@@ -33,6 +33,8 @@ export default async function DraftReviewPage({
         draftId={draft.id}
         version={draft.version}
         initialContent={draft.content}
+        initialMeta={draft.meta}
+        seoData={draft.seo_data}
       />
     </main>
   );

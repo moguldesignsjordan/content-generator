@@ -4,12 +4,19 @@ import type {
   Brand,
   DraftForReview,
   DraftJobContext,
+  DraftMeta,
+  DraftSeoData,
   EmailDraftContent,
   Icp,
+  IcpProfile,
+  MailerliteConfig,
   PillarWithClusters,
+  SeoDefaults,
   Strategy,
   Topic,
   TopicContext,
+  TopicFormData,
+  VoiceProfile,
 } from "./types";
 
 /**
@@ -22,6 +29,7 @@ export async function getBrandStrategy(): Promise<{
   brand: Brand;
   strategy: Strategy;
   pillars: PillarWithClusters[];
+  latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
 } | null> {
   const db = getAdminClient();
 
@@ -54,10 +62,34 @@ export async function getBrandStrategy(): Promise<{
     .order("name", { ascending: true });
   if (pillarErr) throw pillarErr;
 
+  // Load the latest draft per topic so the dashboard can show review links.
+  const topicIds = (pillars ?? []).flatMap((p: PillarWithClusters) =>
+    p.clusters.flatMap((c) => c.topics.map((t) => t.id)),
+  );
+
+  let latestDraftByTopic: Record<string, { id: string; state: string; version: number }> = {};
+  if (topicIds.length > 0) {
+    const { data: jobs } = await db
+      .from("content_jobs")
+      .select(`topic_id, drafts(id, state, version)`)
+      .in("topic_id", topicIds)
+      .eq("type", "email");
+
+    (jobs ?? []).forEach((job) => {
+      const tid = job.topic_id as string;
+      const drafts = (job as { drafts?: { id: string; state: string; version: number }[] }).drafts ?? [];
+      const latest = drafts.sort((a, b) => b.version - a.version)[0];
+      if (latest && (!latestDraftByTopic[tid] || latest.version > latestDraftByTopic[tid].version)) {
+        latestDraftByTopic[tid] = latest;
+      }
+    });
+  }
+
   return {
     brand: brand as Brand,
     strategy: strategy as Strategy,
     pillars: (pillars ?? []) as PillarWithClusters[],
+    latestDraftByTopic,
   };
 }
 
@@ -132,9 +164,11 @@ export async function getTopicContext(
 export async function persistEmailDraft(args: {
   ctx: TopicContext;
   content: EmailDraftContent;
+  meta?: DraftMeta;
+  seoData?: DraftSeoData;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, content } = args;
+  const { ctx, content, meta, seoData } = args;
 
   const { data: job, error: jobErr } = await db
     .from("content_jobs")
@@ -155,6 +189,8 @@ export async function persistEmailDraft(args: {
       job_id: job.id,
       version: 1,
       content,
+      meta: meta ?? {},
+      seo_data: seoData ?? {},
       state: "in_review",
     })
     .select("id")
@@ -249,12 +285,14 @@ export async function rejectDraftRecord(
 export async function approveDraft(
   draftId: string,
   editedContent?: EmailDraftContent,
+  editedMeta?: DraftMeta,
 ): Promise<void> {
   const db = getAdminClient();
   const decision = editedContent ? "edited" : "approved";
 
   const update: Record<string, unknown> = { state: "approved" };
   if (editedContent) update.content = editedContent;
+  if (editedMeta) update.meta = editedMeta;
 
   const { error: updateErr } = await db
     .from("drafts")
@@ -273,13 +311,22 @@ export async function persistRegeneratedDraft(args: {
   jobId: string;
   version: number;
   content: EmailDraftContent;
+  meta?: DraftMeta;
+  seoData?: DraftSeoData;
 }): Promise<string> {
   const db = getAdminClient();
-  const { jobId, version, content } = args;
+  const { jobId, version, content, meta, seoData } = args;
 
   const { data, error } = await db
     .from("drafts")
-    .insert({ job_id: jobId, version, content, state: "in_review" })
+    .insert({
+      job_id: jobId,
+      version,
+      content,
+      meta: meta ?? {},
+      seo_data: seoData ?? {},
+      state: "in_review",
+    })
     .select("id")
     .single();
   if (error) throw error;
@@ -295,7 +342,7 @@ export async function getDraftForReview(
   const { data, error } = await db
     .from("drafts")
     .select(
-      `id, version, state, content, created_at,
+      `id, version, state, content, meta, seo_data, created_at,
        content_jobs!inner ( topics ( title ) )`,
     )
     .eq("id", draftId)
@@ -313,7 +360,160 @@ export async function getDraftForReview(
     version: data.version,
     state: data.state,
     content: data.content as EmailDraftContent,
+    meta: (data.meta ?? {}) as DraftMeta,
+    seo_data: (data.seo_data ?? {}) as DraftSeoData,
     topic_title: topicTitle,
     created_at: data.created_at,
   };
+}
+
+// ── Settings queries ──────────────────────────────────────────────────────────
+
+/** Loads the brand, strategy, and all ICPs for the settings page. */
+export async function getBrandWithIcps(): Promise<{
+  brand: Brand;
+  strategy: Strategy | null;
+  icps: Icp[];
+} | null> {
+  const db = getAdminClient();
+
+  const { data: brand, error: brandErr } = await db
+    .from("brands")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
+  if (brandErr) throw brandErr;
+  if (!brand) return null;
+
+  const { data: strategy, error: stratErr } = await db
+    .from("strategies")
+    .select("*")
+    .eq("brand_id", brand.id)
+    .maybeSingle();
+  if (stratErr) throw stratErr;
+  if (!strategy) return { brand: brand as Brand, strategy: null, icps: [] };
+
+  const { data: icps, error: icpErr } = await db
+    .from("icps")
+    .select("*")
+    .eq("strategy_id", strategy.id)
+    .order("is_primary", { ascending: false });
+  if (icpErr) throw icpErr;
+
+  return {
+    brand: brand as Brand,
+    strategy: strategy as Strategy,
+    icps: (icps ?? []) as Icp[],
+  };
+}
+
+/** Updates the brand's name, mailerlite_config, and seo_defaults. */
+export async function updateBrandBasics(
+  brandId: string,
+  data: {
+    name: string;
+    mailerlite_config: MailerliteConfig;
+    seo_defaults: SeoDefaults;
+  },
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({
+      name: data.name,
+      mailerlite_config: data.mailerlite_config,
+      seo_defaults: data.seo_defaults,
+    })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+/** Replaces the strategy's funnel_definition. */
+export async function updateFunnelDefinition(
+  strategyId: string,
+  funnelDefinition: Record<string, { cta_type: string }>,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("strategies")
+    .update({ funnel_definition: funnelDefinition })
+    .eq("id", strategyId);
+  if (error) throw error;
+}
+
+/** Creates a new spoke topic under a cluster with status "idea". */
+export async function createTopic(
+  clusterId: string,
+  data: TopicFormData,
+): Promise<Topic> {
+  const db = getAdminClient();
+  const { data: topic, error } = await db
+    .from("topics")
+    .insert({
+      cluster_id: clusterId,
+      title: data.title.trim(),
+      target_keyword: data.target_keyword.trim() || null,
+      intent: data.intent.trim() || null,
+      funnel_stage: data.funnel_stage || null,
+      maps_to_product: data.maps_to_product.trim() || null,
+      status: "idea",
+      internal_link_targets: [],
+      distribution_recipe: [],
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return topic as Topic;
+}
+
+/** Updates the 5 user-editable fields on a topic. */
+export async function updateTopic(
+  topicId: string,
+  data: TopicFormData,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("topics")
+    .update({
+      title: data.title.trim(),
+      target_keyword: data.target_keyword.trim() || null,
+      intent: data.intent.trim() || null,
+      funnel_stage: data.funnel_stage || null,
+      maps_to_product: data.maps_to_product.trim() || null,
+    })
+    .eq("id", topicId);
+  if (error) throw error;
+}
+
+/** Hard-deletes a topic. Caller must verify status === "idea" before calling. */
+export async function deleteTopic(topicId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("topics").delete().eq("id", topicId);
+  if (error) throw error;
+}
+
+/** Replaces the brand's voice_profile with the supplied value. */
+export async function updateBrandVoice(
+  brandId: string,
+  voiceProfile: VoiceProfile,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({ voice_profile: voiceProfile })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+/** Updates an ICP's label and profile. */
+export async function updateIcp(
+  icpId: string,
+  data: { label: string; profile: IcpProfile },
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("icps")
+    .update({ label: data.label, profile: data.profile })
+    .eq("id", icpId);
+  if (error) throw error;
 }

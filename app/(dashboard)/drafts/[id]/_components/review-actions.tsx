@@ -2,25 +2,37 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { EmailDraftContent } from "@/lib/db/types";
+import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 
 interface ReviewActionsProps {
   draftId: string;
   version: number;
   initialContent: EmailDraftContent;
+  initialMeta: DraftMeta;
+  seoData: DraftSeoData;
 }
 
 export function ReviewActions({
   draftId,
   version,
   initialContent,
+  initialMeta,
+  seoData,
 }: ReviewActionsProps) {
   const router = useRouter();
+
+  // Content state
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
   const [html, setHtml] = useState(initialContent.html);
   const [showHtmlEdit, setShowHtmlEdit] = useState(false);
+
+  // Meta state (editable, saved with approve)
+  const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
+  const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
+
+  // Review state
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
@@ -32,14 +44,19 @@ export function ReviewActions({
     html !== initialContent.html;
 
   const atCap = version >= MAX_DRAFT_VERSIONS;
+  const hasQa = seoData.qa_pass !== undefined;
+  const hasBannedTerms = (seoData.banned_terms_found?.length ?? 0) > 0;
 
   async function handleApprove() {
     setLoading("approve");
     setError(null);
     try {
-      const body = isEdited
-        ? { editedContent: { subject, preheader, html } }
-        : {};
+      const body: Record<string, unknown> = {
+        meta: { meta_title: metaTitle, meta_description: metaDesc },
+      };
+      if (isEdited) {
+        body.editedContent = { subject, preheader, html };
+      }
       const res = await fetch(`/api/drafts/${draftId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,27 +107,73 @@ export function ReviewActions({
 
   return (
     <div className="space-y-6">
+      {/* QA Results */}
+      {hasQa && (
+        <div className="rounded-lg border border-border bg-surface p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-wide text-muted">QA Results</p>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                seoData.qa_pass
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/20 text-amber-300"
+              }`}
+            >
+              {seoData.qa_pass ? "Pass ✓" : "Issues found"}
+            </span>
+          </div>
+
+          {/* Issues */}
+          {(seoData.issues?.length ?? 0) > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-amber-300">Issues to address:</p>
+              <ul className="space-y-1">
+                {seoData.issues!.map((issue, i) => (
+                  <li key={i} className="text-xs text-muted">· {issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Banned terms */}
+          {hasBannedTerms && (
+            <p className="text-xs text-red-400">
+              Banned terms found: {seoData.banned_terms_found!.join(", ")}
+            </p>
+          )}
+
+          {/* Keyword check */}
+          {seoData.keyword_used !== undefined && (
+            <p className="text-xs text-muted">
+              {seoData.keyword_used
+                ? `✓ Keyword used — ${seoData.keyword_placement}`
+                : "✗ Target keyword not found in email"}
+            </p>
+          )}
+
+          {/* Readability */}
+          {seoData.readability_note && (
+            <p className="text-xs text-muted">{seoData.readability_note}</p>
+          )}
+
+          {/* Meta fields (editable) */}
+          <div className="space-y-3 pt-1 border-t border-border">
+            <p className="text-xs uppercase tracking-wide text-muted pt-1">SEO Meta</p>
+            <EditField label="Meta title (≤60 chars)" value={metaTitle} onChange={setMetaTitle} singleLine />
+            <EditField label="Meta description (≤155 chars)" value={metaDesc} onChange={setMetaDesc} />
+          </div>
+        </div>
+      )}
+
       {/* Editable subject + preheader */}
       <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
-        <EditField
-          label="Subject"
-          value={subject}
-          onChange={setSubject}
-          singleLine
-        />
-        <EditField
-          label="Preheader"
-          value={preheader}
-          onChange={setPreheader}
-          singleLine
-        />
+        <EditField label="Subject" value={subject} onChange={setSubject} singleLine />
+        <EditField label="Preheader" value={preheader} onChange={setPreheader} singleLine />
       </div>
 
       {/* Live email preview */}
       <section>
-        <p className="mb-2 text-xs uppercase tracking-wide text-muted">
-          Rendered email
-        </p>
+        <p className="mb-2 text-xs uppercase tracking-wide text-muted">Rendered email</p>
         <iframe
           key={html}
           title="Email preview"
@@ -192,10 +255,7 @@ export function ReviewActions({
               {loading === "reject" ? "Regenerating… (~30–90s)" : "Reject & Regenerate"}
             </button>
             <button
-              onClick={() => {
-                setShowReject(false);
-                setFeedback("");
-              }}
+              onClick={() => { setShowReject(false); setFeedback(""); }}
               disabled={busy}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:opacity-50"
             >
@@ -206,9 +266,7 @@ export function ReviewActions({
       )}
 
       {error && (
-        <p className="rounded-md bg-red-950/40 px-4 py-2 text-sm text-red-400">
-          {error}
-        </p>
+        <p className="rounded-md bg-red-950/40 px-4 py-2 text-sm text-red-400">{error}</p>
       )}
     </div>
   );
@@ -227,9 +285,7 @@ function EditField({
 }) {
   return (
     <div>
-      <label className="text-xs uppercase tracking-wide text-muted">
-        {label}
-      </label>
+      <label className="text-xs uppercase tracking-wide text-muted">{label}</label>
       {singleLine ? (
         <input
           type="text"

@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getBrandStrategy } from "@/lib/db/queries";
-import type { FunnelStage, TopicStatus } from "@/lib/db/types";
-import { GenerateButton } from "./_components/generate-button";
+import { ClusterCard } from "./_components/cluster-card";
+import { FunnelBadge } from "./_components/topic-badges";
+import { QuickGenerate } from "./_components/quick-generate";
 
 // Always read fresh from the DB in dev; topics change as you work.
 export const dynamic = "force-dynamic";
@@ -57,23 +59,47 @@ export default async function DashboardPage() {
     );
   }
 
-  const { brand, pillars } = data;
+  const { brand, pillars, latestDraftByTopic } = data;
   const topicCount = pillars.reduce(
     (n, p) => n + p.clusters.reduce((m, c) => m + c.topics.length, 0),
     0,
   );
 
+  // Flatten all topics for the quick-generate dropdown.
+  const allTopics = pillars.flatMap((p) =>
+    p.clusters.flatMap((c) =>
+      c.topics.map((t) => ({ id: t.id, title: t.title, pillarName: p.name })),
+    ),
+  );
+
   return (
     <Shell>
-      <header className="mb-8">
-        <p className="text-sm text-muted">Content Engine · Slice 0</p>
-        <h1 className="mt-1 text-2xl font-semibold">{brand.name}</h1>
-        <p className="mt-1 text-sm text-muted">
-          {pillars.length} pillars · {topicCount} topics in the strategy
-        </p>
+      <header className="mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-muted">Content Engine</p>
+            <h1 className="mt-1 text-2xl font-semibold">{brand.name}</h1>
+            <p className="mt-1 text-sm text-muted">
+              {pillars.length} pillars · {topicCount} topics
+            </p>
+          </div>
+          <Link
+            href="/settings"
+            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-foreground"
+          >
+            Settings
+          </Link>
+        </div>
       </header>
 
+      {/* Primary action */}
+      <div className="mb-10">
+        <QuickGenerate topics={allTopics} />
+      </div>
+
+      {/* Strategy reference */}
       <div className="space-y-8">
+        <p className="text-xs uppercase tracking-wide text-muted">Strategy</p>
         {pillars.map((pillar) => (
           <section key={pillar.id}>
             <div className="mb-3 flex items-center gap-2">
@@ -88,52 +114,11 @@ export default async function DashboardPage() {
 
             <div className="space-y-4">
               {pillar.clusters.map((cluster) => (
-                <div
+                <ClusterCard
                   key={cluster.id}
-                  className="rounded-lg border border-border bg-surface"
-                >
-                  <div className="border-b border-border px-4 py-3">
-                    <p className="text-xs uppercase tracking-wide text-muted">
-                      Hub
-                    </p>
-                    <p className="font-medium">{cluster.hub_title}</p>
-                    {cluster.hub_keyword && (
-                      <p className="mt-0.5 text-xs text-muted">
-                        target: <code>{cluster.hub_keyword}</code>
-                      </p>
-                    )}
-                  </div>
-                  <ul>
-                    {cluster.topics.map((topic) => (
-                      <li
-                        key={topic.id}
-                        className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm">{topic.title}</p>
-                          {topic.target_keyword && (
-                            <p className="mt-0.5 truncate text-xs text-muted">
-                              <code>{topic.target_keyword}</code>
-                              {topic.intent ? ` · ${topic.intent}` : ""}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-3">
-                          {topic.funnel_stage && (
-                            <FunnelBadge stage={topic.funnel_stage} />
-                          )}
-                          <StatusBadge status={topic.status} />
-                          <GenerateButton topicId={topic.id} />
-                        </div>
-                      </li>
-                    ))}
-                    {cluster.topics.length === 0 && (
-                      <li className="px-4 py-3 text-sm text-muted">
-                        No spoke topics yet.
-                      </li>
-                    )}
-                  </ul>
-                </div>
+                  cluster={cluster}
+                  latestDraftByTopic={latestDraftByTopic}
+                />
               ))}
             </div>
           </section>
@@ -165,27 +150,3 @@ function SetupNotice({ title, steps }: { title: string; steps: string[] }) {
   );
 }
 
-const STATUS_STYLES: Record<TopicStatus, string> = {
-  idea: "bg-border text-muted",
-  queued: "bg-accent/20 text-accent",
-  in_progress: "bg-amber-500/20 text-amber-300",
-  published: "bg-emerald-500/20 text-emerald-300",
-};
-
-function StatusBadge({ status }: { status: TopicStatus }) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status]}`}
-    >
-      {status.replace("_", " ")}
-    </span>
-  );
-}
-
-function FunnelBadge({ stage }: { stage: FunnelStage }) {
-  return (
-    <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
-      {stage}
-    </span>
-  );
-}

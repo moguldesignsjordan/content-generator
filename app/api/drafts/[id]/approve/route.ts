@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { approveDraft } from "@/lib/db/queries";
-import type { EmailDraftContent } from "@/lib/db/types";
+import type { DraftMeta, EmailDraftContent } from "@/lib/db/types";
 
 export async function POST(
   req: NextRequest,
@@ -10,8 +10,9 @@ export async function POST(
     const { id } = await params;
     const body = await req.json().catch(() => ({})) as {
       editedContent?: EmailDraftContent;
+      meta?: DraftMeta;
     };
-    await approveDraft(id, body.editedContent);
+    await approveDraft(id, body.editedContent, body.meta);
     return NextResponse.json({ approved: true });
   } catch (err) {
     console.error("approve error", err);

@@ -13,7 +13,8 @@ import {
   EmailDraftSchema,
   buildEmailMessages,
 } from "@/prompts/generate-email";
-import type { EmailDraftContent } from "@/lib/db/types";
+import { QaSchema, buildQaMessages } from "@/prompts/qa-email";
+import type { EmailDraftContent, DraftMeta, DraftSeoData, TopicContext } from "@/lib/db/types";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 
 /**
@@ -50,10 +51,51 @@ export async function generateEmailForTopic(topicId: string): Promise<string> {
     html: ensureUnsubscribeTag(stripEmDashes(parsed.html_body)),
   };
 
-  return persistEmailDraft({ ctx, content });
+  const { meta, seoData } = await runQaPass(ctx, content);
+  return persistEmailDraft({ ctx, content, meta, seoData });
 }
 
 export { MAX_DRAFT_VERSIONS } from "./constants";
+
+/**
+ * Runs a QA pass on a generated email draft. Non-fatal — returns empty
+ * objects if the call fails so a QA error never blocks the draft from saving.
+ */
+async function runQaPass(
+  ctx: TopicContext,
+  content: EmailDraftContent,
+): Promise<{ meta: DraftMeta; seoData: DraftSeoData }> {
+  try {
+    const { system, user } = buildQaMessages(ctx, content);
+    const response = await getAnthropic().messages.parse({
+      model: DRAFT_MODEL,
+      max_tokens: 1024,
+      system,
+      messages: [{ role: "user", content: user }],
+      output_config: { format: zodOutputFormat(QaSchema) },
+    });
+    const qa = response.parsed_output;
+    if (!qa) return { meta: {}, seoData: {} };
+
+    return {
+      meta: {
+        meta_title: qa.meta_title,
+        meta_description: qa.meta_description,
+      },
+      seoData: {
+        keyword_used: qa.keyword_used,
+        keyword_placement: qa.keyword_placement,
+        banned_terms_found: qa.banned_terms_found,
+        readability_note: qa.readability_note,
+        qa_pass: qa.qa_pass,
+        issues: qa.issues,
+      },
+    };
+  } catch (err) {
+    console.error("QA pass failed (non-fatal):", err);
+    return { meta: {}, seoData: {} };
+  }
+}
 
 /**
  * Rejects the current draft and regenerates a new version with the reviewer's
@@ -99,24 +141,29 @@ export async function regenerateEmailDraft(
     html: ensureUnsubscribeTag(stripEmDashes(parsed.html_body)),
   };
 
+  const { meta, seoData } = await runQaPass(ctx, content);
+
   const newDraftId = await persistRegeneratedDraft({
     jobId: draftCtx.jobId,
     version: latestVersion + 1,
     content,
+    meta,
+    seoData,
   });
 
   return { newDraftId };
 }
 
 // Em-dashes are banned from all email output (brand voice rule). Replace
-// the unicode char, HTML entities, and double-hyphen stand-ins with ", "
-// so the sentence still reads naturally.
+// the unicode char and HTML entities with ", " so the sentence still reads
+// naturally. Double-hyphen (--) is intentionally NOT replaced here because
+// CSS custom properties (var(--color)) and HTML comments (<!-- -->) use it
+// legitimately inside email HTML; prose ` -- ` is rare enough to skip.
 function stripEmDashes(text: string): string {
   return text
-    .replace(/—/g, ", ")   // — (unicode em-dash)
+    .replace(/—/g, ", ")        // — (unicode em-dash)
     .replace(/&mdash;/gi, ", ") // HTML named entity
-    .replace(/&#8212;/g, ", ")  // HTML numeric entity
-    .replace(/--/g, ", ");      // double-hyphen used as em-dash
+    .replace(/&#8212;/g, ", "); // HTML numeric entity
 }
 
 // MailerLite rejects campaigns without the {$unsubscribe} merge tag. The prompt
