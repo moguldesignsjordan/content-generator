@@ -58,3 +58,4 @@ db/seed.ts        seeds one brand's strategy
 - [ ] **5 — Blog path:** Markdown → Portable Text → Sanity draft
 - [ ] **6 — SEO/QA pass:** second Claude pass adds meta + checks
 - [ ] **7 — Distribution:** repurposing checklist from the topic recipe
+# content-generator
