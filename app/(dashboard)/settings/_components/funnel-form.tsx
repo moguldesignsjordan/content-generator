@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Card, Field, Input } from "@/components/ui";
 
 interface FunnelFormProps {
   strategyId: string;
@@ -49,73 +50,71 @@ export function FunnelForm({ strategyId, funnelDefinition }: FunnelFormProps) {
   const canSave = awareness.trim() && consideration.trim() && decision.trim();
 
   return (
-    <div className="space-y-6 rounded-lg border border-border bg-surface p-6">
-      <p className="text-xs text-muted">
-        Each value must match a key in your CTA Library above (e.g.{" "}
-        <code>newsletter_signup</code>, <code>portfolio</code>,{" "}
-        <code>book_call</code>). This tells the engine which CTA to use when
-        writing for each funnel stage.
+    <Card className="space-y-5 p-5">
+      <p className="text-sm text-muted">
+        Each value must match a key in your CTA Library (e.g.{" "}
+        <code className="font-mono text-foreground/80">newsletter_signup</code>,{" "}
+        <code className="font-mono text-foreground/80">portfolio</code>,{" "}
+        <code className="font-mono text-foreground/80">book_call</code>). This
+        tells the engine which CTA to use when writing for each funnel stage.
       </p>
 
       <StageField
-        stage="Awareness"
+        label="Awareness"
         value={awareness}
         onChange={setAwareness}
         placeholder="e.g. newsletter_signup"
       />
       <StageField
-        stage="Consideration"
+        label="Consideration"
         value={consideration}
         onChange={setConsideration}
         placeholder="e.g. portfolio"
       />
       <StageField
-        stage="Decision"
+        label="Decision"
         value={decision}
         onChange={setDecision}
         placeholder="e.g. book_call"
       />
 
-      <div className="flex items-center gap-3 pt-2">
-        <button
+      <div className="flex items-center gap-3 pt-1">
+        <Button
+          variant="gradient"
+          loading={saving}
+          disabled={!canSave}
           onClick={handleSave}
-          disabled={saving || !canSave}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save funnel config"}
-        </button>
-        {status === "saved" && (
-          <span className="text-sm text-emerald-400">Saved ✓</span>
-        )}
+          Save funnel config
+        </Button>
+        {status === "saved" && <span className="text-sm text-success">Saved</span>}
         {status === "error" && (
-          <span className="text-sm text-red-400">Failed to save.</span>
+          <span className="text-sm text-danger">Failed to save.</span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
 function StageField({
-  stage,
+  label,
   value,
   onChange,
   placeholder,
 }: {
-  stage: string;
+  label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
 }) {
   return (
-    <div>
-      <label className="text-xs uppercase tracking-wide text-muted">{stage}</label>
-      <input
-        type="text"
+    <Field label={label}>
+      <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none font-mono"
+        className="font-mono text-[13px]"
       />
-    </div>
+    </Field>
   );
 }

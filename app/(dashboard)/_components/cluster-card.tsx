@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button, Card, Field, Input } from "@/components/ui";
 import type {
   ClusterWithTopics,
   FunnelStage,
@@ -9,6 +10,7 @@ import type {
   TopicFormData,
 } from "@/lib/db/types";
 import { StatusBadge, FunnelBadge, DraftLink } from "./topic-badges";
+import { GenerateButton } from "./generate-button";
 
 const EMPTY_FORM: TopicFormData = {
   title: "",
@@ -27,6 +29,9 @@ function topicToForm(topic: Topic): TopicFormData {
     maps_to_product: topic.maps_to_product ?? "",
   };
 }
+
+const SELECT_CLS =
+  "mt-1 h-11 w-full rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 text-[15px] text-foreground focus:border-accent focus:outline-none disabled:opacity-50";
 
 interface ClusterCardProps {
   cluster: ClusterWithTopics;
@@ -106,39 +111,43 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <Card className="overflow-hidden">
       {/* Cluster header */}
       <div className="border-b border-border px-4 py-3">
-        <p className="text-xs uppercase tracking-wide text-muted">Hub</p>
-        <p className="font-medium">{cluster.hub_title}</p>
+        <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
+          Hub
+        </p>
+        <p className="font-medium text-foreground">{cluster.hub_title}</p>
         {cluster.hub_keyword && (
-          <p className="mt-0.5 text-xs text-muted">
-            target: <code>{cluster.hub_keyword}</code>
+          <p className="mt-0.5 text-[13px] text-muted">
+            target: <code className="text-foreground/80">{cluster.hub_keyword}</code>
           </p>
         )}
       </div>
 
-      <ul>
+      <ul className="divide-y divide-border">
         {cluster.topics.map((topic) => (
-          <li key={topic.id} className="border-b border-border last:border-b-0">
+          <li key={topic.id}>
             {/* Collapsed row */}
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate text-sm">{topic.title}</p>
+                <p className="truncate text-[15px] text-foreground">{topic.title}</p>
                 {topic.target_keyword && (
-                  <p className="mt-0.5 truncate text-xs text-muted">
-                    <code>{topic.target_keyword}</code>
+                  <p className="mt-0.5 truncate text-[13px] text-muted">
+                    <code className="text-foreground/70">
+                      {topic.target_keyword}
+                    </code>
                     {topic.intent ? ` · ${topic.intent}` : ""}
                   </p>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {topic.funnel_stage && (
-                  <FunnelBadge stage={topic.funnel_stage} />
-                )}
+                {topic.funnel_stage && <FunnelBadge stage={topic.funnel_stage} />}
                 <StatusBadge status={topic.status} />
-                {latestDraftByTopic[topic.id] && (
+                {latestDraftByTopic[topic.id] ? (
                   <DraftLink draft={latestDraftByTopic[topic.id]} />
+                ) : (
+                  <GenerateButton topicId={topic.id} />
                 )}
                 <button
                   onClick={() => {
@@ -151,7 +160,7 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
                       setError(null);
                     }
                   }}
-                  className="text-xs text-muted transition hover:text-foreground"
+                  className="text-[13px] text-muted transition-colors hover:text-foreground"
                 >
                   {editingTopicId === topic.id ? "Cancel" : "Edit"}
                 </button>
@@ -160,35 +169,36 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
 
             {/* Inline edit panel */}
             {editingTopicId === topic.id && (
-              <div className="border-t border-border bg-background/50 px-4 py-4">
+              <div className="border-t border-border bg-surface-2/40 px-4 py-4">
                 <TopicFields
                   formData={formData}
                   onChange={setFormData}
                   saving={saving}
                 />
-                {error && (
-                  <p className="mt-2 text-xs text-red-400">{error}</p>
-                )}
+                {error && <p className="mt-2 text-xs text-danger">{error}</p>}
                 <div className="mt-4 flex items-center gap-2">
-                  <button
+                  <Button
+                    variant="solid"
+                    size="sm"
                     onClick={() => handleUpdateTopic(topic.id)}
-                    disabled={saving || !formData.title.trim()}
-                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                    loading={saving}
+                    disabled={!formData.title.trim()}
                   >
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                  <button
+                    Save
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setEditingTopicId(null)}
                     disabled={saving}
-                    className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-foreground disabled:opacity-50"
                   >
                     Cancel
-                  </button>
+                  </Button>
                   {topic.status === "idea" && (
                     <button
                       onClick={() => handleDeleteTopic(topic.id)}
                       disabled={saving}
-                      className="ml-auto rounded-md px-3 py-1.5 text-xs text-red-400 transition hover:text-red-300 disabled:opacity-50"
+                      className="ml-auto text-[13px] text-danger transition-colors hover:opacity-80 disabled:opacity-50"
                     >
                       Delete
                     </button>
@@ -205,8 +215,8 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
 
         {/* Inline add form */}
         {showAddForm && (
-          <li className="border-b border-border bg-background/50 px-4 py-4 last:border-b-0">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
+          <li className="bg-surface-2/40 px-4 py-4">
+            <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
               New topic
             </p>
             <TopicFields
@@ -214,28 +224,29 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
               onChange={setFormData}
               saving={saving}
             />
-            {error && (
-              <p className="mt-2 text-xs text-red-400">{error}</p>
-            )}
+            {error && <p className="mt-2 text-xs text-danger">{error}</p>}
             <div className="mt-4 flex items-center gap-2">
-              <button
+              <Button
+                variant="solid"
+                size="sm"
                 onClick={handleCreateTopic}
-                disabled={saving || !formData.title.trim()}
-                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                loading={saving}
+                disabled={!formData.title.trim()}
               >
-                {saving ? "Creating…" : "Add topic"}
-              </button>
-              <button
+                Add topic
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setShowAddForm(false);
                   setFormData(EMPTY_FORM);
                   setError(null);
                 }}
                 disabled={saving}
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-foreground disabled:opacity-50"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </li>
         )}
@@ -251,13 +262,13 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
               setEditingTopicId(null);
               setError(null);
             }}
-            className="text-xs text-accent transition hover:opacity-80"
+            className="text-[13px] font-medium text-accent transition-colors hover:text-accent-press"
           >
             + Add topic
           </button>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -277,56 +288,48 @@ function TopicFields({
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
-        <label className="text-xs uppercase tracking-wide text-muted">
-          Title <span className="text-red-400">*</span>
-        </label>
-        <input
-          type="text"
-          value={formData.title}
-          onChange={(e) => set("title", e.target.value)}
-          disabled={saving}
-          placeholder="e.g. How to write a cold email that gets replies"
-          className={inputCls}
-        />
+        <Field label="Title">
+          <Input
+            type="text"
+            value={formData.title}
+            onChange={(e) => set("title", e.target.value)}
+            disabled={saving}
+            placeholder="e.g. How to write a cold email that gets replies"
+          />
+        </Field>
       </div>
 
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">
-          Target keyword
-        </label>
-        <input
+      <Field label="Target keyword">
+        <Input
           type="text"
           value={formData.target_keyword}
           onChange={(e) => set("target_keyword", e.target.value)}
           disabled={saving}
           placeholder="e.g. cold email tips"
-          className={inputCls}
         />
-      </div>
+      </Field>
 
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">Intent</label>
-        <input
+      <Field label="Intent">
+        <Input
           type="text"
           value={formData.intent}
           onChange={(e) => set("intent", e.target.value)}
           disabled={saving}
           placeholder="e.g. informational"
-          className={inputCls}
         />
-      </div>
+      </Field>
 
       <div>
-        <label className="text-xs uppercase tracking-wide text-muted">
+        <label className="mb-1.5 block text-[13px] font-medium text-foreground/90">
           Funnel stage
         </label>
         <select
           value={formData.funnel_stage}
           onChange={(e) => set("funnel_stage", e.target.value as FunnelStage | "")}
           disabled={saving}
-          className={inputCls}
+          className={SELECT_CLS}
         >
-          <option value="">— inherit from pillar —</option>
+          <option value="">Inherit from pillar</option>
           <option value="awareness">Awareness</option>
           <option value="consideration">Consideration</option>
           <option value="decision">Decision</option>
@@ -334,22 +337,15 @@ function TopicFields({
         </select>
       </div>
 
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">
-          Maps to product
-        </label>
-        <input
+      <Field label="Maps to product">
+        <Input
           type="text"
           value={formData.maps_to_product}
           onChange={(e) => set("maps_to_product", e.target.value)}
           disabled={saving}
           placeholder="e.g. brand-audit"
-          className={inputCls}
         />
-      </div>
+      </Field>
     </div>
   );
 }
-
-const inputCls =
-  "mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none disabled:opacity-50";

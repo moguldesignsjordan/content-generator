@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Card, Field, Textarea } from "@/components/ui";
 import type { VoiceProfile } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -54,28 +55,29 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
   }
 
   return (
-    <div className="space-y-6 rounded-lg border border-border bg-surface p-6">
-      <Field label="Voice" hint="Describe the overall voice in 1–3 sentences. This goes directly into every generation prompt.">
-        <textarea
+    <Card className="space-y-5 p-5">
+      <Field
+        label="Voice"
+        hint="Describe the overall voice in 1 to 3 sentences. This goes directly into every generation prompt."
+      >
+        <Textarea
+          rows={3}
           value={voice}
           onChange={(e) => setVoice(e.target.value)}
-          rows={3}
-          className={inputCls}
         />
       </Field>
 
-      <Field label="Tone" hint="How it feels — direct, warm, bold, etc.">
-        <textarea
+      <Field label="Tone" hint="How it feels, direct, warm, bold, etc.">
+        <Textarea
+          rows={2}
           value={tone}
           onChange={(e) => setTone(e.target.value)}
-          rows={2}
-          className={inputCls}
         />
       </Field>
 
       <ListInput
         label="Example posts"
-        hint="Real emails or posts that sound like you. The single biggest quality lever — add at least 3."
+        hint="Real emails or posts that sound like you. The single biggest quality lever, add at least 3."
         values={examplePosts}
         onChange={setExamplePosts}
         multiline
@@ -91,10 +93,13 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
       />
 
       <div className="space-y-3">
-        <p className="text-xs uppercase tracking-wide text-muted">CTA Library</p>
-        <p className="text-xs text-muted">
-          The call-to-action text matched to each funnel stage. Write in brand voice.
-        </p>
+        <div>
+          <p className="text-[13px] font-medium text-foreground/90">CTA library</p>
+          <p className="mt-1 text-xs text-muted">
+            The call-to-action text matched to each funnel stage. Write in brand
+            voice.
+          </p>
+        </div>
         <CtaField
           label="Awareness → newsletter signup"
           value={ctaLibrary.newsletter_signup}
@@ -112,40 +117,16 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
         />
       </div>
 
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save brand voice"}
-        </button>
-        {status === "saved" && (
-          <span className="text-sm text-emerald-400">Saved ✓</span>
-        )}
+      <div className="flex items-center gap-3 pt-1">
+        <Button variant="gradient" loading={saving} onClick={handleSave}>
+          Save brand voice
+        </Button>
+        {status === "saved" && <span className="text-sm text-success">Saved</span>}
         {status === "error" && (
-          <span className="text-sm text-red-400">Failed to save.</span>
+          <span className="text-sm text-danger">Failed to save.</span>
         )}
       </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="text-xs uppercase tracking-wide text-muted">{label}</label>
-      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
-      <div className="mt-2">{children}</div>
-    </div>
+    </Card>
   );
 }
 
@@ -159,17 +140,12 @@ function CtaField({
   onChange: (v: string) => void;
 }) {
   return (
-    <div>
-      <label className="text-xs text-muted">{label}</label>
-      <textarea
+    <Field label={label}>
+      <Textarea
+        rows={2}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        rows={2}
-        className={`mt-1 ${inputCls}`}
       />
-    </div>
+    </Field>
   );
 }
-
-const inputCls =
-  "w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none resize-y";

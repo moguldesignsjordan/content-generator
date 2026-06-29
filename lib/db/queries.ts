@@ -10,12 +10,15 @@ import type {
   Icp,
   IcpProfile,
   MailerliteConfig,
+  OnboardingState,
   PillarWithClusters,
+  Positioning,
   SeoDefaults,
   Strategy,
   Topic,
   TopicContext,
   TopicFormData,
+  VisualIdentity,
   VoiceProfile,
 } from "./types";
 
@@ -369,6 +372,34 @@ export async function getDraftForReview(
 
 // ── Settings queries ──────────────────────────────────────────────────────────
 
+/** Returns the single brand row, or null if none has been created yet. */
+export async function getSingleBrand(): Promise<Brand | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brands")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Brand) ?? null;
+}
+
+/**
+ * Creates a minimal brand row (name only), the first step of onboarding when
+ * no brand exists yet. Subsequent onboarding steps fill in the profile via the
+ * per-section update functions. Returns the new brand.
+ */
+export async function createBrand(name: string): Promise<Brand> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brands")
+    .insert({ name: name.trim() })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Brand;
+}
+
 /** Loads the brand, strategy, and all ICPs for the settings page. */
 export async function getBrandWithIcps(): Promise<{
   brand: Brand;
@@ -505,6 +536,129 @@ export async function updateBrandVoice(
   if (error) throw error;
 }
 
+/** Replaces the brand's visual_identity (logo, colors, fonts, footer). */
+export async function updateVisualIdentity(
+  brandId: string,
+  visualIdentity: VisualIdentity,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({ visual_identity: visualIdentity })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+/** Replaces the brand's positioning (description, tagline, differentiators, competitors). */
+export async function updatePositioning(
+  brandId: string,
+  positioning: Positioning,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({ positioning })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+/** Writes the onboarding conversation state (transcript + completed flag). */
+export async function updateOnboardingState(
+  brandId: string,
+  state: OnboardingState,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({ onboarding_state: state })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+/**
+ * Ensures the brand has a strategy (with a default funnel→CTA mapping) and a
+ * primary ICP, creating stubs if missing. Needed because a freshly-created
+ * brand has neither, the chat onboarding builds the ICP, and the funnel
+ * defaults let generation work immediately. Returns both.
+ */
+export async function ensureStrategyAndPrimaryIcp(
+  brandId: string,
+): Promise<{ strategy: Strategy; primaryIcp: Icp }> {
+  const db = getAdminClient();
+
+  const DEFAULT_FUNNEL = {
+    awareness: { cta_type: "newsletter_signup" },
+    consideration: { cta_type: "newsletter_signup" },
+    decision: { cta_type: "book_call" },
+  };
+  const DEFAULT_CTA_LIBRARY: Record<string, string> = {
+    newsletter_signup: "Subscribe to the newsletter for more.",
+    book_call: "Book a call to see if we're a fit.",
+    portfolio: "See our work.",
+  };
+
+  let strategy: Strategy | null = null;
+  const { data: existing, error: stratErr } = await db
+    .from("strategies")
+    .select("*")
+    .eq("brand_id", brandId)
+    .maybeSingle();
+  if (stratErr) throw stratErr;
+  if (existing) {
+    strategy = existing as Strategy;
+  } else {
+    const { data: created, error: createErr } = await db
+      .from("strategies")
+      .insert({ brand_id: brandId, funnel_definition: DEFAULT_FUNNEL })
+      .select("*")
+      .single();
+    if (createErr) throw createErr;
+    strategy = created as Strategy;
+
+    // Backfill a default CTA library on the brand if none exists, so the
+    // funnel→CTA resolution in generation has text to use.
+    const { data: brand } = await db
+      .from("brands")
+      .select("voice_profile")
+      .eq("id", brandId)
+      .single();
+    const vp = (brand?.voice_profile ?? {}) as VoiceProfile;
+    if (!vp.cta_library || Object.keys(vp.cta_library).length === 0) {
+      await db
+        .from("brands")
+        .update({
+          voice_profile: { ...vp, cta_library: DEFAULT_CTA_LIBRARY },
+        })
+        .eq("id", brandId);
+    }
+  }
+
+  const { data: icps, error: icpErr } = await db
+    .from("icps")
+    .select("*")
+    .eq("strategy_id", strategy.id)
+    .order("is_primary", { ascending: false });
+  if (icpErr) throw icpErr;
+
+  let primaryIcp = (icps?.[0] as Icp) ?? null;
+  if (!primaryIcp) {
+    const { data: created, error: createErr } = await db
+      .from("icps")
+      .insert({
+        strategy_id: strategy.id,
+        label: "Primary ICP",
+        is_primary: true,
+        profile: {},
+      })
+      .select("*")
+      .single();
+    if (createErr) throw createErr;
+    primaryIcp = created as Icp;
+  }
+
+  return { strategy, primaryIcp };
+}
+
 /** Updates an ICP's label and profile. */
 export async function updateIcp(
   icpId: string,
@@ -516,4 +670,75 @@ export async function updateIcp(
     .update({ label: data.label, profile: data.profile })
     .eq("id", icpId);
   if (error) throw error;
+}
+
+// ── Flat list queries (dashboard Emails tab + assistant context) ──────────────
+
+/** A flat list of every email draft, newest first, with its topic title. */
+export async function listDrafts(): Promise<
+  Array<{
+    id: string;
+    topic_title: string | null;
+    subject: string;
+    state: string;
+    version: number;
+    created_at: string;
+  }>
+> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select(
+      `id, version, state, created_at, content,
+       content_jobs!inner ( topics ( title ) )`,
+    )
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+
+  return (data ?? []).map((d) => {
+    const job = (
+      d as { content_jobs?: { topics?: { title?: string } | null } }
+    ).content_jobs;
+    const content = d.content as EmailDraftContent | null;
+    return {
+      id: d.id as string,
+      version: d.version as number,
+      state: d.state as string,
+      created_at: d.created_at as string,
+      topic_title: job?.topics?.title ?? null,
+      subject: content?.subject ?? "",
+    };
+  });
+}
+
+/** Every topic with its pillar, for the assistant's context and Home stats. */
+export async function listTopics(): Promise<
+  Array<{
+    id: string;
+    title: string;
+    pillar: string;
+    funnel_stage: string | null;
+    status: string;
+  }>
+> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("topics")
+    .select(`id, title, funnel_stage, status, clusters ( pillars ( name ) )`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  return (data ?? []).map((t) => {
+    const pillar =
+      (t as { clusters?: { pillars?: { name?: string } | null } }).clusters
+        ?.pillars?.name ?? "";
+    return {
+      id: t.id as string,
+      title: t.title as string,
+      pillar,
+      funnel_stage: (t.funnel_stage as string | null) ?? null,
+      status: t.status as string,
+    };
+  });
 }

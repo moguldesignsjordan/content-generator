@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui";
+import { SparkleIcon } from "@/components/ui/icons";
 
 // Triggers email generation for a topic, then navigates to the review screen.
-// Shows a busy state during the 30–90s call and surfaces any error inline
-// (Guardrail #5: never silently swallow a failure).
+// Shows a busy state during the 30 to 90s call and surfaces any error inline.
 export function GenerateButton({ topicId }: { topicId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -31,14 +32,21 @@ export function GenerateButton({ topicId }: { topicId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
+      <Button
+        variant="subtle"
+        size="sm"
         onClick={generate}
+        loading={busy}
         disabled={busy}
-        className="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
       >
-        {busy ? "Generating… (~30–90s)" : "Generate email"}
-      </button>
-      {error && <span className="max-w-[12rem] text-right text-xs text-red-400">{error}</span>}
+        <SparkleIcon size={14} />
+        {busy ? "Generating…" : "Generate"}
+      </Button>
+      {error && (
+        <span className="max-w-[12rem] text-right text-[11px] text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Button, Input, Label, Textarea } from "@/components/ui";
 
 interface ListInputProps {
   label: string;
@@ -43,77 +44,87 @@ export function ListInput({
 
   return (
     <div>
-      <label className="text-xs uppercase tracking-wide text-muted">{label}</label>
-      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+      {label && <Label>{label}</Label>}
+      {hint && <p className="mb-2 text-xs text-muted">{hint}</p>}
 
-      <ul className="mt-2 space-y-1.5">
+      <ul className="space-y-2">
         {values.map((v, i) => (
           <li key={i} className="flex items-start gap-2">
             {multiline ? (
-              <textarea
-                value={v}
+              <Textarea
                 rows={3}
+                value={v}
                 onChange={(e) => {
                   const next = [...values];
                   next[i] = e.target.value;
                   onChange(next);
                 }}
-                className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none resize-y"
+                className="flex-1"
               />
             ) : (
-              <input
-                type="text"
+              <Input
                 value={v}
                 onChange={(e) => {
                   const next = [...values];
                   next[i] = e.target.value;
                   onChange(next);
                 }}
-                className="flex-1 rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none"
+                className="flex-1"
               />
             )}
             <button
               type="button"
               onClick={() => remove(i)}
-              className="mt-1 text-muted hover:text-red-400 transition text-xs"
               aria-label="Remove"
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-danger"
             >
-              ✕
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
             </button>
           </li>
         ))}
       </ul>
 
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex items-start gap-2">
         {multiline ? (
-          <textarea
+          <Textarea
             ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-            value={draft}
             rows={3}
+            value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none resize-y"
+            className="flex-1"
           />
         ) : (
-          <input
+          <Input
             ref={inputRef as React.RefObject<HTMLInputElement>}
-            type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="flex-1 rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+            className="flex-1"
           />
         )}
-        <button
+        <Button
           type="button"
+          variant="subtle"
+          size="sm"
           onClick={add}
           disabled={!draft.trim()}
-          className="rounded border border-border px-3 py-1.5 text-xs text-muted transition hover:text-foreground disabled:opacity-40"
+          className="mt-1"
         >
           Add
-        </button>
+        </Button>
       </div>
     </div>
   );

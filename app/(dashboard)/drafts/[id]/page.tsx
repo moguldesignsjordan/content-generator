@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getDraftForReview } from "@/lib/db/queries";
+import { ArrowLeftIcon } from "@/components/ui/icons";
+import { ScreenHeader } from "../../_components/screen-header";
+import { DraftStateBadge } from "../../_components/topic-badges";
 import { ReviewActions } from "./_components/review-actions";
 
 export const dynamic = "force-dynamic";
@@ -15,20 +18,18 @@ export default async function DraftReviewPage({
   if (!draft) notFound();
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <Link href="/" className="text-sm text-muted hover:text-foreground">
-        ← Back to topics
+    <>
+      <Link
+        href="/emails"
+        className="mb-3 inline-flex items-center gap-1 text-[13px] font-medium text-muted transition-colors hover:text-foreground"
+      >
+        <ArrowLeftIcon size={15} /> Emails
       </Link>
-
-      <header className="mt-4 mb-6">
-        <p className="text-sm text-muted">
-          Email draft · v{draft.version} · {draft.state.replace("_", " ")}
-        </p>
-        {draft.topic_title && (
-          <h1 className="mt-1 text-xl font-semibold">{draft.topic_title}</h1>
-        )}
-      </header>
-
+      <ScreenHeader
+        title={draft.topic_title ?? draft.content.subject ?? "Email draft"}
+        subtitle={`Version ${draft.version}`}
+        actions={<DraftStateBadge state={draft.state} />}
+      />
       <ReviewActions
         draftId={draft.id}
         version={draft.version}
@@ -36,6 +37,6 @@ export default async function DraftReviewPage({
         initialMeta={draft.meta}
         seoData={draft.seo_data}
       />
-    </main>
+    </>
   );
 }

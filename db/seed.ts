@@ -8,7 +8,7 @@
  * removes its strategy/icps/pillars/clusters/topics), then re-inserts fresh.
  *
  * This is a DRAFT strategy meant to be edited against real evidence (customer
- * calls, competitor reviews, GSC data) — see brand-strategy-template.md §5.
+ * calls, competitor reviews, GSC data), see brand-strategy-template.md §5.
  */
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
@@ -37,12 +37,12 @@ const BRAND = {
   voice_profile: {
     voice:
       "Confident, plain-spoken, and sharp. Talks to founders as a peer who has " +
-      "shipped real brands — opinionated and practical, never salesy or fluffy.",
+      "shipped real brands, opinionated and practical, never salesy or fluffy.",
     tone: "Direct, encouraging, a little bold. Short sentences. No agency jargon.",
     example_posts: [
       "Your logo isn't your brand. Your brand is the gut-feeling someone gets " +
         "before they've read a single word. The logo is just the part you can see.",
-      "Most founders rebrand too late — usually right after losing a deal to a " +
+      "Most founders rebrand too late, usually right after losing a deal to a " +
         "competitor who simply looked more credible. Don't wait for the wake-up call.",
       "A $50 Fiverr logo costs you nothing up front and a fortune in lost trust. " +
         "Cheap branding is the most expensive kind.",
@@ -62,8 +62,8 @@ const BRAND = {
     // Keyed by funnel CTA type (see funnel_definition below).
     cta_library: {
       newsletter_signup:
-        "Get one sharp branding insight in your inbox each week — subscribe to the Mogul newsletter.",
-      portfolio: "See how we've done this for brands like yours — explore our work.",
+        "Get one sharp branding insight in your inbox each week, subscribe to the Mogul newsletter.",
+      portfolio: "See how we've done this for brands like yours, explore our work.",
       book_call:
         "Book a free brand audit call and we'll show you exactly where your brand is leaking trust.",
     },
@@ -84,6 +84,55 @@ const BRAND = {
     language: "en",
     keyword_difficulty_max: 40,
   },
+  visual_identity: {
+    logo_url: "",
+    logo_alt: "Mogul Design Agency",
+    // Mogul brand tokens. The email templates read these via resolveBrandTokens,
+    // so generated emails get the real spectrum accent + Ink type, not the
+    // stale slate/blue defaults. (Logo bucket upload is still pending; emails
+    // fall back to the typographic wordmark until logo_url is set.)
+    colors: {
+      primary: "#08080A", // Ink, headings + wordmark
+      secondary: "#3A3A40", // Slate, lead paragraph
+      accent: "#FF3D8C", // Hot Magenta, CTA + accents
+      background: "#FFFFFF", // email card
+      text: "#08080A", // Ink, body
+      muted: "#6B6B72", // footer / meta (>=4.5:1 on white)
+    },
+    fonts: {
+      // Web fonts don't render reliably across email clients, so use a clean
+      // system sans stack. The app UI uses Clash/Hanken; emails stay safe.
+      heading: "Helvetica Neue, Arial, sans-serif",
+      body: "Helvetica Neue, Arial, sans-serif",
+    },
+    footer: {
+      contact_email: "jordan@moguldesignagency.com",
+      website: "https://moguldesignagency.com",
+      social: {
+        linkedin: "",
+        twitter: "",
+        instagram: "",
+        youtube: "",
+      },
+    },
+  },
+  positioning: {
+    business_description:
+      "Mogul Design Agency builds brand identity systems for scaling startups " +
+      "and SMBs, positioning, visual identity, and the guidelines that make a " +
+      "brand look as credible as it actually is.",
+    tagline: "Brands that look as credible as they are.",
+    differentiators: [
+      "Strategy-first: positioning and messaging before any pixel moves",
+      "Founder-to-founder voice, opinionated and practical, not agency fluff",
+      "Ship-ready brand systems with real guidelines, not just a logo",
+    ],
+    competitors: ["Pentagram", "MetaLab", "independent brand freelancers"],
+  },
+  onboarding_state: {
+    messages: [],
+    completed: true, // Mogul's profile is already complete, don't nag it.
+  },
 };
 
 const FUNNEL_DEFINITION = {
@@ -100,7 +149,7 @@ const ICPS = [
     is_primary: true,
     profile: {
       demographics:
-        "Founders/owners of startups & SMBs, ~$500K–$10M revenue, 5–50 staff. " +
+        "Founders/owners of startups & SMBs, ~$500K to $10M revenue, 5 to 50 staff. " +
         "Often post-seed/Series A or bootstrapped and growing fast.",
       values: ["credibility", "growth", "standing out", "looking legit", "speed"],
       jobs_to_be_done: [
@@ -150,7 +199,7 @@ const ICPS = [
     is_primary: false,
     profile: {
       demographics:
-        "Head/VP of Marketing at a Series A–B startup. Has budget and a board " +
+        "Head/VP of Marketing at a Series A to B startup. Has budget and a board " +
         "to answer to; design-literate; needs an execution partner, not hand-holding.",
       values: ["execution speed", "consistency", "measurable impact"],
       jobs_to_be_done: [
@@ -181,7 +230,7 @@ const PILLARS = [
   {
     name: "Visual Identity & Design",
     description:
-      "Logos, color, typography, and brand systems done right — practical " +
+      "Logos, color, typography, and brand systems done right, practical " +
       "standards founders can judge their own brand against.",
     business_goal: "Authority + brand affinity; maps to design services",
     primary_funnel_stage: "awareness" as const,
@@ -200,7 +249,7 @@ const PILLARS = [
     name: "The Mogul Way",
     description:
       "Case studies, our process, and results. Decision-stage content for " +
-      "people who already know us — low volume, high intent.",
+      "people who already know us, low volume, high intent.",
     business_goal: "Decision-stage conversion",
     primary_funnel_stage: "decision" as const,
     target_icp: "The Scaling Founder With a DIY Brand",
@@ -393,6 +442,9 @@ async function main() {
     .insert({
       name: BRAND.name,
       voice_profile: BRAND.voice_profile,
+      visual_identity: BRAND.visual_identity,
+      positioning: BRAND.positioning,
+      onboarding_state: BRAND.onboarding_state,
       sanity_config: BRAND.sanity_config,
       mailerlite_config: BRAND.mailerlite_config,
       seo_defaults: BRAND.seo_defaults,

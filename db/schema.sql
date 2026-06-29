@@ -1,10 +1,10 @@
   -- ─────────────────────────────────────────────────────────────────────────────
-  -- Automated Content Engine — schema (v1)
+  -- Automated Content Engine, schema (v1)
   -- Tables from automated-content-engine-plan.md §7.
   -- Apply in the Supabase SQL editor (or `psql`) before running `npm run seed`.
   --
   -- Design notes:
-  --   • Strategy is DATA, not hardcoded — one brand now, multi-brand later (Phase 5)
+  --   • Strategy is DATA, not hardcoded, one brand now, multi-brand later (Phase 5)
   --     drops in cleanly because everything hangs off brands.id.
   --   • JSONB for the flexible strategy/profile blobs; typed columns for the
   --     fields the pipeline filters/joins on (status, funnel_stage, …).
@@ -34,11 +34,20 @@
     id                 uuid primary key default gen_random_uuid(),
     name               text not null unique,
     voice_profile      jsonb not null default '{}'::jsonb,  -- voice, tone, examples, banned terms, cta library
+    visual_identity    jsonb not null default '{}'::jsonb,  -- logo_url, colors, fonts, footer → email template tokens
+    positioning        jsonb not null default '{}'::jsonb,  -- business_description, tagline, differentiators, competitors → prompt context
+    onboarding_state   jsonb not null default '{}'::jsonb,  -- { messages: [{role,content}], completed } for chat onboarding
     sanity_config      jsonb not null default '{}'::jsonb,  -- project_id, dataset, doc_type, author_ref
     mailerlite_config  jsonb not null default '{}'::jsonb,  -- sender_name, sender_email, group_ids
     seo_defaults       jsonb not null default '{}'::jsonb,  -- geography, language, keyword_difficulty_max
     created_at         timestamptz not null default now()
   );
+
+  -- Logos are uploaded as files to a Supabase Storage bucket named `logos`
+  -- (public). Create it once in the Supabase dashboard, it lives in the
+  -- `storage` schema, intentionally outside this drop/recreate block so
+  -- re-running the schema doesn't wipe stored objects. The public URL is
+  -- saved on the brand at visual_identity.logo_url.
 
   -- One current strategy per brand.
   create table strategies (

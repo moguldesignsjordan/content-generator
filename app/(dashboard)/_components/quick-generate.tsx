@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Badge, Button, Card } from "@/components/ui";
 
 interface TopicOption {
   id: string;
@@ -58,45 +59,41 @@ export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
 
   return (
     <>
-      {/* Full-screen generation overlay */}
       {busy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-sm rounded-xl border border-border bg-surface p-8 text-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
+          <Card className="w-full max-w-sm p-8 text-center">
             <PenAnimation />
-            <p className="mt-5 text-sm font-medium text-foreground">
+            <p className="mt-5 text-[15px] font-medium text-foreground">
               {selectedTopic?.title}
             </p>
-            <p className="mt-2 text-xs text-muted">
+            <p className="mt-2 text-[13px] text-muted">
               {STATUSES[statusIdx]}
               <ThinkingDots />
             </p>
             <div className="mt-5 h-px w-full bg-border" />
-            <p className="mt-3 text-xs text-muted opacity-50">
-              This takes 30–90 seconds
+            <p className="mt-3 text-[12px] text-muted-2">
+              This takes 30 to 90 seconds
             </p>
-          </div>
+          </Card>
         </div>
       )}
 
-      {/* Card */}
-      <div className="rounded-lg border border-border bg-surface p-5">
+      <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
             New draft
           </p>
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
-            Email
-          </span>
+          <Badge tone="cyan">Email</Badge>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
           <select
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
             disabled={busy}
-            className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none disabled:opacity-50"
+            className="h-11 flex-1 rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 text-[15px] text-foreground focus:border-accent focus:outline-none disabled:opacity-50"
           >
-            <option value="">Pick a topic&hellip;</option>
+            <option value="">Pick a topic…</option>
             {grouped.map(([pillar, ts]) => (
               <optgroup key={pillar} label={pillar}>
                 {ts.map((t) => (
@@ -107,17 +104,19 @@ export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
               </optgroup>
             ))}
           </select>
-          <button
+          <Button
+            variant="gradient"
+            size="md"
             onClick={generate}
             disabled={!selectedId || busy}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+            className="sm:w-auto"
           >
             Generate
-          </button>
+          </Button>
         </div>
 
-        {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      </div>
+        {error && <p className="mt-2.5 text-xs text-danger">{error}</p>}
+      </Card>
     </>
   );
 }
@@ -134,11 +133,11 @@ function groupByPillar(topics: TopicOption[]): [string, TopicOption[]][] {
 
 function ThinkingDots() {
   return (
-    <span className="inline-flex gap-0.5 align-middle">
+    <span className="ml-1 inline-flex gap-0.5 align-middle">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="inline-block h-1 w-1 rounded-full bg-muted animate-bounce"
+          className="inline-block h-1 w-1 animate-bounce rounded-full bg-muted"
           style={{ animationDelay: `${i * 0.15}s` }}
         />
       ))}
@@ -149,9 +148,7 @@ function ThinkingDots() {
 function PenAnimation() {
   return (
     <div className="relative mx-auto flex h-14 w-14 items-center justify-center">
-      {/* Outer pulse ring */}
-      <span className="absolute inset-0 rounded-full bg-accent/10 animate-ping" />
-      {/* Icon */}
+      <span className="absolute inset-0 animate-ping rounded-full bg-accent/10" />
       <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-accent/15">
         <svg
           viewBox="0 0 24 24"
@@ -160,7 +157,7 @@ function PenAnimation() {
           strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="h-5 w-5 text-accent animate-pulse"
+          className="h-5 w-5 animate-pulse text-accent"
         >
           <path d="M12 20h9" />
           <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />

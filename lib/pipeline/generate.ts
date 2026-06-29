@@ -1,5 +1,4 @@
 import "server-only";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
 import {
   getDraftWithJobContext,
@@ -10,11 +9,26 @@ import {
   rejectDraftRecord,
 } from "@/lib/db/queries";
 import {
+  EMAIL_TOOL,
   EmailDraftSchema,
   buildEmailMessages,
+  resolveEmailTemplateId,
+  type EmailDraftOutput,
 } from "@/prompts/generate-email";
-import { QaSchema, buildQaMessages } from "@/prompts/qa-email";
-import type { EmailDraftContent, DraftMeta, DraftSeoData, TopicContext } from "@/lib/db/types";
+import { QA_TOOL, QaSchema, buildQaMessages } from "@/prompts/qa-email";
+import {
+  renderEmailTemplate,
+  resolveBrandTokens,
+} from "@/lib/email/templates";
+import type {
+  EmailCopy,
+  EmailDraftContent,
+  EmailTemplateId,
+  DraftMeta,
+  DraftSeoData,
+  TopicContext,
+} from "@/lib/db/types";
+import { stripEmDashes } from "@/lib/text";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 
 /**
@@ -22,7 +36,7 @@ import { MAX_DRAFT_VERSIONS } from "./constants";
  * Returns the new draft id (the review screen route).
  *
  * Throws on missing topic, unconfigured key, or a model response that doesn't
- * match the schema — the API route turns these into a visible failure state
+ * match the schema, the API route turns these into a visible failure state
  * (Guardrail #5: never swallow errors).
  */
 export async function generateEmailForTopic(topicId: string): Promise<string> {
@@ -31,34 +45,108 @@ export async function generateEmailForTopic(topicId: string): Promise<string> {
 
   const { system, user } = buildEmailMessages(ctx);
 
-  const response = await getAnthropic().messages.parse({
-    model: DRAFT_MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    system,
-    messages: [{ role: "user", content: user }],
-    output_config: { format: zodOutputFormat(EmailDraftSchema) },
-  });
+  const parsed = await generateEmailCopy(system, user);
 
-  const parsed = response.parsed_output;
-  if (!parsed) {
-    throw new Error("The model did not return a valid email draft.");
-  }
+  const { content, copy, templateId } = renderEmailForContext(ctx, parsed);
 
-  const content: EmailDraftContent = {
-    subject: stripEmDashes(parsed.subject.trim()),
-    preheader: stripEmDashes(parsed.preheader.trim()),
-    html: ensureUnsubscribeTag(stripEmDashes(parsed.html_body)),
+  const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
+  const meta: DraftMeta = {
+    ...qaMeta,
+    email_template_id: templateId,
+    email_copy: copy,
+  };
+  return persistEmailDraft({ ctx, content, meta, seoData });
+}
+
+/**
+ * Calls Claude for structured email copy via FORCED TOOL USE, with one retry
+ * on failure. We force `save_email_draft` (tool_choice) instead of json_schema
+ * output_config: tool inputs are reliably structured and can't come back as
+ * markdown-fenced JSON, which the json_schema path was producing under thinking.
+ * Logs the raw response content on failure so failures are diagnosable.
+ */
+async function generateEmailCopy(
+  system: string,
+  user: string,
+): Promise<EmailDraftOutput> {
+  const call = () =>
+    getAnthropic().messages.create({
+      model: DRAFT_MODEL,
+      max_tokens: 16000,
+      thinking: { type: "adaptive" },
+      system,
+      messages: [{ role: "user", content: user }],
+      tools: [EMAIL_TOOL],
+      tool_choice: { type: "tool", name: "save_email_draft" },
+    });
+
+  const extract = (resp: Awaited<ReturnType<typeof call>>): EmailDraftOutput => {
+    const tu = resp.content.find(
+      (b) => b.type === "tool_use" && b.name === "save_email_draft",
+    );
+    if (!tu || tu.type !== "tool_use") {
+      const preview = JSON.stringify(resp.content).slice(0, 800);
+      throw new Error(
+        `Model did not call save_email_draft. Stop reason: ${resp.stop_reason}. Raw content: ${preview}`,
+      );
+    }
+    const parsed = EmailDraftSchema.safeParse(tu.input);
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .slice(0, 5)
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ");
+      throw new Error(`Invalid email copy from tool: ${issues}`);
+    }
+    return parsed.data;
   };
 
-  const { meta, seoData } = await runQaPass(ctx, content);
-  return persistEmailDraft({ ctx, content, meta, seoData });
+  try {
+    return extract(await call());
+  } catch (err) {
+    console.error("[generate] email copy failed, retrying once:", err);
+    return extract(await call());
+  }
+}
+
+/**
+ * Renders Claude's structured copy into a designed, on-brand HTML email using
+ * the template the topic's distribution recipe points at. Em-dashes are
+ * stripped from the COPY only (the template HTML is controlled and dash-free).
+ * Returns the persisted content shape plus the copy/template so they can be
+ * stashed on the draft's meta.
+ */
+function renderEmailForContext(
+  ctx: TopicContext,
+  parsed: EmailDraftOutput,
+): { content: EmailDraftContent; copy: EmailCopy; templateId: EmailTemplateId } {
+  const copy: EmailCopy = {
+    subject: stripEmDashes(parsed.subject.trim()),
+    preheader: stripEmDashes(parsed.preheader.trim()),
+    headline: stripEmDashes(parsed.headline.trim()),
+    body_sections: parsed.body_sections.map((s) => ({
+      heading: s.heading ? stripEmDashes(s.heading.trim()) : undefined,
+      body: stripEmDashes(s.body.trim()),
+    })),
+    cta_text: stripEmDashes(parsed.cta_text.trim()),
+    cta_url: parsed.cta_url?.trim() || undefined,
+  };
+
+  const templateId = resolveEmailTemplateId(ctx.topic);
+  const tokens = resolveBrandTokens(ctx.brand);
+  const html = ensureUnsubscribeTag(renderEmailTemplate(templateId, { copy, tokens }));
+
+  return {
+    content: { subject: copy.subject, preheader: copy.preheader, html },
+    copy,
+    templateId,
+  };
 }
 
 export { MAX_DRAFT_VERSIONS } from "./constants";
 
 /**
- * Runs a QA pass on a generated email draft. Non-fatal — returns empty
+ * Runs a QA pass on a generated email draft. Non-fatal, returns empty
  * objects if the call fails so a QA error never blocks the draft from saving.
  */
 async function runQaPass(
@@ -67,15 +155,25 @@ async function runQaPass(
 ): Promise<{ meta: DraftMeta; seoData: DraftSeoData }> {
   try {
     const { system, user } = buildQaMessages(ctx, content);
-    const response = await getAnthropic().messages.parse({
+    const response = await getAnthropic().messages.create({
       model: DRAFT_MODEL,
       max_tokens: 1024,
       system,
       messages: [{ role: "user", content: user }],
-      output_config: { format: zodOutputFormat(QaSchema) },
+      tools: [QA_TOOL],
+      tool_choice: { type: "tool", name: "qa_review" },
     });
-    const qa = response.parsed_output;
-    if (!qa) return { meta: {}, seoData: {} };
+
+    const tu = response.content.find(
+      (b) => b.type === "tool_use" && b.name === "qa_review",
+    );
+    if (!tu || tu.type !== "tool_use") return { meta: {}, seoData: {} };
+    const parsed = QaSchema.safeParse(tu.input);
+    if (!parsed.success) {
+      console.error("[generate] QA tool input invalid:", parsed.error.issues);
+      return { meta: {}, seoData: {} };
+    }
+    const qa = parsed.data;
 
     return {
       meta: {
@@ -120,28 +218,20 @@ export async function regenerateEmailDraft(
 
   const { system, user } = buildEmailMessages(ctx, {
     feedback,
-    previousDraft: draftCtx.content,
+    previousSubject: draftCtx.content.subject,
+    previousPreheader: draftCtx.content.preheader,
   });
 
-  const response = await getAnthropic().messages.parse({
-    model: DRAFT_MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    system,
-    messages: [{ role: "user", content: user }],
-    output_config: { format: zodOutputFormat(EmailDraftSchema) },
-  });
+  const parsed = await generateEmailCopy(system, user);
 
-  const parsed = response.parsed_output;
-  if (!parsed) throw new Error("The model did not return a valid email draft.");
+  const { content, copy, templateId } = renderEmailForContext(ctx, parsed);
 
-  const content: EmailDraftContent = {
-    subject: stripEmDashes(parsed.subject.trim()),
-    preheader: stripEmDashes(parsed.preheader.trim()),
-    html: ensureUnsubscribeTag(stripEmDashes(parsed.html_body)),
+  const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
+  const meta: DraftMeta = {
+    ...qaMeta,
+    email_template_id: templateId,
+    email_copy: copy,
   };
-
-  const { meta, seoData } = await runQaPass(ctx, content);
 
   const newDraftId = await persistRegeneratedDraft({
     jobId: draftCtx.jobId,
@@ -152,18 +242,6 @@ export async function regenerateEmailDraft(
   });
 
   return { newDraftId };
-}
-
-// Em-dashes are banned from all email output (brand voice rule). Replace
-// the unicode char and HTML entities with ", " so the sentence still reads
-// naturally. Double-hyphen (--) is intentionally NOT replaced here because
-// CSS custom properties (var(--color)) and HTML comments (<!-- -->) use it
-// legitimately inside email HTML; prose ` -- ` is rare enough to skip.
-function stripEmDashes(text: string): string {
-  return text
-    .replace(/—/g, ", ")        // — (unicode em-dash)
-    .replace(/&mdash;/gi, ", ") // HTML named entity
-    .replace(/&#8212;/g, ", "); // HTML numeric entity
 }
 
 // MailerLite rejects campaigns without the {$unsubscribe} merge tag. The prompt

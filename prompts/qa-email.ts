@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Anthropic } from "@anthropic-ai/sdk";
 import type { EmailDraftContent, TopicContext } from "@/lib/db/types";
 
 export const QaSchema = z.object({
@@ -13,7 +14,7 @@ export const QaSchema = z.object({
     .describe("True if the target keyword appears naturally in the email body or subject."),
   keyword_placement: z
     .string()
-    .describe("Where the keyword appears — e.g. 'subject line and opening paragraph'. Empty string if not found."),
+    .describe("Where the keyword appears, e.g. 'subject line and opening paragraph'. Empty string if not found."),
   banned_terms_found: z
     .array(z.string())
     .describe("Any banned terms found verbatim in the subject, preheader, or body. Empty array if none."),
@@ -30,6 +31,35 @@ export const QaSchema = z.object({
 
 export type QaOutput = z.infer<typeof QaSchema>;
 
+/** Forced tool the QA reviewer must call to return its audit result. */
+export const QA_TOOL: Anthropic.Tool = {
+  name: "qa_review",
+  description: "Return the QA audit result for the email draft.",
+  input_schema: {
+    type: "object",
+    properties: {
+      meta_title: { type: "string", description: "SEO meta title, under 60 characters." },
+      meta_description: { type: "string", description: "SEO meta description, under 155 characters." },
+      keyword_used: { type: "boolean", description: "True if the target keyword appears naturally." },
+      keyword_placement: { type: "string", description: "Where the keyword appears, or empty string." },
+      banned_terms_found: { type: "array", items: { type: "string" }, description: "Banned terms found, or empty." },
+      readability_note: { type: "string", description: "One sentence on readability." },
+      qa_pass: { type: "boolean", description: "True only if no banned terms and keyword is used." },
+      issues: { type: "array", items: { type: "string" }, description: "Actionable issues, or empty." },
+    },
+    required: [
+      "meta_title",
+      "meta_description",
+      "keyword_used",
+      "keyword_placement",
+      "banned_terms_found",
+      "readability_note",
+      "qa_pass",
+      "issues",
+    ],
+  },
+};
+
 /** Builds the QA review prompt for a generated email draft. */
 export function buildQaMessages(
   ctx: TopicContext,
@@ -39,7 +69,7 @@ export function buildQaMessages(
 
   const system = [
     "You are a QA reviewer for marketing emails. Audit the draft against the criteria",
-    "provided and generate SEO meta fields. Be direct and specific — flag only real",
+    "provided and generate SEO meta fields. Be direct and specific, flag only real",
     "problems, not stylistic preferences.",
   ].join("\n");
 
@@ -55,10 +85,10 @@ export function buildQaMessages(
     `SUBJECT: ${draft.subject}`,
     `PREHEADER: ${draft.preheader}`,
     "",
-    "BODY (HTML — evaluate the readable text, not the markup):",
+    "BODY (HTML, evaluate the readable text, not the markup):",
     draft.html,
     "",
-    "Return the QA result.",
+    "Call the qa_review tool with the audit result.",
   ]
     .filter(Boolean)
     .join("\n");

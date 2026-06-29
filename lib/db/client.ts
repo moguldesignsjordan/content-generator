@@ -5,7 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // Server-only Supabase clients.
 //
 // `server-only` makes the build fail loudly if any of this is ever imported into
-// a Client Component — the service-role key must never reach the browser bundle
+// a Client Component, the service-role key must never reach the browser bundle
 // (Guardrail #1).
 //
 // v1 is a single-brand internal tool with no end-user auth yet, so reads/writes
@@ -25,7 +25,7 @@ let cached: SupabaseClient | null = null;
 
 /**
  * Admin client (service role, bypasses RLS). Server code only.
- * Throws if env isn't configured — callers that want to render a "connect
+ * Throws if env isn't configured, callers that want to render a "connect
  * Supabase" state should gate on `isSupabaseConfigured()` first.
  */
 export function getAdminClient(): SupabaseClient {

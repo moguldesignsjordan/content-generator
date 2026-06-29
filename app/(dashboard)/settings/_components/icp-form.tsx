@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Card, Field, Input, Textarea } from "@/components/ui";
 import type { Icp } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -49,27 +50,21 @@ export function IcpForm({ icp }: { icp: Icp }) {
   }
 
   return (
-    <div className="space-y-6 rounded-lg border border-border bg-surface p-6">
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">ICP label</label>
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className={`mt-2 ${inputCls}`}
-        />
-      </div>
+    <Card className="space-y-5 p-5">
+      <Field label="ICP label">
+        <Input value={label} onChange={(e) => setLabel(e.target.value)} />
+      </Field>
 
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">Demographics</label>
-        <p className="mt-0.5 text-xs text-muted">Who they are — role, company size, revenue stage.</p>
-        <textarea
+      <Field
+        label="Demographics"
+        hint="Who they are, role, company size, revenue stage."
+      >
+        <Textarea
+          rows={3}
           value={demographics}
           onChange={(e) => setDemographics(e.target.value)}
-          rows={3}
-          className={`mt-2 ${inputCls}`}
         />
-      </div>
+      </Field>
 
       <ListInput
         label="Pains"
@@ -89,7 +84,7 @@ export function IcpForm({ icp }: { icp: Icp }) {
 
       <ListInput
         label="Vocabulary"
-        hint="Words and phrases they actually use — not your jargon, theirs."
+        hint="Words and phrases they actually use, not your jargon, theirs."
         values={vocabulary}
         onChange={setVocabulary}
         placeholder="e.g. rebrand, visual identity, look professional"
@@ -111,36 +106,26 @@ export function IcpForm({ icp }: { icp: Icp }) {
         placeholder="e.g. raising a funding round"
       />
 
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted">Awareness stage</label>
-        <p className="mt-0.5 text-xs text-muted">How aware are they of the problem and solution?</p>
-        <input
-          type="text"
+      <Field
+        label="Awareness stage"
+        hint="How aware are they of the problem and solution?"
+      >
+        <Input
           value={awarenessStage}
           onChange={(e) => setAwarenessStage(e.target.value)}
           placeholder="e.g. problem/solution-aware, low product-awareness"
-          className={`mt-2 ${inputCls}`}
         />
-      </div>
+      </Field>
 
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save ICP"}
-        </button>
-        {status === "saved" && (
-          <span className="text-sm text-emerald-400">Saved ✓</span>
-        )}
+      <div className="flex items-center gap-3 pt-1">
+        <Button variant="gradient" loading={saving} onClick={handleSave}>
+          Save ICP
+        </Button>
+        {status === "saved" && <span className="text-sm text-success">Saved</span>}
         {status === "error" && (
-          <span className="text-sm text-red-400">Failed to save.</span>
+          <span className="text-sm text-danger">Failed to save.</span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
-
-const inputCls =
-  "w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none resize-y";

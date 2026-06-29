@@ -2,8 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Sheet,
+  Textarea,
+} from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
+import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
 
 interface ReviewActionsProps {
   draftId: string;
@@ -22,17 +31,14 @@ export function ReviewActions({
 }: ReviewActionsProps) {
   const router = useRouter();
 
-  // Content state
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
   const [html, setHtml] = useState(initialContent.html);
   const [showHtmlEdit, setShowHtmlEdit] = useState(false);
 
-  // Meta state (editable, saved with approve)
   const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
   const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
 
-  // Review state
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
@@ -63,10 +69,10 @@ export function ReviewActions({
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Failed to approve.");
       }
-      router.push("/");
+      router.push("/emails");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to approve.");
@@ -85,10 +91,13 @@ export function ReviewActions({
         body: JSON.stringify({ feedback }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Failed to regenerate.");
       }
-      const data = await res.json() as { newDraftId?: string; capped?: boolean };
+      const data = (await res.json()) as {
+        newDraftId?: string;
+        capped?: boolean;
+      };
       if (data.capped) {
         setError(
           `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Edit the draft manually or start fresh.`,
@@ -106,201 +115,197 @@ export function ReviewActions({
   const busy = loading !== null;
 
   return (
-    <div className="space-y-6">
-      {/* QA Results */}
+    <div className="space-y-5">
+      {/* QA results */}
       {hasQa && (
-        <div className="rounded-lg border border-border bg-surface p-4 space-y-4">
+        <Card className="p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-wide text-muted">QA Results</p>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                seoData.qa_pass
-                  ? "bg-emerald-500/20 text-emerald-300"
-                  : "bg-amber-500/20 text-amber-300"
-              }`}
-            >
-              {seoData.qa_pass ? "Pass ✓" : "Issues found"}
-            </span>
+            <h3 className="text-[15px] font-semibold">QA results</h3>
+            <Badge tone={seoData.qa_pass ? "success" : "warning"} dot>
+              {seoData.qa_pass ? "Pass" : "Issues found"}
+            </Badge>
           </div>
 
-          {/* Issues */}
-          {(seoData.issues?.length ?? 0) > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-amber-300">Issues to address:</p>
-              <ul className="space-y-1">
-                {seoData.issues!.map((issue, i) => (
-                  <li key={i} className="text-xs text-muted">· {issue}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <div className="mt-4 space-y-3 text-[13px]">
+            {(seoData.issues?.length ?? 0) > 0 && (
+              <div>
+                <p className="mb-1.5 text-muted">Issues to address</p>
+                <ul className="space-y-1 text-foreground/80">
+                  {seoData.issues!.map((issue, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-warning">·</span>
+                      <span>{issue}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-          {/* Banned terms */}
-          {hasBannedTerms && (
-            <p className="text-xs text-red-400">
-              Banned terms found: {seoData.banned_terms_found!.join(", ")}
-            </p>
-          )}
+            {hasBannedTerms && (
+              <p className="text-danger">
+                Banned terms found: {seoData.banned_terms_found!.join(", ")}
+              </p>
+            )}
 
-          {/* Keyword check */}
-          {seoData.keyword_used !== undefined && (
-            <p className="text-xs text-muted">
-              {seoData.keyword_used
-                ? `✓ Keyword used — ${seoData.keyword_placement}`
-                : "✗ Target keyword not found in email"}
-            </p>
-          )}
+            {seoData.keyword_used !== undefined && (
+              <p className="text-muted">
+                {seoData.keyword_used
+                  ? `Keyword used, ${seoData.keyword_placement}`
+                  : "Target keyword not found in email"}
+              </p>
+            )}
 
-          {/* Readability */}
-          {seoData.readability_note && (
-            <p className="text-xs text-muted">{seoData.readability_note}</p>
-          )}
-
-          {/* Meta fields (editable) */}
-          <div className="space-y-3 pt-1 border-t border-border">
-            <p className="text-xs uppercase tracking-wide text-muted pt-1">SEO Meta</p>
-            <EditField label="Meta title (≤60 chars)" value={metaTitle} onChange={setMetaTitle} singleLine />
-            <EditField label="Meta description (≤155 chars)" value={metaDesc} onChange={setMetaDesc} />
+            {seoData.readability_note && (
+              <p className="text-muted">{seoData.readability_note}</p>
+            )}
           </div>
-        </div>
+
+          <div className="mt-4 space-y-3 border-t border-border pt-4">
+            <p className="text-[13px] font-medium text-foreground">SEO meta</p>
+            <Field label="Meta title (≤60 chars)">
+              <Input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} />
+            </Field>
+            <Field label="Meta description (≤155 chars)">
+              <Textarea
+                rows={2}
+                value={metaDesc}
+                onChange={(e) => setMetaDesc(e.target.value)}
+              />
+            </Field>
+          </div>
+        </Card>
       )}
 
-      {/* Editable subject + preheader */}
-      <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
-        <EditField label="Subject" value={subject} onChange={setSubject} singleLine />
-        <EditField label="Preheader" value={preheader} onChange={setPreheader} singleLine />
-      </div>
+      {/* Editable copy */}
+      <Card className="space-y-4 p-5">
+        <Field label="Subject">
+          <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+        </Field>
+        <Field label="Preheader">
+          <Input
+            value={preheader}
+            onChange={(e) => setPreheader(e.target.value)}
+          />
+        </Field>
+      </Card>
 
-      {/* Live email preview */}
-      <section>
-        <p className="mb-2 text-xs uppercase tracking-wide text-muted">Rendered email</p>
+      {/* Live preview */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <p className="text-[13px] font-medium text-muted">Rendered email</p>
+          <button
+            type="button"
+            onClick={() => setShowHtmlEdit((v) => !v)}
+            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+          >
+            {showHtmlEdit ? "Hide HTML" : "Edit HTML"}
+          </button>
+        </div>
         <iframe
           key={html}
           title="Email preview"
           srcDoc={html}
           sandbox=""
-          className="h-[600px] w-full rounded-lg border border-border bg-white"
+          className="h-[600px] w-full bg-white"
         />
-      </section>
-
-      {/* HTML editor (collapsible) */}
-      <div>
-        <button
-          onClick={() => setShowHtmlEdit((v) => !v)}
-          className="text-xs text-muted hover:text-foreground"
-        >
-          {showHtmlEdit ? "Hide HTML editor" : "Edit HTML"}
-        </button>
         {showHtmlEdit && (
           <textarea
             value={html}
             onChange={(e) => setHtml(e.target.value)}
-            rows={20}
+            rows={18}
             spellCheck={false}
-            className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:border-accent focus:outline-none resize-y"
+            className="w-full resize-y border-t border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:border-accent focus:outline-none"
           />
         )}
-      </div>
+      </Card>
 
-      {/* Primary actions */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleApprove}
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          variant="gradient"
+          size="lg"
+          loading={loading === "approve"}
           disabled={busy}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+          onClick={handleApprove}
         >
           {loading === "approve"
             ? "Approving…"
             : isEdited
-              ? "Save & Approve"
+              ? "Save & approve"
               : "Approve"}
-        </button>
-
-        {!showReject && (
-          <button
-            onClick={() => setShowReject(true)}
-            disabled={busy}
-            className="rounded-md border border-border px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:opacity-50"
-          >
-            Reject
-          </button>
-        )}
+        </Button>
+        <Button
+          variant="outline"
+          size="lg"
+          disabled={busy}
+          onClick={() => setShowReject(true)}
+        >
+          Reject
+        </Button>
       </div>
 
-      {/* Reject panel */}
-      {showReject && (
-        <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
-          <p className="text-xs uppercase tracking-wide text-muted">
-            Rejection feedback
-            {atCap && (
-              <span className="ml-2 text-red-400">
-                · max revisions ({MAX_DRAFT_VERSIONS}) reached
-              </span>
-            )}
-          </p>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="What needs to change? Be specific — this goes into the regeneration prompt."
-            rows={4}
-            disabled={atCap || busy}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none resize-none disabled:opacity-50"
-          />
+      {error && (
+        <p className="rounded-[var(--radius-md)] bg-danger/10 px-4 py-2.5 text-sm text-danger">
+          {error}
+        </p>
+      )}
+
+      {/* Reject sheet */}
+      <Sheet
+        open={showReject}
+        onClose={() => {
+          setShowReject(false);
+          setFeedback("");
+        }}
+        title="Reject & regenerate"
+        description={
+          atCap
+            ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
+            : `Version ${version}. Your feedback shapes the next draft.`
+        }
+        footer={
           <div className="flex gap-2">
-            <button
-              onClick={handleReject}
-              disabled={busy || !feedback.trim() || atCap}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-            >
-              {loading === "reject" ? "Regenerating… (~30–90s)" : "Reject & Regenerate"}
-            </button>
-            <button
-              onClick={() => { setShowReject(false); setFeedback(""); }}
+            <Button
+              variant="subtle"
+              className="flex-1"
               disabled={busy}
-              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-muted transition hover:text-foreground disabled:opacity-50"
+              onClick={() => {
+                setShowReject(false);
+                setFeedback("");
+              }}
             >
               Cancel
-            </button>
+            </Button>
+            <Button
+              variant="solid"
+              className="flex-1"
+              loading={loading === "reject"}
+              disabled={busy || !feedback.trim() || atCap}
+              onClick={handleReject}
+            >
+              {loading === "reject" ? "Regenerating…" : "Reject & regenerate"}
+            </Button>
           </div>
-        </div>
-      )}
-
-      {error && (
-        <p className="rounded-md bg-red-950/40 px-4 py-2 text-sm text-red-400">{error}</p>
-      )}
-    </div>
-  );
-}
-
-function EditField({
-  label,
-  value,
-  onChange,
-  singleLine,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  singleLine?: boolean;
-}) {
-  return (
-    <div>
-      <label className="text-xs uppercase tracking-wide text-muted">{label}</label>
-      {singleLine ? (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none"
-        />
-      ) : (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none resize-none"
-        />
-      )}
+        }
+      >
+        <Field
+          label="What needs to change?"
+          hint="Be specific, this goes into the regeneration prompt."
+        >
+          <Textarea
+            rows={5}
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="e.g. Lead with the pain point, tighten the CTA, drop the second section."
+            disabled={atCap || busy}
+          />
+        </Field>
+        {atCap && (
+          <p className="mt-3 text-sm text-danger">
+            Max revisions reached. Edit the draft manually or start fresh.
+          </p>
+        )}
+      </Sheet>
     </div>
   );
 }

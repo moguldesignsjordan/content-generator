@@ -3,7 +3,7 @@ import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { generateEmailForTopic } from "@/lib/pipeline/generate";
 
-// A full generation (Claude + adaptive thinking) can take 30–90s, which exceeds
+// A full generation (Claude + adaptive thinking) can take 30 to 90s, which exceeds
 // the default serverless timeout. Give the route headroom (Guardrail #6).
 // Vercel allows up to 300s on Pro/Fluid Compute.
 export const maxDuration = 300;
@@ -31,10 +31,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    console.log("[generate] start topicId:", topicId);
     const draftId = await generateEmailForTopic(topicId);
+    console.log("[generate] success topicId:", topicId, "draftId:", draftId);
     return NextResponse.json({ draftId });
   } catch (err) {
-    console.error("Email generation failed:", err);
+    console.error(
+      "[generate] failed topicId:",
+      topicId,
+      err instanceof Error ? err.message : err,
+    );
+    if (err instanceof Error && err.stack) {
+      console.error("[generate] stack:", err.stack);
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Generation failed." },
       { status: 500 },
