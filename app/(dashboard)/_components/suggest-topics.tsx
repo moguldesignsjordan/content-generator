@@ -1,0 +1,135 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button, Card } from "@/components/ui";
+import { FunnelBadge } from "./topic-badges";
+import type { TopicIdeaInput } from "@/prompts/suggest-topics";
+
+// "Suggest topic ideas" on the Create tab: proposals come from the brand
+// brain, the user picks which to add (nothing persists until Add selected).
+
+type Proposal = TopicIdeaInput & { include: boolean };
+
+export function SuggestTopics({ compact = false }: { compact?: boolean }) {
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleSuggest() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/topics/suggest", { method: "POST" });
+      const data = (await res.json()) as {
+        proposals?: TopicIdeaInput[];
+        error?: string;
+      };
+      if (!res.ok || !data.proposals?.length) {
+        throw new Error(data.error ?? "No ideas came back. Try again.");
+      }
+      setProposals(data.proposals.map((p) => ({ ...p, include: true })));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAdd() {
+    const picked = proposals?.filter((p) => p.include) ?? [];
+    if (!picked.length) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/topics/suggest", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topics: picked.map(({ include: _include, ...t }) => t),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      setProposals(null);
+      router.refresh();
+    } catch {
+      setError("Couldn't add the topics. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!proposals) {
+    return (
+      <div className={compact ? "" : "text-center"}>
+        <Button
+          variant={compact ? "subtle" : "gradient"}
+          size={compact ? "sm" : undefined}
+          loading={loading}
+          onClick={handleSuggest}
+        >
+          {loading ? "Thinking…" : "✨ Suggest topic ideas"}
+        </Button>
+        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      </div>
+    );
+  }
+
+  const pickedCount = proposals.filter((p) => p.include).length;
+
+  return (
+    <Card className="space-y-3 p-5">
+      <p className="text-[13px] text-muted">
+        Ideas from your brand brain. Uncheck any you don&apos;t want, then add
+        them to your plan.
+      </p>
+      <div className="space-y-2">
+        {proposals.map((p, i) => (
+          <label
+            key={i}
+            className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-md)] border border-border p-3 transition-colors hover:bg-surface-2"
+          >
+            <input
+              type="checkbox"
+              checked={p.include}
+              onChange={(e) =>
+                setProposals(
+                  proposals.map((x, xi) =>
+                    xi === i ? { ...x, include: e.target.checked } : x,
+                  ),
+                )
+              }
+              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+            />
+            <span className="flex-1">
+              <span className="block text-[14.5px] font-medium text-foreground">
+                {p.title}
+              </span>
+              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                {p.funnel_stage && <FunnelBadge stage={p.funnel_stage} />}
+                {p.target_keyword && <span>“{p.target_keyword}”</span>}
+                {p.maps_to_product && <span>sells: {p.maps_to_product}</span>}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <div className="flex items-center gap-3">
+        <Button
+          variant="gradient"
+          loading={saving}
+          disabled={!pickedCount}
+          onClick={handleAdd}
+        >
+          Add {pickedCount} to plan
+        </Button>
+        <Button variant="subtle" disabled={saving} onClick={() => setProposals(null)}>
+          Discard
+        </Button>
+      </div>
+    </Card>
+  );
+}

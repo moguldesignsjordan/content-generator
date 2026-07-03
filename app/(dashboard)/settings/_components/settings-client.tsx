@@ -4,19 +4,25 @@ import { useState } from "react";
 import { ListGroup, ListRow, Sheet } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
-import type { Brand, Icp, Strategy } from "@/lib/db/types";
+import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
 import { BrandBasicsForm } from "./brand-basics-form";
+import { ImportWebsiteForm } from "./import-website-form";
 import { BrandVoiceForm } from "./brand-voice-form";
 import { PositioningForm } from "./positioning-form";
 import { VisualIdentityForm } from "./visual-identity-form";
+import { GuidelinesForm } from "./guidelines-form";
+import { ProductsForm } from "./products-form";
 import { FunnelForm } from "./funnel-form";
 import { IcpForm } from "./icp-form";
 
 type SectionKey =
+  | "import"
   | "basics"
   | "voice"
   | "positioning"
   | "visual"
+  | "guidelines"
+  | "products"
   | "funnel"
   | "icp";
 
@@ -24,10 +30,12 @@ export function SettingsClient({
   brand,
   strategy,
   primaryIcp,
+  products,
 }: {
   brand: Brand;
   strategy: Strategy | null;
   primaryIcp: Icp | null;
+  products: Product[];
 }) {
   const [open, setOpen] = useState<SectionKey | null>(null);
   const close = () => setOpen(null);
@@ -35,6 +43,11 @@ export function SettingsClient({
   return (
     <div>
       <ListGroup label="Brand">
+        <ListRow
+          title="Import from website"
+          subtitle="Pull voice, positioning, offers, and visuals from your site"
+          onClick={() => setOpen("import")}
+        />
         <ListRow
           title="Brand basics"
           subtitle="Name, sender identity, SEO geography"
@@ -55,9 +68,19 @@ export function SettingsClient({
           subtitle="Logo, colors, typography for emails"
           onClick={() => setOpen("visual")}
         />
+        <ListRow
+          title="Brand guidelines"
+          subtitle="AI-drafted from everything stored, approved by you"
+          onClick={() => setOpen("guidelines")}
+        />
       </ListGroup>
 
       <ListGroup label="Strategy">
+        <ListRow
+          title="Products & services"
+          subtitle="The offers your emails pitch, scope, pricing, links"
+          onClick={() => setOpen("products")}
+        />
         {strategy ? (
           <ListRow
             title="Funnel"
@@ -99,6 +122,16 @@ export function SettingsClient({
       </ListGroup>
 
       {/* Section sheets */}
+      <Sheet
+        open={open === "import"}
+        onClose={close}
+        title="Import from website"
+        description="Scan your site for voice, positioning, offers, and visuals. You review everything before it's saved."
+        size="xl"
+      >
+        <ImportWebsiteForm brand={brand} products={products} />
+      </Sheet>
+
       <Sheet
         open={open === "basics"}
         onClose={close}
@@ -152,6 +185,26 @@ export function SettingsClient({
           visualIdentity={brand.visual_identity}
           brandName={brand.name}
         />
+      </Sheet>
+
+      <Sheet
+        open={open === "products"}
+        onClose={close}
+        title="Products & services"
+        description="What generation pitches when a topic maps to an offer. Real scope and pricing make the copy concrete."
+        size="xl"
+      >
+        <ProductsForm brandId={brand.id} products={products} />
+      </Sheet>
+
+      <Sheet
+        open={open === "guidelines"}
+        onClose={close}
+        title="Brand guidelines"
+        description="The document every generation prompt leads with. Generate a draft, edit it until it's right, then save to approve."
+        size="xl"
+      >
+        <GuidelinesForm brandId={brand.id} guidelines={brand.guidelines} />
       </Sheet>
 
       {strategy && (

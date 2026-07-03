@@ -2,6 +2,11 @@ import "server-only";
 import { getAdminClient } from "./client";
 import type {
   Brand,
+  BrandGuidelines,
+  Campaign,
+  CampaignBrief,
+  CampaignChatState,
+  CampaignStatus,
   DraftForReview,
   DraftJobContext,
   DraftMeta,
@@ -13,6 +18,7 @@ import type {
   OnboardingState,
   PillarWithClusters,
   Positioning,
+  Product,
   SeoDefaults,
   Strategy,
   Topic,
@@ -152,11 +158,33 @@ export async function getTopicContext(
     .limit(1);
   if (icpErr) throw icpErr;
 
+  // Resolve the topic's product slug to a real offer so the prompt can pitch
+  // something concrete. Missing row is fine (product stays null), and a
+  // missing table (migration 002 not applied yet) degrades instead of
+  // breaking generation.
+  let product: Product | null = null;
+  if (topic.maps_to_product) {
+    const { data: productRow, error: productErr } = await db
+      .from("products")
+      .select("*")
+      .eq("brand_id", brand.id)
+      .eq("slug", topic.maps_to_product)
+      .maybeSingle();
+    if (productErr && !isMissingTableError(productErr)) throw productErr;
+    if (productErr) {
+      console.warn(
+        "[queries] products table missing, apply db/migrations/002 to enable offer context",
+      );
+    }
+    product = (productRow as Product) ?? null;
+  }
+
   return {
     topic: topic as Topic,
     brand: brand as Brand,
     strategy: strategy as Strategy,
     primaryIcp: (icps?.[0] as Icp) ?? null,
+    product,
   };
 }
 
@@ -169,10 +197,13 @@ export async function persistEmailDraft(args: {
   content: EmailDraftContent;
   meta?: DraftMeta;
   seoData?: DraftSeoData;
+  campaignId?: string;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, content, meta, seoData } = args;
+  const { ctx, content, meta, seoData, campaignId } = args;
 
+  // campaign_id only when a campaign drove the draft, so plain generation
+  // still works before migration 002 adds the column.
   const { data: job, error: jobErr } = await db
     .from("content_jobs")
     .insert({
@@ -180,7 +211,8 @@ export async function persistEmailDraft(args: {
       topic_id: ctx.topic.id,
       type: "email",
       status: "in_review",
-      trigger_source: "manual",
+      trigger_source: campaignId ? "campaign" : "manual",
+      ...(campaignId ? { campaign_id: campaignId } : {}),
     })
     .select("id")
     .single();
@@ -215,21 +247,33 @@ export async function getDraftWithJobContext(
 ): Promise<DraftJobContext | null> {
   const db = getAdminClient();
 
-  const { data, error } = await db
+  // Falls back to a campaign-less select before migration 002 adds the column.
+  let { data, error } = await db
     .from("drafts")
-    .select(`id, job_id, version, content, content_jobs!inner(topic_id)`)
+    .select(`id, job_id, version, content, content_jobs!inner(topic_id, campaign_id)`)
     .eq("id", draftId)
     .maybeSingle();
+  if (error) {
+    ({ data, error } = await db
+      .from("drafts")
+      .select(`id, job_id, version, content, content_jobs!inner(topic_id)`)
+      .eq("id", draftId)
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data) return null;
 
-  const job = (data as { content_jobs?: { topic_id?: string } | null })
-    .content_jobs;
+  const job = (
+    data as {
+      content_jobs?: { topic_id?: string; campaign_id?: string | null } | null;
+    }
+  ).content_jobs;
 
   return {
     draftId: data.id as string,
     jobId: data.job_id as string,
     topicId: job?.topic_id ?? "",
+    campaignId: job?.campaign_id ?? null,
     version: data.version as number,
     content: data.content as EmailDraftContent,
   };
@@ -656,6 +700,10 @@ export async function ensureStrategyAndPrimaryIcp(
     primaryIcp = created as Icp;
   }
 
+  // A brand is only generation-ready when a cluster exists for topics to
+  // attach to; guarantee it here so onboarding always leaves a working setup.
+  await ensureDefaultCluster(strategy.id);
+
   return { strategy, primaryIcp };
 }
 
@@ -669,6 +717,182 @@ export async function updateIcp(
     .from("icps")
     .update({ label: data.label, profile: data.profile })
     .eq("id", icpId);
+  if (error) throw error;
+}
+
+/** Replaces the brand's guidelines. Caller stamps approved_at on explicit save. */
+export async function updateBrandGuidelines(
+  brandId: string,
+  guidelines: BrandGuidelines,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brands")
+    .update({ guidelines })
+    .eq("id", brandId);
+  if (error) throw error;
+}
+
+// ── Products (the offers behind topics.maps_to_product) ───────────────────────
+
+/**
+ * True when a query failed because the table doesn't exist yet (migration not
+ * applied). PGRST205 is PostgREST's "table not in schema cache"; 42P01 is
+ * Postgres "undefined_table".
+ */
+function isMissingTableError(err: { code?: string; message?: string }): boolean {
+  return (
+    err.code === "PGRST205" ||
+    err.code === "42P01" ||
+    (err.message ?? "").includes("schema cache")
+  );
+}
+
+/**
+ * All products for a brand, alphabetical by name. Returns [] (with a warning)
+ * when the products table doesn't exist yet so Settings keeps working
+ * pre-migration.
+ */
+export async function listProducts(brandId: string): Promise<Product[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("products")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("name", { ascending: true });
+  if (error && isMissingTableError(error)) {
+    console.warn(
+      "[queries] products table missing, apply db/migrations/002 to enable products",
+    );
+    return [];
+  }
+  if (error) throw error;
+  return (data ?? []) as Product[];
+}
+
+/** Creates or updates a product by (brand_id, slug). */
+export async function upsertProduct(
+  brandId: string,
+  product: {
+    slug: string;
+    name: string;
+    description: string | null;
+    deliverables: string[];
+    price_point: string | null;
+    url: string | null;
+  },
+): Promise<Product> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("products")
+    .upsert(
+      { brand_id: brandId, ...product },
+      { onConflict: "brand_id,slug" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Product;
+}
+
+/** Hard-deletes a product. Topics keep their slug; the prompt just loses detail. */
+export async function deleteProduct(productId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("products").delete().eq("id", productId);
+  if (error) throw error;
+}
+
+/**
+ * First cluster under the brand's strategy, the home for topics created from
+ * the campaign chat (which has no cluster concept). Null when no clusters exist.
+ */
+export async function getDefaultClusterId(
+  strategyId: string,
+): Promise<string | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("clusters")
+    .select("id, pillars!inner(strategy_id)")
+    .eq("pillars.strategy_id", strategyId)
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0]?.id as string | undefined) ?? null;
+}
+
+/**
+ * Guarantees a cluster exists to attach topics to, creating a starter
+ * pillar + cluster when the strategy has none (a fresh, unseeded brand).
+ * Without this, every topic-creation path dead-ends for new users.
+ */
+export async function ensureDefaultCluster(strategyId: string): Promise<string> {
+  const existing = await getDefaultClusterId(strategyId);
+  if (existing) return existing;
+
+  const db = getAdminClient();
+  const { data: pillar, error: pillarErr } = await db
+    .from("pillars")
+    .insert({
+      strategy_id: strategyId,
+      name: "Core content",
+      description:
+        "Starter pillar created automatically. Rename or reorganize it as the content plan grows.",
+      primary_funnel_stage: "awareness",
+    })
+    .select("id")
+    .single();
+  if (pillarErr) throw pillarErr;
+
+  const { data: cluster, error: clusterErr } = await db
+    .from("clusters")
+    .insert({ pillar_id: pillar.id, hub_title: "Starter ideas" })
+    .select("id")
+    .single();
+  if (clusterErr) throw clusterErr;
+  return cluster.id as string;
+}
+
+// ── Campaigns (the strategic interview that briefs generation) ────────────────
+
+/** Creates an empty campaign in `briefing` for the brand. */
+export async function createCampaign(brandId: string): Promise<Campaign> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("campaigns")
+    .insert({ brand_id: brandId })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Campaign;
+}
+
+export async function getCampaign(
+  campaignId: string,
+): Promise<Campaign | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("campaigns")
+    .select("*")
+    .eq("id", campaignId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Campaign) ?? null;
+}
+
+/** Patches a campaign (brief, topic, transcript, status) and bumps updated_at. */
+export async function updateCampaign(
+  campaignId: string,
+  patch: {
+    brief?: CampaignBrief;
+    topic_id?: string | null;
+    chat_state?: CampaignChatState;
+    status?: CampaignStatus;
+  },
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("campaigns")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", campaignId);
   if (error) throw error;
 }
 

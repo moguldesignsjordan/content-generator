@@ -1,12 +1,14 @@
 import "server-only";
 import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
 import {
+  getCampaign,
   getDraftWithJobContext,
   getLatestDraftVersion,
   getTopicContext,
   persistEmailDraft,
   persistRegeneratedDraft,
   rejectDraftRecord,
+  updateCampaign,
 } from "@/lib/db/queries";
 import {
   EMAIL_TOOL,
@@ -21,6 +23,7 @@ import {
   resolveBrandTokens,
 } from "@/lib/email/templates";
 import type {
+  CampaignBrief,
   EmailCopy,
   EmailDraftContent,
   EmailTemplateId,
@@ -39,23 +42,52 @@ import { MAX_DRAFT_VERSIONS } from "./constants";
  * match the schema, the API route turns these into a visible failure state
  * (Guardrail #5: never swallow errors).
  */
-export async function generateEmailForTopic(topicId: string): Promise<string> {
+export async function generateEmailForTopic(
+  topicId: string,
+  opts: { campaignId?: string } = {},
+): Promise<string> {
   const ctx = await getTopicContext(topicId);
   if (!ctx) throw new Error(`Topic ${topicId} not found`);
 
-  const { system, user } = buildEmailMessages(ctx);
+  const brief = await loadCampaignBrief(opts.campaignId);
+  const tokens = resolveBrandTokens(ctx.brand);
+  const { system, user } = buildEmailMessages(ctx, tokens, { brief });
 
   const parsed = await generateEmailCopy(system, user);
 
-  const { content, copy, templateId } = renderEmailForContext(ctx, parsed);
+  const { content, copy, templateId, designSource } = renderEmailForContext(
+    ctx,
+    parsed,
+  );
 
   const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
   const meta: DraftMeta = {
     ...qaMeta,
     email_template_id: templateId,
     email_copy: copy,
+    email_design_source: designSource,
   };
-  return persistEmailDraft({ ctx, content, meta, seoData });
+  const draftId = await persistEmailDraft({
+    ctx,
+    content,
+    meta,
+    seoData,
+    campaignId: opts.campaignId,
+  });
+
+  if (opts.campaignId) {
+    await updateCampaign(opts.campaignId, { status: "drafted" });
+  }
+  return draftId;
+}
+
+/** Loads a campaign's brief, or null when no campaign is driving this draft. */
+async function loadCampaignBrief(
+  campaignId: string | undefined | null,
+): Promise<CampaignBrief | null> {
+  if (!campaignId) return null;
+  const campaign = await getCampaign(campaignId);
+  return campaign?.brief ?? null;
 }
 
 /**
@@ -69,16 +101,21 @@ async function generateEmailCopy(
   system: string,
   user: string,
 ): Promise<EmailDraftOutput> {
+  // Streamed because copy + a complete designed HTML document + adaptive
+  // thinking share this token budget, and the SDK requires streaming for
+  // requests that could outlive its non-streaming timeout ceiling.
   const call = () =>
-    getAnthropic().messages.create({
-      model: DRAFT_MODEL,
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system,
-      messages: [{ role: "user", content: user }],
-      tools: [EMAIL_TOOL],
-      tool_choice: { type: "tool", name: "save_email_draft" },
-    });
+    getAnthropic()
+      .messages.stream({
+        model: DRAFT_MODEL,
+        max_tokens: 32000,
+        thinking: { type: "adaptive" },
+        system,
+        messages: [{ role: "user", content: user }],
+        tools: [EMAIL_TOOL],
+        tool_choice: { type: "tool", name: "save_email_draft" },
+      })
+      .finalMessage();
 
   const extract = (resp: Awaited<ReturnType<typeof call>>): EmailDraftOutput => {
     const tu = resp.content.find(
@@ -110,16 +147,22 @@ async function generateEmailCopy(
 }
 
 /**
- * Renders Claude's structured copy into a designed, on-brand HTML email using
- * the template the topic's distribution recipe points at. Em-dashes are
- * stripped from the COPY only (the template HTML is controlled and dash-free).
- * Returns the persisted content shape plus the copy/template so they can be
- * stashed on the draft's meta.
+ * Turns Claude's output into the persisted draft content. The model designs
+ * the full HTML under the email design system prompt; if that HTML fails
+ * validation, the structured copy is rendered through the code template the
+ * topic's distribution recipe points at, so a draft always exists. Em-dashes
+ * are stripped from both paths, and the {$unsubscribe} tag is guaranteed.
  */
 function renderEmailForContext(
   ctx: TopicContext,
   parsed: EmailDraftOutput,
-): { content: EmailDraftContent; copy: EmailCopy; templateId: EmailTemplateId } {
+  templateOverride?: EmailTemplateId,
+): {
+  content: EmailDraftContent;
+  copy: EmailCopy;
+  templateId: EmailTemplateId;
+  designSource: "model" | "template";
+} {
   const copy: EmailCopy = {
     subject: stripEmDashes(parsed.subject.trim()),
     preheader: stripEmDashes(parsed.preheader.trim()),
@@ -132,15 +175,49 @@ function renderEmailForContext(
     cta_url: parsed.cta_url?.trim() || undefined,
   };
 
-  const templateId = resolveEmailTemplateId(ctx.topic);
+  const templateId = templateOverride ?? resolveEmailTemplateId(ctx.topic);
   const tokens = resolveBrandTokens(ctx.brand);
-  const html = ensureUnsubscribeTag(renderEmailTemplate(templateId, { copy, tokens }));
+
+  const modelHtml = validateModelEmailHtml(parsed.html);
+  let designSource: "model" | "template";
+  let html: string;
+  if (modelHtml) {
+    designSource = "model";
+    html = modelHtml;
+  } else {
+    console.warn(
+      "[generate] model HTML failed validation; falling back to code template",
+      templateId,
+    );
+    designSource = "template";
+    html = renderEmailTemplate(templateId, { copy, tokens });
+  }
+  html = ensureUnsubscribeTag(stripEmDashes(html));
 
   return {
     content: { subject: copy.subject, preheader: copy.preheader, html },
     copy,
     templateId,
+    designSource,
   };
+}
+
+/**
+ * Validates model-designed email HTML before it can be persisted: must be a
+ * complete document and must not smuggle in script. Returns the trimmed HTML
+ * or null (null → the caller falls back to the code template). Kept strict
+ * and code-level, never trust the model for safety guarantees.
+ */
+function validateModelEmailHtml(html: string | undefined): string | null {
+  if (!html) return null;
+  const h = html.trim();
+  if (h.length < 500) return null; // a real designed email is never this small
+  if (!/<html[\s>]/i.test(h)) return null;
+  if (!/<\/html>\s*$/i.test(h)) return null;
+  if (!/<body[\s>]/i.test(h)) return null;
+  if (/<script[\s>]/i.test(h) || /javascript:/i.test(h)) return null;
+  if (/<link[\s>]/i.test(h) || /<iframe[\s>]/i.test(h)) return null;
+  return h;
 }
 
 export { MAX_DRAFT_VERSIONS } from "./constants";
@@ -203,6 +280,7 @@ async function runQaPass(
 export async function regenerateEmailDraft(
   draftId: string,
   feedback: string,
+  opts: { templateOverride?: EmailTemplateId } = {},
 ): Promise<{ newDraftId: string } | { capped: true }> {
   const draftCtx = await getDraftWithJobContext(draftId);
   if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
@@ -216,21 +294,32 @@ export async function regenerateEmailDraft(
   const ctx = await getTopicContext(draftCtx.topicId);
   if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
 
-  const { system, user } = buildEmailMessages(ctx, {
-    feedback,
-    previousSubject: draftCtx.content.subject,
-    previousPreheader: draftCtx.content.preheader,
+  const brief = await loadCampaignBrief(draftCtx.campaignId);
+  const tokens = resolveBrandTokens(ctx.brand);
+  const { system, user } = buildEmailMessages(ctx, tokens, {
+    brief,
+    templateOverride: opts.templateOverride,
+    rejection: {
+      feedback,
+      previousSubject: draftCtx.content.subject,
+      previousPreheader: draftCtx.content.preheader,
+    },
   });
 
   const parsed = await generateEmailCopy(system, user);
 
-  const { content, copy, templateId } = renderEmailForContext(ctx, parsed);
+  const { content, copy, templateId, designSource } = renderEmailForContext(
+    ctx,
+    parsed,
+    opts.templateOverride,
+  );
 
   const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
   const meta: DraftMeta = {
     ...qaMeta,
     email_template_id: templateId,
     email_copy: copy,
+    email_design_source: designSource,
   };
 
   const newDraftId = await persistRegeneratedDraft({

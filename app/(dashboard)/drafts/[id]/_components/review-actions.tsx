@@ -8,11 +8,17 @@ import {
   Card,
   Field,
   Input,
+  SegmentedControl,
   Sheet,
   Textarea,
 } from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
-import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
+import type {
+  DraftMeta,
+  DraftSeoData,
+  EmailDraftContent,
+  EmailTemplateId,
+} from "@/lib/db/types";
 
 interface ReviewActionsProps {
   draftId: string;
@@ -21,6 +27,13 @@ interface ReviewActionsProps {
   initialMeta: DraftMeta;
   seoData: DraftSeoData;
 }
+
+const LAYOUT_OPTIONS: { value: EmailTemplateId | "auto"; label: string }[] = [
+  { value: "auto", label: "Keep layout" },
+  { value: "newsletter_tip", label: "Quick tip" },
+  { value: "newsletter_feature", label: "Feature" },
+  { value: "newsletter_howto", label: "Step-by-step" },
+];
 
 export function ReviewActions({
   draftId,
@@ -41,8 +54,19 @@ export function ReviewActions({
 
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
+  const [layout, setLayout] = useState<EmailTemplateId | "auto">("auto");
+  const [loading, setLoading] = useState<"approve" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Regeneration runs in the background: the reject sheet closes the instant
+  // you submit, so you're never stuck watching a spinner. This page keeps a
+  // "new version ready" banner for whenever the response comes back; if you
+  // navigate away before then, the draft still lands, it'll just be waiting
+  // for you next time you open this topic or check Emails.
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const [newDraftId, setNewDraftId] = useState<string | null>(null);
+  const [rejectedThisDraft, setRejectedThisDraft] = useState(false);
 
   const isEdited =
     subject !== initialContent.subject ||
@@ -80,39 +104,55 @@ export function ReviewActions({
     }
   }
 
-  async function handleReject() {
+  function handleReject() {
     if (!feedback.trim()) return;
-    setLoading("reject");
-    setError(null);
-    try {
-      const res = await fetch(`/api/drafts/${draftId}/reject`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feedback }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to regenerate.");
+    // Close the sheet and clear its state immediately, before the request
+    // even resolves, so you're never trapped watching a spinner in a modal.
+    // The regeneration keeps running server-side; this page just shows a
+    // small non-blocking status you can ignore, watch, or navigate away from.
+    const sentFeedback = feedback;
+    const sentLayout = layout;
+    setShowReject(false);
+    setFeedback("");
+    setLayout("auto");
+    setRejectedThisDraft(true);
+    setRegenerating(true);
+    setRegenError(null);
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            feedback: sentFeedback,
+            templateOverride: sentLayout === "auto" ? undefined : sentLayout,
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Failed to regenerate.");
+        }
+        const data = (await res.json()) as {
+          newDraftId?: string;
+          capped?: boolean;
+        };
+        if (data.capped) {
+          setRegenError(
+            `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Edit the draft manually or start fresh.`,
+          );
+          return;
+        }
+        if (data.newDraftId) setNewDraftId(data.newDraftId);
+      } catch (e) {
+        setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
+      } finally {
+        setRegenerating(false);
       }
-      const data = (await res.json()) as {
-        newDraftId?: string;
-        capped?: boolean;
-      };
-      if (data.capped) {
-        setError(
-          `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Edit the draft manually or start fresh.`,
-        );
-        setLoading(null);
-        return;
-      }
-      router.push(`/drafts/${data.newDraftId}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to regenerate.");
-      setLoading(null);
-    }
+    })();
   }
 
-  const busy = loading !== null;
+  const busy = loading !== null || regenerating;
 
   return (
     <div className="space-y-5">
@@ -219,13 +259,43 @@ export function ReviewActions({
         )}
       </Card>
 
+      {/* Background regeneration status: never blocks the page, closes the
+          moment you submit feedback. Leave, keep reviewing, whatever, it
+          finishes on its own and shows up here (or in Emails) when ready. */}
+      {(regenerating || newDraftId || regenError) && (
+        <Card className="flex items-center justify-between gap-3 p-4">
+          {regenerating && (
+            <p className="flex items-center gap-2.5 text-sm text-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              Writing and designing the new version in the background, feel
+              free to leave this page. Usually about a minute.
+            </p>
+          )}
+          {!regenerating && newDraftId && (
+            <>
+              <p className="text-sm text-foreground">New version ready.</p>
+              <Button
+                size="sm"
+                variant="gradient"
+                onClick={() => router.push(`/drafts/${newDraftId}`)}
+              >
+                View new version
+              </Button>
+            </>
+          )}
+          {!regenerating && regenError && (
+            <p className="text-sm text-danger">{regenError}</p>
+          )}
+        </Card>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="gradient"
           size="lg"
           loading={loading === "approve"}
-          disabled={busy}
+          disabled={busy || rejectedThisDraft}
           onClick={handleApprove}
         >
           {loading === "approve"
@@ -237,7 +307,7 @@ export function ReviewActions({
         <Button
           variant="outline"
           size="lg"
-          disabled={busy}
+          disabled={busy || rejectedThisDraft || atCap}
           onClick={() => setShowReject(true)}
         >
           Reject
@@ -250,28 +320,30 @@ export function ReviewActions({
         </p>
       )}
 
-      {/* Reject sheet */}
+      {/* Reject sheet: closes instantly on submit, regeneration continues
+          in the background (see the status card above). */}
       <Sheet
         open={showReject}
         onClose={() => {
           setShowReject(false);
           setFeedback("");
+          setLayout("auto");
         }}
         title="Reject & regenerate"
         description={
           atCap
             ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
-            : `Version ${version}. Your feedback shapes the next draft.`
+            : `Version ${version}. Your feedback shapes the next draft, content or design.`
         }
         footer={
           <div className="flex gap-2">
             <Button
               variant="subtle"
               className="flex-1"
-              disabled={busy}
               onClick={() => {
                 setShowReject(false);
                 setFeedback("");
+                setLayout("auto");
               }}
             >
               Cancel
@@ -279,25 +351,32 @@ export function ReviewActions({
             <Button
               variant="solid"
               className="flex-1"
-              loading={loading === "reject"}
-              disabled={busy || !feedback.trim() || atCap}
+              disabled={!feedback.trim() || atCap}
               onClick={handleReject}
             >
-              {loading === "reject" ? "Regenerating…" : "Reject & regenerate"}
+              Reject & regenerate
             </Button>
           </div>
         }
       >
         <Field
           label="What needs to change?"
-          hint="Be specific, this goes into the regeneration prompt."
+          hint="Content or design, both work: tighten the copy, use bolder colors, more whitespace, a different tone, whatever you want different."
         >
           <Textarea
             rows={5}
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. Lead with the pain point, tighten the CTA, drop the second section."
-            disabled={atCap || busy}
+            placeholder="e.g. Lead with the pain point and tighten the CTA. Or: make it feel bolder, bigger headline, more whitespace, less text."
+            disabled={atCap}
+          />
+        </Field>
+        <Field label="Layout" hint="Leave on Keep layout unless you want a different shape.">
+          <SegmentedControl
+            value={layout}
+            onChange={setLayout}
+            options={LAYOUT_OPTIONS}
+            className="w-full [&>button]:flex-1"
           />
         </Field>
         {atCap && (

@@ -112,13 +112,18 @@ export function Chat({ brandId, initialMessages, alreadyComplete }: ChatProps) {
       {/* Composer */}
       <div className="border-t border-border p-3">
         {isComplete ? (
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[14px] text-muted">
-              All set, your brand profile is ready.
+              Your brand profile is ready. Let&apos;s put it to work.
             </p>
-            <LinkButton href="/" variant="gradient" size="sm">
-              Finish → Dashboard
-            </LinkButton>
+            <div className="flex items-center gap-3">
+              <LinkButton href="/" variant="subtle" size="sm">
+                Dashboard
+              </LinkButton>
+              <LinkButton href="/campaigns/new" variant="gradient" size="sm">
+                Generate your first email
+              </LinkButton>
+            </div>
           </div>
         ) : (
           <div className="flex items-end gap-2">

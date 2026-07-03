@@ -21,6 +21,8 @@
   drop table if exists approvals       cascade;
   drop table if exists drafts          cascade;
   drop table if exists content_jobs    cascade;
+  drop table if exists campaigns       cascade;
+  drop table if exists products        cascade;
   drop table if exists topics          cascade;
   drop table if exists clusters        cascade;
   drop table if exists pillars         cascade;
@@ -37,6 +39,7 @@
     visual_identity    jsonb not null default '{}'::jsonb,  -- logo_url, colors, fonts, footer → email template tokens
     positioning        jsonb not null default '{}'::jsonb,  -- business_description, tagline, differentiators, competitors → prompt context
     onboarding_state   jsonb not null default '{}'::jsonb,  -- { messages: [{role,content}], completed } for chat onboarding
+    guidelines         jsonb not null default '{}'::jsonb,  -- synthesized brand guidelines (human-approved), see 002 migration
     sanity_config      jsonb not null default '{}'::jsonb,  -- project_id, dataset, doc_type, author_ref
     mailerlite_config  jsonb not null default '{}'::jsonb,  -- sender_name, sender_email, group_ids
     seo_defaults       jsonb not null default '{}'::jsonb,  -- geography, language, keyword_difficulty_max
@@ -107,12 +110,43 @@
     created_at            timestamptz not null default now()
   );
 
+  -- Real product/service data behind topics.maps_to_product slugs, so the
+  -- generation prompt pitches an actual offer (name, deliverables, price).
+  create table products (
+    id           uuid primary key default gen_random_uuid(),
+    brand_id     uuid not null references brands(id) on delete cascade,
+    slug         text not null,
+    name         text not null,
+    description  text,
+    deliverables jsonb not null default '[]'::jsonb,  -- string[]
+    price_point  text,
+    url          text,
+    created_at   timestamptz not null default now(),
+    unique (brand_id, slug)
+  );
+
+  -- A campaign: one strategic interview (chat) that produces a brief, picks or
+  -- creates a topic, and drives generation. chat_state mirrors
+  -- brands.onboarding_state ({ messages }) for resume.
+  create table campaigns (
+    id          uuid primary key default gen_random_uuid(),
+    brand_id    uuid not null references brands(id) on delete cascade,
+    topic_id    uuid references topics(id) on delete set null,
+    brief       jsonb not null default '{}'::jsonb,  -- goal, audience_notes, key_message, offer_slug, angle, constraints
+    chat_state  jsonb not null default '{}'::jsonb,  -- { messages: [{role,content}] }
+    status      text not null default 'briefing'
+      check (status in ('briefing', 'generating', 'drafted', 'done')),
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now()
+  );
+
   -- ── Production pipeline (jobs → drafts → approvals → publications → metrics) ──
 
   create table content_jobs (
     id             uuid primary key default gen_random_uuid(),
     brand_id       uuid not null references brands(id) on delete cascade,
     topic_id       uuid references topics(id) on delete set null,
+    campaign_id    uuid references campaigns(id) on delete set null,
     type           text not null check (type in ('email', 'blog')),
     status         text not null default 'pending'
       check (status in ('pending', 'generating', 'in_review', 'published', 'failed')),
@@ -171,4 +205,7 @@
   create index idx_icps_strategy    on icps(strategy_id);
   create index idx_jobs_brand       on content_jobs(brand_id);
   create index idx_jobs_topic       on content_jobs(topic_id);
+  create index idx_jobs_campaign    on content_jobs(campaign_id);
   create index idx_drafts_job       on drafts(job_id);
+  create index idx_products_brand   on products(brand_id);
+  create index idx_campaigns_brand  on campaigns(brand_id);

@@ -135,6 +135,58 @@ const BRAND = {
   },
 };
 
+// ── Products (the offers topics map to via maps_to_product) ─────────────────
+// DRAFT copy for Jordan to correct in Settings → Products & services. The
+// generation prompt reads these so emails pitch a real offer, not a slug.
+
+const PRODUCTS = [
+  {
+    slug: "brand-strategy-service",
+    name: "Brand Strategy Sprint",
+    description:
+      "A focused engagement that nails positioning, messaging, and audience " +
+      "before any design work: what the brand stands for, who it serves, and " +
+      "why it wins. (Draft copy: edit with real scope and pricing.)",
+    deliverables: [
+      "Positioning statement and messaging framework",
+      "Audience and competitor analysis",
+      "Brand voice and tone guide",
+    ],
+    price_point: "Starting around $X,XXX (draft: set real pricing)",
+    url: "https://moguldesignagency.com",
+  },
+  {
+    slug: "brand-identity-service",
+    name: "Brand Identity System",
+    description:
+      "A complete, ship-ready visual identity: logo, color, typography, and " +
+      "the guidelines that keep it consistent everywhere it shows up. " +
+      "(Draft copy: edit with real scope and pricing.)",
+    deliverables: [
+      "Logo suite and usage rules",
+      "Color and typography system",
+      "Brand guidelines document",
+    ],
+    price_point: "Starting around $X,XXX (draft: set real pricing)",
+    url: "https://moguldesignagency.com",
+  },
+  {
+    slug: "rebrand-service",
+    name: "Full Rebrand",
+    description:
+      "Strategy plus identity for brands that have outgrown their look: " +
+      "repositioning, a new visual system, and a rollout plan that doesn't " +
+      "break momentum. (Draft copy: edit with real scope and pricing.)",
+    deliverables: [
+      "Repositioning and messaging",
+      "New visual identity system",
+      "Rollout and migration plan",
+    ],
+    price_point: "Starting around $XX,XXX (draft: set real pricing)",
+    url: "https://moguldesignagency.com",
+  },
+];
+
 const FUNNEL_DEFINITION = {
   awareness: { cta_type: "newsletter_signup" },
   consideration: { cta_type: "portfolio" },
@@ -453,6 +505,24 @@ async function main() {
     .single();
   if (brandErr) throw brandErr;
 
+  // products (brand delete above cascaded any prior rows, so plain insert).
+  // Warn-and-skip when the table doesn't exist yet (migration 002 not applied)
+  // so the rest of the seed still lands.
+  const { error: productErr } = await db.from("products").insert(
+    PRODUCTS.map((p) => ({ brand_id: brand.id, ...p })),
+  );
+  if (productErr) {
+    const missingTable =
+      productErr.code === "PGRST205" ||
+      productErr.code === "42P01" ||
+      productErr.message?.includes("schema cache");
+    if (!missingTable) throw productErr;
+    console.warn(
+      "⚠ products table missing, apply db/migrations/002_campaigns_products_guidelines.sql " +
+        "in the Supabase SQL editor, then re-run `npm run seed`.",
+    );
+  }
+
   // strategy
   const { data: strategy, error: stratErr } = await db
     .from("strategies")
@@ -532,8 +602,8 @@ async function main() {
   }
 
   console.log(
-    `✓ Seeded ${BRAND.name}: ${ICPS.length} ICPs, ${PILLARS.length} pillars, ` +
-      `${CLUSTERS.length} clusters, ${topicCount} topics.`,
+    `✓ Seeded ${BRAND.name}: ${PRODUCTS.length} products, ${ICPS.length} ICPs, ` +
+      `${PILLARS.length} pillars, ${CLUSTERS.length} clusters, ${topicCount} topics.`,
   );
 }
 

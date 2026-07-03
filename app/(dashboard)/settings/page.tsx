@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandWithIcps } from "@/lib/db/queries";
+import { getBrandWithIcps, listProducts } from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { SettingsClient } from "./_components/settings-client";
@@ -50,6 +50,7 @@ export default async function SettingsPage() {
 
   const { brand, strategy, icps } = data;
   const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
+  const products = await listProducts(brand.id);
 
   return (
     <>
@@ -61,6 +62,7 @@ export default async function SettingsPage() {
         brand={brand}
         strategy={strategy}
         primaryIcp={primaryIcp}
+        products={products}
       />
     </>
   );

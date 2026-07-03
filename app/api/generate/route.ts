@@ -20,9 +20,11 @@ export async function POST(request: Request) {
   }
 
   let topicId: string | undefined;
+  let campaignId: string | undefined;
   try {
     const body = await request.json();
     topicId = body?.topicId;
+    campaignId = body?.campaignId || undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -31,8 +33,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    console.log("[generate] start topicId:", topicId);
-    const draftId = await generateEmailForTopic(topicId);
+    console.log("[generate] start topicId:", topicId, "campaignId:", campaignId);
+    const draftId = await generateEmailForTopic(topicId, { campaignId });
     console.log("[generate] success topicId:", topicId, "draftId:", draftId);
     return NextResponse.json({ draftId });
   } catch (err) {
