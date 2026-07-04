@@ -210,6 +210,26 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
   byte-identical back on the pre-edit original. New query:
   `updateDraftContent()` in `lib/db/queries.ts` now optionally writes
   `meta` atomically alongside `content`.
+- **Adjust-style rebuilt as find/replace patches on FAST_MODEL, same day:**
+  the model used to echo back the ENTIRE HTML document on every single-word
+  tweak. Rebuilt `prompts/adjust-email-style.ts`/`lib/pipeline/adjust-style.ts`
+  around a `save_style_patch` tool (`edits: {find, replace, replace_all?}[]`)
+  where the model outputs only the small exact-match snippet(s) that change;
+  `find` must literally exist in the current HTML (verbatim, checked in code)
+  or the edit fails closed rather than guessing, which is also a safety
+  property: the model is mechanically unable to touch anything outside the
+  span it names. Live A/B measured on a real draft: **54.3s / 4,687 output
+  tokens (old, full-doc, Sonnet) → 2.7s / 113 tokens (new, patch, Sonnet)**,
+  roughly 20x faster. Switched the model to `FAST_MODEL` (Haiku): verified
+  it correctly handles the exact case that broke this feature (header BAR
+  vs header TEXT gradient, including the real `background-clip:text`
+  technique with an honest client-support caveat). One real finding from
+  testing: an exact-match `find` can occasionally miss on Haiku sampling
+  variance alone (rare, confirmed live), so `adjustEmailStyle` now retries
+  once on Haiku, then falls back to `DRAFT_MODEL` (Sonnet) once, before
+  ever surfacing an error, absorbed transparently, verified across 3
+  repeated full test cycles (6/6 edits succeeded, every undo round-trip
+  landed byte-identical).
 
 ## What's not built yet
 
