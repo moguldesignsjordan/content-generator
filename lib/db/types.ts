@@ -232,8 +232,10 @@ export interface BrandImportProposal {
   products?: ProposedProduct[];
   visual_identity?: VisualIdentity; // logo_url already mirrored to storage
   audience_summary?: string;
-  source_url: string;
-  pages_scraped: string[];
+  // Present for website-derived proposals; absent for from-scratch generation
+  // (e.g. the brand-identity generator, which has no pages to cite).
+  source_url?: string;
+  pages_scraped?: string[];
 }
 
 // ── Campaigns: one strategic interview that briefs a piece of content ───────

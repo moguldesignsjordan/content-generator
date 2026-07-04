@@ -134,6 +134,40 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
     notification, they'd discover it via the Emails tab. A real background
     job queue / global toast system would close that gap; out of scope for
     this pass.
+- **Brand identity generator (2026-07-03):** brands with no website to
+  import from used to leave `visual_identity` empty (silent fallback to
+  generic navy/blue email defaults). `FAST_MODEL` (`claude-haiku-4-5`,
+  `lib/clients/anthropic.ts`) + one forced tool call (`prompts/brand-identity.ts`,
+  `app/api/settings/brand-identity/route.ts`) now generates a color palette +
+  a font pairing chosen from a curated, email-safe list (`FONT_PAIRINGS`, no
+  invented font stacks). ~1.8k input / ~250 output tokens per call, verified
+  live. Two contrast safety nets in the route: text/background must clear
+  WCAG AA (4.5), and the accent (white CTA-button text on it) is
+  programmatically darkened until it clears AA-large (3.0), since a
+  from-scratch palette has nothing to validate against upfront the way
+  website-import candidates do. No logo image generation (explicit scope
+  decision): the email design system already renders a styled text wordmark
+  when `logo_url` is empty. Wired into Settings ("Generate brand identity",
+  next to "Import from website") and into onboarding automatically when no
+  website is given, reusing the same `ImportReview` component (only the
+  visual identity section populates). `BrandImportProposal.source_url` /
+  `pages_scraped` are now optional to support this non-scraped case.
+  **Scrape-grounded fallback added same day:** the generator logic moved to
+  a shared `lib/pipeline/brand-identity.ts` (`generateBrandIdentity()`) used
+  by both the standalone route and `app/api/settings/import-website/route.ts`.
+  When a website scrape succeeds but its CSS yields NO usable colors (a real
+  failure mode: oklch()-only sites like the 37signals family), the import
+  route now calls the identity generator grounded in that scrape's own
+  signals (`scrape.signals.color_candidates`/`font_candidates`/`site_name`/
+  `meta_description`, plus the voice/positioning just extracted from the
+  same pages) instead of leaving `visual_identity` empty.
+  `buildBrandIdentityMessages` (`prompts/brand-identity.ts`) instructs the
+  model to prefer real site colors/fonts for whichever roles they plausibly
+  fill, inventing complementary colors only for the rest; verified live
+  against 37signals.com (0 color candidates, 3 font candidates) that the
+  grounded reasoning explicitly references the site's real font ("Lab
+  Grotesque's geometric roots") versus a materially different blind result.
+  Both contrast safety nets still apply regardless of grounding.
 
 ## What's not built yet
 

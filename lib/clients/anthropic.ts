@@ -16,6 +16,13 @@ const apiKey = process.env.ANTHROPIC_API_KEY;
 /** Model used for generating email/blog drafts. */
 export const DRAFT_MODEL = "claude-sonnet-4-6";
 
+/**
+ * Cheapest/fastest tier, for small structured-output calls where quality
+ * needn't scale with cost: picking from a curated list, short classification,
+ * a brand-identity palette. Don't use for anything drafting reader-facing copy.
+ */
+export const FAST_MODEL = "claude-haiku-4-5-20251001";
+
 export function isAnthropicConfigured(): boolean {
   return Boolean(apiKey);
 }

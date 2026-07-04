@@ -9,6 +9,7 @@ import { getBrandWithIcps } from "@/lib/db/queries";
 import type { BrandImportProposal, ProposedProduct } from "@/lib/db/types";
 import { ScrapeError, scrapeSite } from "@/lib/scrape";
 import { mirrorLogoToStorage } from "@/lib/scrape/logo";
+import { generateBrandIdentity } from "@/lib/pipeline/brand-identity";
 import {
   IMPORT_TOOL,
   buildImportMessages,
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
     }
 
     const email = clean(raw.contact_email);
-    const colors = {
+    let colors = {
       primary: color(raw.color_primary),
       secondary: color(raw.color_secondary),
       accent: color(raw.color_accent),
@@ -141,9 +142,9 @@ export async function POST(req: NextRequest) {
       text: color(raw.color_text),
       muted: color(raw.color_muted),
     };
-    const hasColors = Object.values(colors).some(Boolean);
-    const fonts = { heading: font(raw.font_heading), body: font(raw.font_body) };
-    const hasFonts = Object.values(fonts).some(Boolean);
+    let hasColors = Object.values(colors).some(Boolean);
+    let fonts = { heading: font(raw.font_heading), body: font(raw.font_body) };
+    let hasFonts = Object.values(fonts).some(Boolean);
     const social = {
       linkedin: clean(raw.social_linkedin),
       twitter: clean(raw.social_twitter),
@@ -161,6 +162,36 @@ export async function POST(req: NextRequest) {
     const tagline = clean(raw.tagline);
     const differentiators = cleanList(raw.differentiators);
     const competitors = cleanList(raw.competitors);
+
+    // The site's own CSS didn't yield usable colors (a real failure mode,
+    // e.g. oklch()-only sites), but we still have real context from this
+    // same scrape: whatever color/font candidates WERE found, the site's
+    // meta description, and the voice/positioning just extracted above.
+    // Ground a generated palette in that instead of leaving visual_identity
+    // empty and falling back to generic defaults in every email.
+    if (!hasColors) {
+      try {
+        const generated = await generateBrandIdentity({
+          brandName: data.brand.name,
+          positioning: { business_description: businessDescription, tagline },
+          voiceProfile: { voice, tone },
+          colorCandidates: scrape.signals.color_candidates,
+          fontCandidates: scrape.signals.font_candidates,
+          siteName: scrape.signals.site_name,
+          metaDescription: scrape.signals.meta_description,
+        });
+        if (generated) {
+          colors = generated.colors as typeof colors;
+          hasColors = true;
+          if (!hasFonts) {
+            fonts = generated.fonts as typeof fonts;
+            hasFonts = true;
+          }
+        }
+      } catch (err) {
+        console.warn("[import-website] identity fallback failed:", err);
+      }
+    }
 
     const proposal: BrandImportProposal = {
       ...(voice || tone || exampleLines || bannedTerms

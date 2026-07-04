@@ -7,16 +7,21 @@ import type { BrandImportProposal } from "@/lib/db/types";
 import { ImportReview } from "../../_components/import-review";
 
 /**
- * First-run: no brand exists yet. Create one (name + optional website). When
- * a website is given, the importer pre-fills the brand brain and the user
- * reviews the proposal before the onboarding chat starts; the chat's system
- * prompt already carries the current profile, so it only asks about gaps.
+ * First-run: no brand exists yet. Create one (name + optional website). With
+ * a website, the importer pre-fills the brand brain from the real site. With
+ * no website, a cheap brand-identity generation step still gets the brand a
+ * real color palette and font pairing instead of leaving visual_identity
+ * empty (silently falling back to generic defaults in every email). Either
+ * way the user reviews the proposal before the onboarding chat starts; the
+ * chat's system prompt already carries the current profile, so it only asks
+ * about gaps.
  */
 export function CreateBrandForm() {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [generatingIdentity, setGeneratingIdentity] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [review, setReview] = useState<{
@@ -64,6 +69,24 @@ export function CreateBrandForm() {
         } finally {
           setImporting(false);
         }
+      } else if (data.id) {
+        // No website: still get a real palette instead of generic defaults.
+        // Cheap and fast (FAST_MODEL, no thinking), so worth doing inline.
+        setSaving(false);
+        setGeneratingIdentity(true);
+        try {
+          const gen = await fetch("/api/settings/brand-identity", { method: "POST" });
+          const genData = (await gen.json()) as { proposal?: BrandImportProposal };
+          if (gen.ok && genData.proposal) {
+            setReview({ brandId: data.id, proposal: genData.proposal });
+            return;
+          }
+        } catch {
+          // Silent: this is a nice-to-have for a brand-new profile, not
+          // worth blocking onboarding over if generation hiccups.
+        } finally {
+          setGeneratingIdentity(false);
+        }
       }
       router.refresh();
     } catch {
@@ -99,6 +122,15 @@ export function CreateBrandForm() {
     );
   }
 
+  if (generatingIdentity) {
+    return (
+      <Card className="flex items-center gap-3 p-6 text-sm text-muted">
+        <AccentSpinner />
+        Picking a starting color palette and font pairing…
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-6">
       <h2 className="font-display text-lg font-semibold">Start your brand profile</h2>
@@ -115,13 +147,16 @@ export function CreateBrandForm() {
             placeholder="e.g. Mogul Design Agency"
           />
         </Field>
-        <Field label="Website (recommended)">
+        <Field
+          label="Website (optional)"
+          hint="With one, we pull your real voice and visuals. Without one, you'll still get a generated starting palette to refine."
+        >
           <Input
             type="text"
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-            placeholder="yourbrand.com — we'll pull your voice, offers, and visuals from it"
+            placeholder="yourbrand.com"
           />
         </Field>
       </div>

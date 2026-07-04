@@ -253,10 +253,12 @@ export function ImportReview({
   return (
     <div className="space-y-4">
       <p className="text-[13px] text-muted">
-        Read {p.pages_scraped.length}{" "}
-        {p.pages_scraped.length === 1 ? "page" : "pages"} from{" "}
-        {p.source_url.replace(/^https?:\/\//, "")}. Review and edit what it
-        found. Nothing is saved until you hit Save.
+        {p.source_url
+          ? `Read ${p.pages_scraped?.length ?? 0} ${
+              (p.pages_scraped?.length ?? 0) === 1 ? "page" : "pages"
+            } from ${p.source_url.replace(/^https?:\/\//, "")}. `
+          : ""}
+        Review and edit what it found. Nothing is saved until you hit Save.
       </p>
 
       {p.voice_profile && (

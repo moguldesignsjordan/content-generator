@@ -7,6 +7,7 @@ import { signOut } from "@/lib/supabase/actions";
 import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
 import { BrandBasicsForm } from "./brand-basics-form";
 import { ImportWebsiteForm } from "./import-website-form";
+import { GenerateIdentityForm } from "./generate-identity-form";
 import { BrandVoiceForm } from "./brand-voice-form";
 import { PositioningForm } from "./positioning-form";
 import { VisualIdentityForm } from "./visual-identity-form";
@@ -17,6 +18,7 @@ import { IcpForm } from "./icp-form";
 
 type SectionKey =
   | "import"
+  | "generateIdentity"
   | "basics"
   | "voice"
   | "positioning"
@@ -47,6 +49,11 @@ export function SettingsClient({
           title="Import from website"
           subtitle="Pull voice, positioning, offers, and visuals from your site"
           onClick={() => setOpen("import")}
+        />
+        <ListRow
+          title="Generate brand identity"
+          subtitle="No website? Get a starting color palette and font pairing"
+          onClick={() => setOpen("generateIdentity")}
         />
         <ListRow
           title="Brand basics"
@@ -130,6 +137,16 @@ export function SettingsClient({
         size="xl"
       >
         <ImportWebsiteForm brand={brand} products={products} />
+      </Sheet>
+
+      <Sheet
+        open={open === "generateIdentity"}
+        onClose={close}
+        title="Generate brand identity"
+        description="A starting palette and font pairing from your name and voice, for brands with no website yet."
+        size="lg"
+      >
+        <GenerateIdentityForm brand={brand} products={products} />
       </Sheet>
 
       <Sheet
