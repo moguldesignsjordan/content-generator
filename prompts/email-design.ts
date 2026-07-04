@@ -80,7 +80,9 @@ export function buildEmailDesignBrief(
       (footer.contact_email ? `, the contact email ${footer.contact_email}` : "") +
       ", and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
     "",
-    "BRAND TOKENS (use these exact values):",
+    "BRAND TOKENS (the default palette; use these exact values UNLESS the",
+    "instruction below explicitly asks for a different color, tone, or look",
+    "for this piece, in which case follow that explicit request instead):",
     `- Primary (headlines, wordmark): ${c.primary}`,
     `- Secondary (lead paragraph): ${c.secondary}`,
     `- Accent (top bar, eyebrow, CTA button, highlights): ${c.accent}`,

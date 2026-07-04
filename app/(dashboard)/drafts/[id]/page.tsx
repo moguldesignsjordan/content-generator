@@ -36,6 +36,7 @@ export default async function DraftReviewPage({
         initialContent={draft.content}
         initialMeta={draft.meta}
         seoData={draft.seo_data}
+        initialArchived={draft.archived}
       />
     </>
   );

@@ -2,8 +2,7 @@ import { isSupabaseConfigured } from "@/lib/db/client";
 import { getBrandStrategy } from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
-import { FunnelBadge } from "../_components/topic-badges";
-import { ClusterCard } from "../_components/cluster-card";
+import { ContentPlan } from "../_components/content-plan";
 import { QuickGenerate } from "../_components/quick-generate";
 import { SuggestTopics } from "../_components/suggest-topics";
 
@@ -52,10 +51,19 @@ export default async function CreatePage() {
   }
 
   const { pillars, latestDraftByTopic } = data;
+  // Archived topics are tucked away: excluded from quick-generate, but the
+  // Content Plan tree itself still renders (with its own "show archived"
+  // toggle) as long as ANY topic exists, archived or not, so archived-only
+  // brands can still reach the toggle to unarchive.
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
-      c.topics.map((t) => ({ id: t.id, title: t.title, pillarName: p.name })),
+      c.topics
+        .filter((t) => !t.archived)
+        .map((t) => ({ id: t.id, title: t.title, pillarName: p.name })),
     ),
+  );
+  const hasAnyTopics = pillars.some((p) =>
+    p.clusters.some((c) => c.topics.length > 0),
   );
 
   const hasTopics = allTopics.length > 0;
@@ -97,33 +105,8 @@ export default async function CreatePage() {
         {hasTopics && <SuggestTopics compact />}
       </div>
 
-      {hasTopics ? (
-        <div className="space-y-9">
-          {pillars.map((pillar) => (
-            <section key={pillar.id}>
-              <div className="mb-3 flex items-center gap-2">
-                <h3 className="font-display text-[16px] font-semibold tracking-tight text-foreground">
-                  {pillar.name}
-                </h3>
-                <FunnelBadge stage={pillar.primary_funnel_stage} />
-              </div>
-              {pillar.description && (
-                <p className="mb-4 max-w-2xl text-[14px] leading-relaxed text-muted">
-                  {pillar.description}
-                </p>
-              )}
-              <div className="space-y-4">
-                {pillar.clusters.map((cluster) => (
-                  <ClusterCard
-                    key={cluster.id}
-                    cluster={cluster}
-                    latestDraftByTopic={latestDraftByTopic}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+      {hasAnyTopics ? (
+        <ContentPlan pillars={pillars} latestDraftByTopic={latestDraftByTopic} />
       ) : (
         <Card className="p-7 text-center">
           <h3 className="font-display text-[16px] font-semibold text-foreground">

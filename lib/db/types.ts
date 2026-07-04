@@ -185,6 +185,7 @@ export interface Topic {
   distribution_recipe: string[];
   status: TopicStatus;
   published_url: string | null;
+  archived: boolean;
   created_at: string;
 }
 
@@ -347,6 +348,7 @@ export interface DraftForReview {
   meta: DraftMeta;
   seo_data: DraftSeoData;
   topic_title: string | null;
+  archived: boolean;
   created_at: string;
 }
 

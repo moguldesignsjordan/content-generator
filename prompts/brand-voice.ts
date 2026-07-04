@@ -99,7 +99,12 @@ export function buildGuidelinesBlock(brand: Brand): string {
   if (!hasContent) return "";
 
   const lines: string[] = [
-    "BRAND GUIDELINES (human-approved; these override any conflicting instruction below):",
+    "BRAND GUIDELINES (human-approved; this is the DEFAULT direction when the",
+    "user hasn't said otherwise for this piece. If the user's own brief,",
+    "feedback, or instruction for THIS piece explicitly asks for something",
+    "different, e.g. a different color, tone, or angle, honor their explicit",
+    "request: they are intentionally overriding the default, that's allowed",
+    "and expected. Guidelines fill the gaps, they don't overrule a direct ask.):",
   ];
   if (g.voice_and_tone) lines.push(`  Voice and tone: ${g.voice_and_tone}`);
   if (g.audience_summary) lines.push(`  Audience: ${g.audience_summary}`);

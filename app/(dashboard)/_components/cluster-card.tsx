@@ -36,15 +36,23 @@ const SELECT_CLS =
 interface ClusterCardProps {
   cluster: ClusterWithTopics;
   latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
+  /** When false (default), archived topics are hidden entirely. */
+  showArchived?: boolean;
 }
 
-export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
+export function ClusterCard({
+  cluster,
+  latestDraftByTopic,
+  showArchived = false,
+}: ClusterCardProps) {
   const router = useRouter();
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState<TopicFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const visibleTopics = cluster.topics.filter((t) => showArchived || !t.archived);
 
   async function handleUpdateTopic(topicId: string) {
     setSaving(true);
@@ -110,6 +118,26 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
     }
   }
 
+  async function handleToggleArchive(topicId: string, archive: boolean) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/topics/${topicId}/archive`, {
+        method: archive ? "POST" : "DELETE",
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? "Failed to update.");
+      }
+      setEditingTopicId(null);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Card className="overflow-hidden">
       {/* Cluster header */}
@@ -126,12 +154,19 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
       </div>
 
       <ul className="divide-y divide-border">
-        {cluster.topics.map((topic) => (
-          <li key={topic.id}>
+        {visibleTopics.map((topic) => (
+          <li key={topic.id} className={topic.archived ? "opacity-60" : undefined}>
             {/* Collapsed row */}
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate text-[15px] text-foreground">{topic.title}</p>
+                <p className="truncate text-[15px] text-foreground">
+                  {topic.title}
+                  {topic.archived && (
+                    <span className="ml-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+                      Archived
+                    </span>
+                  )}
+                </p>
                 {topic.target_keyword && (
                   <p className="mt-0.5 truncate text-[13px] text-muted">
                     <code className="text-foreground/70">
@@ -194,11 +229,18 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
                   >
                     Cancel
                   </Button>
+                  <button
+                    onClick={() => handleToggleArchive(topic.id, !topic.archived)}
+                    disabled={saving}
+                    className="ml-auto text-[13px] text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                  >
+                    {topic.archived ? "Unarchive" : "Archive"}
+                  </button>
                   {topic.status === "idea" && (
                     <button
                       onClick={() => handleDeleteTopic(topic.id)}
                       disabled={saving}
-                      className="ml-auto text-[13px] text-danger transition-colors hover:opacity-80 disabled:opacity-50"
+                      className="text-[13px] text-danger transition-colors hover:opacity-80 disabled:opacity-50"
                     >
                       Delete
                     </button>
@@ -209,7 +251,7 @@ export function ClusterCard({ cluster, latestDraftByTopic }: ClusterCardProps) {
           </li>
         ))}
 
-        {cluster.topics.length === 0 && !showAddForm && (
+        {visibleTopics.length === 0 && !showAddForm && (
           <li className="px-4 py-3 text-sm text-muted">No spoke topics yet.</li>
         )}
 

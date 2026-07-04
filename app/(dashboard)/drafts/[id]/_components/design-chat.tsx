@@ -31,6 +31,7 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
   const [input, setInput] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [redesigning, setRedesigning] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -103,6 +104,49 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
     }
   }
 
+  async function handleRedesign() {
+    if (redesigning || busy) return;
+    // Whatever's typed in the box becomes an explicit creative override for
+    // this redesign (e.g. "make it darker, purple accent instead"); empty
+    // just reapplies the current brand tokens everywhere.
+    const direction = input.trim();
+    setInput("");
+    setRedesigning(true);
+    setEntries((e) => [
+      ...e,
+      {
+        instruction: direction ? `Redesign: ${direction}` : "Redesign using current brand colors",
+        status: "applying",
+      },
+    ]);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/redesign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: direction || undefined }),
+      });
+      const data = (await res.json()) as { html?: string; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Redesign failed.");
+      }
+      onHtmlChange(data.html);
+      setCanUndo(true);
+      setEntries((e) =>
+        e.map((entry, i) => (i === e.length - 1 ? { ...entry, status: "done" } : entry)),
+      );
+    } catch (err) {
+      setEntries((e) =>
+        e.map((entry, i) =>
+          i === e.length - 1
+            ? { ...entry, status: "error", error: err instanceof Error ? err.message : "Failed." }
+            : entry,
+        ),
+      );
+    } finally {
+      setRedesigning(false);
+    }
+  }
+
   async function handleUndo() {
     if (!canUndo || undoing) return;
     setUndoing(true);
@@ -130,16 +174,33 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
 
   return (
     <Card className="space-y-3 p-4">
-      <div>
-        <p className="text-[13.5px] font-medium text-foreground">
-          Adjust the design
-        </p>
-        <p className="text-[12.5px] text-muted">
-          Style only, in plain words. Copy doesn&apos;t change and this
-          doesn&apos;t use a draft version. Be specific about what you mean:
-          &ldquo;the header bar&rdquo; (background) is different from
-          &ldquo;the header text&rdquo; or &ldquo;the headline&rdquo;.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[13.5px] font-medium text-foreground">
+            Adjust the design
+          </p>
+          <p className="text-[12.5px] text-muted">
+            Style only, in plain words. Copy doesn&apos;t change and this
+            doesn&apos;t use a draft version. Be specific about what you mean:
+            &ldquo;the header bar&rdquo; (background) is different from
+            &ldquo;the header text&rdquo; or &ldquo;the headline&rdquo;. If the
+            design has drifted out of sync with your brand colors in several
+            places, Redesign is faster than chasing each one, and if you
+            want it to look different from your saved brand colors just for
+            this one email, type that here first, e.g. &ldquo;darker, purple
+            accent instead&rdquo;, then hit Redesign instead of Apply.
+          </p>
+        </div>
+        <Button
+          variant="subtle"
+          size="sm"
+          loading={redesigning}
+          disabled={busy || redesigning}
+          onClick={handleRedesign}
+          className="shrink-0"
+        >
+          Redesign
+        </Button>
       </div>
 
       {entries.length > 0 && (

@@ -230,6 +230,88 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
   ever surfacing an error, absorbed transparently, verified across 3
   repeated full test cycles (6/6 edits succeeded, every undo round-trip
   landed byte-identical).
+- **Archive for topics and drafts (needs migration 003 applied):** neither
+  had any hide/remove UI before, topics only had a hard-delete restricted to
+  idea-stage (content_jobs.topic_id is ON DELETE SET NULL, so deleting a
+  topic with real generation history would orphan its drafts, hence the
+  restriction). Added a soft `archived` boolean to both tables instead
+  (`db/migrations/003_archive_topics_drafts.sql`, folded into `db/schema.sql`
+  too), always safe regardless of status since it's just a display filter,
+  nothing cascades. `archiveTopic()`/`archiveDraft()` in `lib/db/queries.ts`
+  + `app/api/topics/[id]/archive` and `app/api/drafts/[id]/archive` routes
+  (POST archives, DELETE unarchives). Content Plan (`content-plan.tsx`
+  wrapping `cluster-card.tsx`) gained a "Show archived (N)" toggle and an
+  Archive/Unarchive button on every topic regardless of status; Emails tab
+  gained an "Archived" filter segment (only shown when non-empty); the
+  draft review screen (`review-actions.tsx`) gained its own Archive button.
+  **Jordan must apply migration 003 in the Supabase SQL editor before this
+  works live** — the `archived` column doesn't exist in the live DB yet.
+- **Instant full redesign, same day:** investigated "my background is stuck
+  black and targeted edits don't fix it" — root cause was NOT a bug: the
+  brand's own `visual_identity.colors.background` is genuinely `#000000`,
+  and it (plus several derived near-black shades: `#111111`, `#0d0d0d`,
+  `#1f1f1f` etc.) is baked into MULTIPLE different literal spots across a
+  generated design. A single find/replace patch can only ever fix one
+  literal string at a time, so it could never reach all of them in one
+  instruction. Built a third action alongside Adjust-design (patches) and
+  Reject & regenerate (full copy+design rewrite): **Redesign**
+  (`prompts/redesign-email.ts`, `lib/pipeline/redesign.ts`,
+  `app/api/drafts/[id]/redesign/route.ts`, a button in `design-chat.tsx`)
+  keeps the exact stored copy (`drafts.meta.email_copy`, already saved at
+  generation time) completely fixed as INPUT and asks the model to design a
+  fresh HTML document from scratch under the same design brief + CURRENT
+  brand tokens, so a consistent palette applies everywhere in one shot
+  instead of needing N patches. No thinking, no copywriting (same
+  Haiku-then-Sonnet-escalation reliability pattern as adjust-style), so
+  it's cheap despite regenerating the whole document (~15s live measured).
+  Shares the same `style_edit_history` undo stack as adjust-style (one
+  undo model for all style-only operations). **Verified rigorously, not
+  just assumed:** a naive full-text diff first showed "not identical" but
+  that was the test's own fault, it didn't strip `<style>`/`<script>`
+  block CONTENTS or the hidden preheader's padding filler; after fixing the
+  comparison, every actual sentence of subject/preheader/headline/body/cta
+  matched exactly. Two real findings from testing, both fixed: (1) the
+  eyebrow label and any stat-highlight callouts are NOT part of stored
+  copy, they're decorative flourishes the model invents from context each
+  design pass, so `buildRedesignMessages` now also receives the topic +
+  offer block (`buildOfferBlock`, exported from `prompts/generate-email.ts`)
+  the original generation had, which measurably improved consistency (e.g.
+  eyebrow correctly stayed "Systems & Automations" instead of drifting to
+  an invented "Lead Systems"). (2) Decorative elements not in the stored
+  copy (numbered step badges, a stats bar) may still legitimately differ
+  between any two design passes since they're genuinely re-invented each
+  time, not a guarantee this feature makes or breaks; only the actual
+  written words are guaranteed unchanged.
+- **Runtime error fixed same day:** `listDrafts()`/`getDraftForReview()`
+  hard-selected the new `archived` column by name, so any live DB without
+  migration 003 applied hit Postgres error 42703 (undefined_column) and
+  broke the Emails tab and every draft page outright. Fixed with the same
+  fallback-select pattern already used elsewhere in `lib/db/queries.ts`
+  (`getDraftWithJobContext`'s campaign_id fallback): retry without
+  `archived` on error, default `archived: false`. Verified live against
+  the real (still pre-migration) database. Browsing works regardless of
+  whether migration 003 has been applied; only the archive ACTION itself
+  still needs it.
+- **Override permission for brand guidelines/tokens, same day:** Jordan
+  flagged that `buildGuidelinesBlock()` (`prompts/brand-voice.ts`, injected
+  into email generation, the campaign chat, and topic suggestions) said
+  guidelines "override any conflicting instruction below", a blanket rule
+  with no carve-out for the user's OWN explicit request for this piece.
+  Same issue in `buildEmailDesignBrief()`'s "use these exact values"
+  (`prompts/email-design.ts`). Reworded both: brand guidelines/tokens are
+  now explicitly the DEFAULT when the user hasn't said otherwise, but an
+  explicit user instruction for this piece wins when it conflicts.
+  `prompts/adjust-email-style.ts` got the same explicit permission for
+  named colors. The bigger gap: **Redesign had literally no way to accept
+  creative input at all**, no parameter existed. Added an optional
+  `direction` argument threaded through `buildRedesignMessages` →
+  `redesignEmail()` → the API route → `design-chat.tsx` (whatever's typed
+  in the instruction box when you click Redesign instead of Apply becomes
+  the override; empty just reapplies current brand tokens). Verified live:
+  redesigning with no direction kept the brand's `#000000` background
+  token; redesigning with an explicit "use a deep purple background
+  instead of black, #4C1D95" correctly dropped the token and used exactly
+  that purple.
 
 ## What's not built yet
 

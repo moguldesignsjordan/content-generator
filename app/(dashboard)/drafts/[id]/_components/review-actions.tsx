@@ -27,6 +27,7 @@ interface ReviewActionsProps {
   initialContent: EmailDraftContent;
   initialMeta: DraftMeta;
   seoData: DraftSeoData;
+  initialArchived: boolean;
 }
 
 const LAYOUT_OPTIONS: { value: EmailTemplateId | "auto"; label: string }[] = [
@@ -42,8 +43,11 @@ export function ReviewActions({
   initialContent,
   initialMeta,
   seoData,
+  initialArchived,
 }: ReviewActionsProps) {
   const router = useRouter();
+  const [archived, setArchived] = useState(initialArchived);
+  const [archiving, setArchiving] = useState(false);
 
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
@@ -154,6 +158,23 @@ export function ReviewActions({
   }
 
   const busy = loading !== null || regenerating;
+
+  async function handleToggleArchive() {
+    setArchiving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/archive`, {
+        method: archived ? "DELETE" : "POST",
+      });
+      if (!res.ok) throw new Error();
+      setArchived(!archived);
+      router.refresh();
+    } catch {
+      setError(`Failed to ${archived ? "unarchive" : "archive"}.`);
+    } finally {
+      setArchiving(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -315,6 +336,20 @@ export function ReviewActions({
         >
           Reject
         </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          loading={archiving}
+          disabled={busy}
+          onClick={handleToggleArchive}
+        >
+          {archived ? "Unarchive" : "Archive"}
+        </Button>
+        {archived && (
+          <span className="text-[13px] text-muted">
+            Hidden from the Emails list.
+          </span>
+        )}
       </div>
 
       {error && (

@@ -141,7 +141,7 @@ export function resolveEmailTemplateId(topic: Topic): EmailTemplateId {
 }
 
 /** Builds the offer block from the topic's resolved product row. */
-function buildOfferBlock(ctx: TopicContext): string {
+export function buildOfferBlock(ctx: TopicContext): string {
   const p = ctx.product;
   if (!p) {
     // No product row for the slug: fall back to naming it so the model at

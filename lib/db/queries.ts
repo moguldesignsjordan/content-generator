@@ -404,14 +404,26 @@ export async function getDraftForReview(
 ): Promise<DraftForReview | null> {
   const db = getAdminClient();
 
-  const { data, error } = await db
+  // Falls back to an archived-less select before migration 003 adds the
+  // column, so this doesn't hard-break every draft page in the meantime.
+  let { data, error } = await db
     .from("drafts")
     .select(
-      `id, version, state, content, meta, seo_data, created_at,
+      `id, version, state, content, meta, seo_data, archived, created_at,
        content_jobs!inner ( topics ( title ) )`,
     )
     .eq("id", draftId)
     .maybeSingle();
+  if (error) {
+    ({ data, error } = await db
+      .from("drafts")
+      .select(
+        `id, version, state, content, meta, seo_data, created_at,
+         content_jobs!inner ( topics ( title ) )`,
+      )
+      .eq("id", draftId)
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data) return null;
 
@@ -428,6 +440,7 @@ export async function getDraftForReview(
     meta: (data.meta ?? {}) as DraftMeta,
     seo_data: (data.seo_data ?? {}) as DraftSeoData,
     topic_title: topicTitle,
+    archived: (data.archived as boolean) ?? false,
     created_at: data.created_at,
   };
 }
@@ -582,6 +595,18 @@ export async function updateTopic(
 export async function deleteTopic(topicId: string): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("topics").delete().eq("id", topicId);
+  if (error) throw error;
+}
+
+/**
+ * Archives (or unarchives) a topic: hides it from the default Content Plan
+ * view without touching its data. Safe for any status, unlike hard delete
+ * (idea-only, see app/api/topics/[id]/route.ts) since content_jobs.topic_id
+ * is ON DELETE SET NULL and would orphan real generation history.
+ */
+export async function archiveTopic(topicId: string, archived: boolean): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("topics").update({ archived }).eq("id", topicId);
   if (error) throw error;
 }
 
@@ -924,18 +949,33 @@ export async function listDrafts(): Promise<
     subject: string;
     state: string;
     version: number;
+    archived: boolean;
     created_at: string;
   }>
 > {
   const db = getAdminClient();
-  const { data, error } = await db
+  // Falls back to an archived-less select before migration 003 adds the
+  // column, so the Emails tab doesn't hard-break in the meantime.
+  let data: Record<string, unknown>[] | null;
+  let error: { message: string } | null;
+  ({ data, error } = await db
     .from("drafts")
     .select(
-      `id, version, state, created_at, content,
+      `id, version, state, archived, created_at, content,
        content_jobs!inner ( topics ( title ) )`,
     )
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(100));
+  if (error) {
+    ({ data, error } = await db
+      .from("drafts")
+      .select(
+        `id, version, state, created_at, content,
+         content_jobs!inner ( topics ( title ) )`,
+      )
+      .order("created_at", { ascending: false })
+      .limit(100));
+  }
   if (error) throw error;
 
   return (data ?? []).map((d) => {
@@ -947,11 +987,22 @@ export async function listDrafts(): Promise<
       id: d.id as string,
       version: d.version as number,
       state: d.state as string,
+      archived: (d.archived as boolean) ?? false,
       created_at: d.created_at as string,
       topic_title: job?.topics?.title ?? null,
       subject: content?.subject ?? "",
     };
   });
+}
+
+/**
+ * Archives (or unarchives) a draft: hides it from the default Emails list
+ * without deleting its content or approval history.
+ */
+export async function archiveDraft(draftId: string, archived: boolean): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("drafts").update({ archived }).eq("id", draftId);
+  if (error) throw error;
 }
 
 /** Every topic with its pillar, for the assistant's context and Home stats. */

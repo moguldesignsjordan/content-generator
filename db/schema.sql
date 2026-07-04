@@ -107,6 +107,7 @@
     status                text not null default 'idea'
       check (status in ('idea', 'queued', 'in_progress', 'published')),
     published_url         text,
+    archived              boolean not null default false,  -- hides from the default Content Plan view
     created_at            timestamptz not null default now()
   );
 
@@ -163,6 +164,7 @@
     seo_data   jsonb not null default '{}'::jsonb,  -- qa findings, keyword usage, flags
     state      text not null default 'in_review'
       check (state in ('in_review', 'approved', 'rejected', 'superseded')),
+    archived   boolean not null default false,  -- hides from the default Emails list
     created_at timestamptz not null default now(),
     unique (job_id, version)
   );
@@ -209,3 +211,5 @@
   create index idx_drafts_job       on drafts(job_id);
   create index idx_products_brand   on products(brand_id);
   create index idx_campaigns_brand  on campaigns(brand_id);
+  create index idx_topics_archived  on topics(archived);
+  create index idx_drafts_archived  on drafts(archived);

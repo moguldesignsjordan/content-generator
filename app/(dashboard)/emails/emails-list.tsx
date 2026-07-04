@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Card, ListGroup, ListRow, SegmentedControl } from "@/components/ui";
 import { DraftStateBadge } from "../_components/topic-badges";
 
-type Filter = "all" | "in_review" | "approved";
+type Filter = "all" | "in_review" | "approved" | "archived";
 
 export interface DraftRow {
   id: string;
@@ -12,19 +12,28 @@ export interface DraftRow {
   subject: string;
   state: string;
   version: number;
+  archived: boolean;
   created_at: string;
 }
 
 export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
   const [filter, setFilter] = useState<Filter>("all");
 
+  // Archived drafts are hidden from all/review/approved (tucked away by
+  // design); the Archived tab is the only place they show.
+  const active = drafts.filter((d) => !d.archived);
   const counts = {
-    all: drafts.length,
-    in_review: drafts.filter((d) => d.state === "in_review").length,
-    approved: drafts.filter((d) => d.state === "approved").length,
+    all: active.length,
+    in_review: active.filter((d) => d.state === "in_review").length,
+    approved: active.filter((d) => d.state === "approved").length,
+    archived: drafts.filter((d) => d.archived).length,
   };
   const filtered =
-    filter === "all" ? drafts : drafts.filter((d) => d.state === filter);
+    filter === "archived"
+      ? drafts.filter((d) => d.archived)
+      : filter === "all"
+        ? active
+        : active.filter((d) => d.state === filter);
 
   return (
     <div>
@@ -36,6 +45,9 @@ export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
           { value: "all", label: `All ${counts.all}` },
           { value: "in_review", label: `Review ${counts.in_review}` },
           { value: "approved", label: `Approved ${counts.approved}` },
+          ...(counts.archived > 0
+            ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
+            : []),
         ]}
       />
 
