@@ -168,6 +168,24 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
   grounded reasoning explicitly references the site's real font ("Lab
   Grotesque's geometric roots") versus a materially different blind result.
   Both contrast safety nets still apply regardless of grounding.
+- **Design-adjustment chat (2026-07-03):** on the draft review screen, a
+  small chat-style panel (`design-chat.tsx`) lets you type a free-form style
+  instruction ("change the header to a gradient", "darken the background")
+  and applies it to the CURRENT draft's HTML in place, no new draft version,
+  copy untouched. Deliberately not an agent: one non-thinking `DRAFT_MODEL`
+  call per instruction (`lib/pipeline/adjust-style.ts`,
+  `app/api/drafts/[id]/adjust-style/route.ts`), reusing the same
+  `validateModelEmailHtml`/`ensureUnsubscribeTag` guarantees generation
+  relies on (now exported from `lib/pipeline/generate.ts`). Distinct from
+  "Reject & regenerate": that rewrites copy and counts against
+  `MAX_DRAFT_VERSIONS`; this doesn't, since it's meaningfully cheaper (no
+  thinking, no copy fields, smaller output) and meant for quick iteration.
+  Verified live against a real draft: visible text content came back
+  byte-identical (2828 chars before and after) while the requested gradient
+  was actually applied, `{$unsubscribe}` and em-dash guarantees held. One
+  client-side undo step (previous HTML kept in memory). New query:
+  `updateDraftContent()` in `lib/db/queries.ts` (plain in-place update, no
+  version/state change).
 
 ## What's not built yet
 

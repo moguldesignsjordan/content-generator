@@ -19,6 +19,7 @@ import type {
   EmailDraftContent,
   EmailTemplateId,
 } from "@/lib/db/types";
+import { DesignChat } from "./design-chat";
 
 interface ReviewActionsProps {
   draftId: string;
@@ -258,6 +259,8 @@ export function ReviewActions({
           />
         )}
       </Card>
+
+      <DesignChat draftId={draftId} html={html} onHtmlChange={setHtml} />
 
       {/* Background regeneration status: never blocks the page, closes the
           moment you submit feedback. Leave, keep reviewing, whatever, it

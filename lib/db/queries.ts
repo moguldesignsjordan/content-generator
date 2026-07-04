@@ -326,6 +326,21 @@ export async function rejectDraftRecord(
 }
 
 /**
+ * Updates a draft's content IN PLACE: no new version, no state change. For
+ * lightweight style adjustments (see lib/pipeline/adjust-style.ts), which are
+ * cheap enough not to count against MAX_DRAFT_VERSIONS the way a full
+ * reject-and-regenerate does.
+ */
+export async function updateDraftContent(
+  draftId: string,
+  content: EmailDraftContent,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("drafts").update({ content }).eq("id", draftId);
+  if (error) throw error;
+}
+
+/**
  * Approves a draft. If editedContent is supplied the draft's content is updated
  * first and the decision is recorded as "edited"; otherwise it's "approved".
  */

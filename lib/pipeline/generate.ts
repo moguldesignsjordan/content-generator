@@ -208,7 +208,7 @@ function renderEmailForContext(
  * or null (null → the caller falls back to the code template). Kept strict
  * and code-level, never trust the model for safety guarantees.
  */
-function validateModelEmailHtml(html: string | undefined): string | null {
+export function validateModelEmailHtml(html: string | undefined): string | null {
   if (!html) return null;
   const h = html.trim();
   if (h.length < 500) return null; // a real designed email is never this small
@@ -336,7 +336,7 @@ export async function regenerateEmailDraft(
 // MailerLite rejects campaigns without the {$unsubscribe} merge tag. The prompt
 // asks for it, but we guarantee it here so a forgetful generation can't produce
 // an unpublishable draft.
-function ensureUnsubscribeTag(html: string): string {
+export function ensureUnsubscribeTag(html: string): string {
   if (html.includes("{$unsubscribe}")) return html;
 
   const footer =
