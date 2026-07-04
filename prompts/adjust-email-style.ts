@@ -10,6 +10,7 @@ import type { BrandTokens } from "@/lib/email/templates/types";
 
 export interface AdjustStyleToolInput {
   html: string;
+  client_support_caveat?: string;
 }
 
 export const ADJUST_STYLE_TOOL: Anthropic.Tool = {
@@ -25,6 +26,14 @@ export const ADJUST_STYLE_TOOL: Anthropic.Tool = {
         description:
           "The complete HTML document (doctype through </html>), identical " +
           "to the input except for the requested change.",
+      },
+      client_support_caveat: {
+        type: "string",
+        description:
+          "One short sentence ONLY if you used a technique some email " +
+          "clients don't fully support (e.g. gradient text via " +
+          "background-clip:text), explaining what those clients will show " +
+          "instead. Omit entirely for ordinary changes.",
       },
     },
     required: ["html"],
@@ -46,6 +55,34 @@ export function buildAdjustStyleMessages(args: {
     "make ONLY the visual/style change the user asks for. This is a styling",
     "edit, not a rewrite.",
     "",
+    "DISAMBIGUATING WHAT THE USER MEANS (get this right, it's the most common",
+    "way these instructions go wrong):",
+    "- \"the header\", \"the header bar\", \"the header background\" = the header",
+    "  SECTION'S background/container (the top band behind the logo). Change",
+    "  its background-color / background property.",
+    "- \"the header text\", \"the wordmark\", \"the logo text\", \"the brand name\"",
+    "  = the actual text characters in the header (e.g. the brand name).",
+    "  Change the text's own styling (color, or a text gradient, see below),",
+    "  NOT the section background.",
+    "- Apply the same logic elsewhere: \"the headline\" or \"the title\" means",
+    "  the <h1> text itself; \"the button\" means the CTA link/table cell;",
+    "  \"the background\" alone (no qualifier) means the outer page background",
+    "  behind the card, not any specific section.",
+    "- If truly ambiguous, prefer the CONTAINER/background reading over the",
+    "  text reading, that's what most people mean by an unqualified noun, but",
+    "  never touch both a container AND its text based on one ambiguous word.",
+    "",
+    "GRADIENT TEXT (e.g. \"make the header text a gradient\"): this needs a",
+    "specific technique, not just a color change:",
+    "  background: linear-gradient(...);",
+    "  -webkit-background-clip: text;",
+    "  background-clip: text;",
+    "  -webkit-text-fill-color: transparent;",
+    "  color: <a solid color close to one of the gradient stops>;",
+    "The final color: line is REQUIRED as a fallback: some email clients",
+    "(notably Outlook desktop) don't support background-clip:text and will",
+    "show that solid color instead, never leave it black or unset.",
+    "",
     "RULES:",
     "- Do not change any copy, wording, subject matter, or text content.",
     "  Do not add, remove, or reorder sections unless explicitly asked.",
@@ -55,8 +92,8 @@ export function buildAdjustStyleMessages(args: {
     "  instruction targets.",
     "- ALL styles stay inline on elements (email HTML is not browser HTML).",
     "  No external stylesheets, no <link>, no JavaScript.",
-    "- If asked for a gradient background, set a solid background-color",
-    "  fallback (for clients that ignore CSS gradients) AND a",
+    "- If asked for a gradient BACKGROUND (not text), set a solid",
+    "  background-color fallback (for clients that ignore CSS gradients) AND a",
     "  background: linear-gradient(...) on the same element.",
     "- Keep the footer unsubscribe link exactly as {$unsubscribe}, do not",
     "  alter or remove it.",

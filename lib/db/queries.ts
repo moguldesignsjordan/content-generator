@@ -250,13 +250,13 @@ export async function getDraftWithJobContext(
   // Falls back to a campaign-less select before migration 002 adds the column.
   let { data, error } = await db
     .from("drafts")
-    .select(`id, job_id, version, content, content_jobs!inner(topic_id, campaign_id)`)
+    .select(`id, job_id, version, content, meta, content_jobs!inner(topic_id, campaign_id)`)
     .eq("id", draftId)
     .maybeSingle();
   if (error) {
     ({ data, error } = await db
       .from("drafts")
-      .select(`id, job_id, version, content, content_jobs!inner(topic_id)`)
+      .select(`id, job_id, version, content, meta, content_jobs!inner(topic_id)`)
       .eq("id", draftId)
       .maybeSingle());
   }
@@ -276,6 +276,7 @@ export async function getDraftWithJobContext(
     campaignId: job?.campaign_id ?? null,
     version: data.version as number,
     content: data.content as EmailDraftContent,
+    meta: (data.meta as DraftMeta) ?? {},
   };
 }
 
@@ -334,9 +335,11 @@ export async function rejectDraftRecord(
 export async function updateDraftContent(
   draftId: string,
   content: EmailDraftContent,
+  meta?: DraftMeta,
 ): Promise<void> {
   const db = getAdminClient();
-  const { error } = await db.from("drafts").update({ content }).eq("id", draftId);
+  const patch = meta !== undefined ? { content, meta } : { content };
+  const { error } = await db.from("drafts").update(patch).eq("id", draftId);
   if (error) throw error;
 }
 

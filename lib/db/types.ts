@@ -309,12 +309,23 @@ export interface EmailCopy {
 // template id + copy that produced this draft's HTML (enables future re-render).
 // email_design_source records whether the HTML came from the model's design
 // (under the email design system prompt) or the code template fallback.
+export interface StyleEditHistoryEntry {
+  html: string;
+  instruction: string;
+  at: string; // ISO timestamp
+}
+
 export interface DraftMeta {
   meta_title?: string;
   meta_description?: string;
   email_template_id?: EmailTemplateId;
   email_copy?: EmailCopy;
   email_design_source?: "model" | "template";
+  // Undo stack for the design-adjustment chat: the html BEFORE each style
+  // edit, most-recent last, capped. Lives in meta (jsonb, no migration
+  // needed) since style edits update drafts.content in place with no
+  // versioning of their own.
+  style_edit_history?: StyleEditHistoryEntry[];
 }
 
 // What we store in drafts.seo_data, QA findings from the second Claude pass.
@@ -347,4 +358,5 @@ export interface DraftJobContext {
   campaignId: string | null;
   version: number;
   content: EmailDraftContent;
+  meta: DraftMeta;
 }

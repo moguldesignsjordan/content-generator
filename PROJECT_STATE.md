@@ -182,10 +182,34 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
   thinking, no copy fields, smaller output) and meant for quick iteration.
   Verified live against a real draft: visible text content came back
   byte-identical (2828 chars before and after) while the requested gradient
-  was actually applied, `{$unsubscribe}` and em-dash guarantees held. One
-  client-side undo step (previous HTML kept in memory). New query:
-  `updateDraftContent()` in `lib/db/queries.ts` (plain in-place update, no
-  version/state change).
+  was actually applied, `{$unsubscribe}` and em-dash guarantees held.
+  **Real bug found and fixed same day, from live use:** asking to change
+  "the header to a gradient" applied to the header BAR's background (a
+  reasonable default reading), but the user meant the header TEXT; a second
+  attempt to correct it just flattened the wordmark to solid black with no
+  visible gradient (the model had no taught technique for gradient text,
+  and the client-only undo was already gone because the page had reloaded).
+  Fixed three things: (1) `prompts/adjust-email-style.ts` now explicitly
+  disambiguates "header"/"header bar" (background) vs "header text"/
+  "headline"/"wordmark" (the text itself), and teaches the actual
+  `background-clip:text` + `-webkit-text-fill-color:transparent` technique
+  for gradient text, with a REQUIRED solid-color fallback (the tool can
+  return an optional `client_support_caveat`, e.g. noting Outlook desktop
+  will show the fallback color instead of the gradient). (2) Fixed the
+  design-chat's own placeholder example, which was itself ambiguous
+  ("Make the header a gradient...") and had primed the exact
+  misunderstanding. (3) **The real root cause**: undo was client-memory-only
+  and vanished on reload with zero server-side history, so a bad edit had no
+  recovery path. Replaced with a server-authoritative undo stack in
+  `drafts.meta.style_edit_history` (jsonb, no migration needed, capped at
+  10 entries) via `getStyleEditHistory()`/`undoLastStyleEdit()` in
+  `lib/pipeline/adjust-style.ts`; the API route gained GET (hydrate
+  history on page load) and DELETE (undo) handlers; `design-chat.tsx`
+  fetches history on mount so it survives reloads. Verified live: a
+  2-edit-deep apply→apply→undo→undo round trip against a real draft landed
+  byte-identical back on the pre-edit original. New query:
+  `updateDraftContent()` in `lib/db/queries.ts` now optionally writes
+  `meta` atomically alongside `content`.
 
 ## What's not built yet
 
