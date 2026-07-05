@@ -12,21 +12,31 @@ import {
 import { ImageSheet } from "./image-sheet";
 import type { ContentImage } from "@/lib/db/types";
 import { forceColorScheme, type EmailPreviewMode } from "@/lib/email/preview-mode";
+import { guessStyleValue, type StyleChanges } from "@/lib/email/inline-style";
 
 // Click-to-edit creative control: overlays the rendered email with invisible
 // hotspot buttons over every [data-region] element the design/templates tag
 // (header, eyebrow, headline, body, cta, footer). Tapping one opens a sheet
-// with ONE tool visible at a time (Wording | Color | Style tabs):
-//   - WORDING: a textarea pre-filled with the region's current text, an
-//     "Apply text" button (swap in your wording verbatim) and a "Regenerate"
-//     button (AI rewrites that region's text). -> POST /api/drafts/[id]/copy
-//   - COLOR: a color picker defaulting to the region's current color, an
-//     "Apply color" button. -> POST /api/drafts/[id]/color
-//   - STYLE: quick suggestion chips plus a free-text fallback. -> POST
-//     /api/drafts/[id]/adjust-style
+// with ONE tool visible at a time (Wording | Design | Style tabs):
+//   - WORDING: a textarea pre-filled with the region's current text. "Apply
+//     text" swaps it in verbatim, natively (no model call) for regions whose
+//     structure is simple enough (falls back to AI only if not); "Rewrite it
+//     for me" always asks the model to rephrase. -> POST /api/drafts/[id]/copy
+//   - DESIGN: native, no-AI mechanical controls (text color, background,
+//     spacing, font size, alignment, bold), each an instant inline-style
+//     mutation on just this region. -> POST /api/drafts/[id]/style-edit
+//   - STYLE: fuzzy free-text asks the model can't do mechanically (quick
+//     chips + a custom instruction). -> POST /api/drafts/[id]/adjust-style
 // All three are scoped to the region's exact HTML so the edit lands
 // precisely, and all update this preview live via onHtmlChange. The image
 // region opens the shared ImageSheet instead (generate/upload/move/remove).
+//
+// Design/native "Apply text" edits locate their target by the region's exact
+// occurrence index (regionIndex) scanned in the STORED html server-side, not
+// by the client-sent `snippet` — the iframe's el.outerHTML is browser-
+// normalized (attribute order/quoting/entities) and may not byte-match the
+// stored string, so it's kept only as a display/AI hint, never a find-anchor
+// for native edits.
 //
 // The srcDoc iframe is same-origin content, sandboxed with allow-same-origin
 // (but NOT allow-scripts, so the untrusted model HTML still can't execute
@@ -43,32 +53,58 @@ const REGION_LABELS: Record<string, string> = {
   image: "Image",
 };
 
-const SUGGESTION_CHIPS = [
-  "Make it bolder",
-  "Larger text",
-  "More breathing room",
-  "Stronger color",
-  "Soften the tone",
-];
+// Only genuinely fuzzy asks stay as AI chips — "larger text", "more
+// breathing room", and "bolder" are now native, instant Design controls.
+const SUGGESTION_CHIPS = ["Stronger color", "Soften the tone"];
 
-type ToolTab = "wording" | "color" | "style";
+type ToolTab = "wording" | "design" | "style";
+type SpacingPreset = "compact" | "normal" | "roomy";
+type Alignment = "left" | "center" | "right";
 
-/** Best-effort: pulls the first hex color out of a region's inline styles, to pre-fill the color picker. Not authoritative — the model decides the real target property. */
-function guessColor(snippet: string): string {
-  const match = snippet.match(
-    /(?:background-color|background|color)\s*:\s*(#[0-9a-fA-F]{3,8})/,
-  );
-  return match ? match[1].slice(0, 7) : "#000000";
+const SPACING_MARGIN: Record<SpacingPreset, string> = {
+  compact: "8px 0",
+  normal: "20px 0",
+  roomy: "40px 0",
+};
+
+/** Best-effort: reconstructs the design controls' initial state from a region's current inline style. Not authoritative — a native edit always starts from what's actually there, never invents a value the model would have to guess either. */
+function guessDesignState(snippet: string): {
+  color: string;
+  background: string;
+  spacing: SpacingPreset;
+  fontSize: number;
+  align: Alignment;
+  bold: boolean;
+} {
+  const color = guessStyleValue(snippet, "color");
+  const background = guessStyleValue(snippet, "background");
+  const margin = guessStyleValue(snippet, "margin");
+  const fontSizeRaw = guessStyleValue(snippet, "fontSize");
+  const align = guessStyleValue(snippet, "textAlign");
+  const weight = guessStyleValue(snippet, "fontWeight");
+
+  const marginNums = margin ? margin.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [] : [];
+  const maxMargin = marginNums.length ? Math.max(...marginNums) : 20;
+  const spacing: SpacingPreset = maxMargin <= 12 ? "compact" : maxMargin >= 30 ? "roomy" : "normal";
+
+  return {
+    color: color?.startsWith("#") ? color.slice(0, 7) : "#000000",
+    background: background?.startsWith("#") ? background.slice(0, 7) : "#ffffff",
+    spacing,
+    fontSize: fontSizeRaw ? parseInt(fontSizeRaw, 10) || 16 : 16,
+    align: align === "center" || align === "right" ? align : "left",
+    bold: weight === "bold" || (weight ? parseInt(weight, 10) >= 600 : false),
+  };
 }
 
 interface Hotspot {
   region: string;
+  /** This region's 0-based occurrence among all same-named regions (a region like "body" can repeat) — how native edits locate their target server-side. */
+  regionIndex: number;
   label: string;
   snippet: string;
   /** The region's visible text, used to pre-fill the wording textarea. */
   text: string;
-  /** Best-effort current color, used to pre-fill the color picker. */
-  color: string;
   rect: { top: number; left: number; width: number; height: number };
 }
 
@@ -99,7 +135,12 @@ export function EmailPreview({
   const [tool, setTool] = useState<ToolTab>("wording");
   const [customInput, setCustomInput] = useState("");
   const [textValue, setTextValue] = useState("");
-  const [colorValue, setColorValue] = useState("#000000");
+  const [designColor, setDesignColor] = useState("#000000");
+  const [designBackground, setDesignBackground] = useState("#ffffff");
+  const [designSpacing, setDesignSpacing] = useState<SpacingPreset>("normal");
+  const [designFontSize, setDesignFontSize] = useState(16);
+  const [designAlign, setDesignAlign] = useState<Alignment>("left");
+  const [designBold, setDesignBold] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
   const [image, setImage] = useState<ContentImage | null>(initialImage ?? null);
   const [applying, setApplying] = useState(false);
@@ -122,16 +163,19 @@ export function EmailPreview({
       const elements = Array.from(
         doc.querySelectorAll<HTMLElement>("[data-region]"),
       );
+      const seen: Record<string, number> = {};
       setHotspots(
         elements.map((el) => {
           const r = el.getBoundingClientRect();
           const region = el.getAttribute("data-region") ?? "";
+          const regionIndex = seen[region] ?? 0;
+          seen[region] = regionIndex + 1;
           return {
             region,
+            regionIndex,
             label: REGION_LABELS[region] ?? region,
             snippet: el.outerHTML,
             text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
-            color: guessColor(el.outerHTML),
             rect: {
               top: iframeRect.top - containerRect.top + r.top,
               left: iframeRect.left - containerRect.left + r.left,
@@ -176,7 +220,13 @@ export function EmailPreview({
     setActive(h);
     setTool("wording");
     setTextValue(h.text);
-    setColorValue(h.color);
+    const design = guessDesignState(h.snippet);
+    setDesignColor(design.color);
+    setDesignBackground(design.background);
+    setDesignSpacing(design.spacing);
+    setDesignFontSize(design.fontSize);
+    setDesignAlign(design.align);
+    setDesignBold(design.bold);
     setCustomInput("");
     setEditError(null);
   }
@@ -238,6 +288,7 @@ export function EmailPreview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           region: active.region,
+          regionIndex: active.regionIndex,
           regionLabel: active.label,
           snippet: active.snippet,
           mode,
@@ -260,38 +311,41 @@ export function EmailPreview({
     }
   }
 
-  /** A COLOR change on the active region: swap it to the exact picked hex. */
-  async function applyColor(hex: string) {
+  /**
+   * A DESIGN change on the active region: one or more mechanical CSS
+   * properties, applied instantly with no model call. Unlike Wording/Style,
+   * this deliberately doesn't close the sheet, so color/spacing/font/align/
+   * bold tweaks can be chained without reopening the hotspot each time.
+   */
+  async function applyStyleEdit(changes: StyleChanges) {
     if (!active || applying) return;
     setApplying(true);
     setEditError(null);
     try {
-      const res = await fetch(`/api/drafts/${draftId}/color`, {
+      const res = await fetch(`/api/drafts/${draftId}/style-edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           region: active.region,
+          regionIndex: active.regionIndex,
           regionLabel: active.label,
-          snippet: active.snippet,
-          hex,
+          changes,
         }),
       });
       const data = (await res.json()) as { html?: string; error?: string };
       if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't apply that color.");
+        throw new Error(data.error ?? "Couldn't apply that change.");
       }
       onHtmlChange(data.html);
       onEdited?.();
-      closeSheet();
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Couldn't apply that color.");
+      setEditError(err instanceof Error ? err.message : "Couldn't apply that change.");
     } finally {
       setApplying(false);
     }
   }
 
   const textUnchanged = !active || textValue.trim() === active.text;
-  const colorUnchanged = !active || colorValue.toLowerCase() === active.color.toLowerCase();
 
   return (
     <div ref={containerRef} className="relative overflow-hidden">
@@ -368,7 +422,7 @@ export function EmailPreview({
           onChange={setTool}
           options={[
             { value: "wording", label: "Wording" },
-            { value: "color", label: "Color" },
+            { value: "design", label: "Design" },
             { value: "style", label: "Style" },
           ]}
         />
@@ -405,33 +459,154 @@ export function EmailPreview({
           </div>
         )}
 
-        {tool === "color" && (
-          <div className="mt-4">
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={colorValue}
-                onChange={(e) => setColorValue(e.target.value)}
-                disabled={applying}
-                aria-label="Pick a color"
-                className="h-9 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
-              />
-              <Input
-                value={colorValue}
-                onChange={(e) => setColorValue(e.target.value)}
-                placeholder="#000000"
-                disabled={applying}
-                className="w-28"
-              />
-              <Button
-                variant="gradient"
+        {tool === "design" && (
+          <div className="mt-4 space-y-5">
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Text color</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={designColor}
+                  onChange={(e) => setDesignColor(e.target.value)}
+                  disabled={applying}
+                  aria-label="Pick a text color"
+                  className="h-9 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
+                />
+                <Input
+                  value={designColor}
+                  onChange={(e) => setDesignColor(e.target.value)}
+                  placeholder="#000000"
+                  disabled={applying}
+                  className="w-28"
+                />
+                <Button
+                  variant="gradient"
+                  size="sm"
+                  loading={applying}
+                  disabled={applying}
+                  onClick={() => applyStyleEdit({ color: designColor })}
+                >
+                  Apply
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Background</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={designBackground}
+                  onChange={(e) => setDesignBackground(e.target.value)}
+                  disabled={applying}
+                  aria-label="Pick a background color"
+                  className="h-9 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
+                />
+                <Input
+                  value={designBackground}
+                  onChange={(e) => setDesignBackground(e.target.value)}
+                  placeholder="#ffffff"
+                  disabled={applying}
+                  className="w-28"
+                />
+                <Button
+                  variant="gradient"
+                  size="sm"
+                  loading={applying}
+                  disabled={applying}
+                  onClick={() => applyStyleEdit({ background: designBackground })}
+                >
+                  Apply
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Spacing</p>
+              <SegmentedControl
                 size="sm"
-                loading={applying}
-                disabled={colorUnchanged || applying}
-                onClick={() => applyColor(colorValue)}
+                value={designSpacing}
+                onChange={(v) => {
+                  setDesignSpacing(v);
+                  applyStyleEdit({ margin: SPACING_MARGIN[v] });
+                }}
+                options={[
+                  { value: "compact", label: "Compact" },
+                  { value: "normal", label: "Normal" },
+                  { value: "roomy", label: "Roomy" },
+                ]}
+              />
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Font size</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={applying || designFontSize <= 10}
+                  onClick={() => {
+                    const next = Math.max(10, designFontSize - 2);
+                    setDesignFontSize(next);
+                    applyStyleEdit({ fontSize: `${next}px` });
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface-2 text-foreground transition-colors hover:bg-surface-3 disabled:opacity-40"
+                  aria-label="Decrease font size"
+                >
+                  −
+                </button>
+                <span className="w-12 text-center text-[13px] text-foreground">{designFontSize}px</span>
+                <button
+                  type="button"
+                  disabled={applying || designFontSize >= 64}
+                  onClick={() => {
+                    const next = Math.min(64, designFontSize + 2);
+                    setDesignFontSize(next);
+                    applyStyleEdit({ fontSize: `${next}px` });
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface-2 text-foreground transition-colors hover:bg-surface-3 disabled:opacity-40"
+                  aria-label="Increase font size"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Alignment</p>
+              <SegmentedControl
+                size="sm"
+                value={designAlign}
+                onChange={(v) => {
+                  setDesignAlign(v);
+                  applyStyleEdit({ textAlign: v });
+                }}
+                options={[
+                  { value: "left", label: "Left" },
+                  { value: "center", label: "Center" },
+                  { value: "right", label: "Right" },
+                ]}
+              />
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-[12px] font-medium text-muted">Weight</p>
+              <button
+                type="button"
+                disabled={applying}
+                onClick={() => {
+                  const next = !designBold;
+                  setDesignBold(next);
+                  applyStyleEdit({ fontWeight: next ? "700" : "400" });
+                }}
+                aria-pressed={designBold}
+                className={`rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                  designBold
+                    ? "border-accent bg-accent/10 text-accent"
+                    : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+                }`}
               >
-                Apply color
-              </Button>
+                Bold
+              </button>
             </div>
           </div>
         )}
