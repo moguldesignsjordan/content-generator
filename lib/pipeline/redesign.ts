@@ -1,5 +1,10 @@
 import "server-only";
-import { DRAFT_MODEL, FAST_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  FAST_MODEL,
+  cacheableSystem,
+  getAnthropic,
+} from "@/lib/clients/anthropic";
 import {
   getDraftWithJobContext,
   getTopicContext,
@@ -30,6 +35,10 @@ export type RedesignResult =
 
 const MAX_HISTORY = 10;
 
+// `system` here is the email design brief keyed only by template + brand
+// tokens (three variants total), identical across every redesign call for
+// this brand; caching it makes the same-model retry below and every later
+// redesign within the cache window cost a fraction of full input price.
 async function attemptRedesign(
   model: string,
   system: string,
@@ -38,7 +47,7 @@ async function attemptRedesign(
   const response = await getAnthropic().messages.create({
     model,
     max_tokens: 8192,
-    system,
+    system: cacheableSystem(system),
     messages: [{ role: "user", content: user }],
     tools: [REDESIGN_TOOL],
     tool_choice: { type: "tool", name: "save_redesigned_email" },

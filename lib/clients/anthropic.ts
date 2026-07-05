@@ -38,3 +38,44 @@ export function getAnthropic(): Anthropic {
   }
   return client;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompt caching helpers.
+//
+// Anthropic caches a prompt prefix up to a `cache_control` breakpoint and
+// serves it back at roughly a 90% input-token discount on the next call
+// within the cache's rolling 5-minute TTL. Every system prompt in this app
+// (brand voice, guidelines, positioning, the email design system) is large
+// and reused verbatim across many calls, either every turn of a chat or
+// every generation/edit for the same brand, so marking it cacheable is close
+// to free money. Use `cacheableSystem` wherever a system prompt is built
+// once and reused, and `withCacheBreakpoint` on the last message of a stored
+// chat history so each new turn only pays for its own incremental text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Wraps a system prompt string as a single cacheable content block. */
+export function cacheableSystem(text: string): Anthropic.TextBlockParam[] {
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
+
+/**
+ * Marks the last content block of a message as a cache breakpoint, so the
+ * full prefix up to and including it (tools + system + every earlier turn)
+ * is cached. Call this on the last message of stored history BEFORE
+ * appending the newest user message, so each turn reuses everything except
+ * that one new message.
+ */
+export function withCacheBreakpoint(
+  message: Anthropic.MessageParam,
+): Anthropic.MessageParam {
+  const content =
+    typeof message.content === "string"
+      ? [{ type: "text" as const, text: message.content }]
+      : [...message.content];
+  if (content.length === 0) return message;
+  const last = {
+    ...content[content.length - 1],
+    cache_control: { type: "ephemeral" as const },
+  };
+  return { ...message, content: [...content.slice(0, -1), last] };
+}

@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import type { Anthropic } from "@anthropic-ai/sdk";
+import {
+  DRAFT_MODEL,
+  cacheableSystem,
+  getAnthropic,
+  withCacheBreakpoint,
+} from "@/lib/clients/anthropic";
 import {
   ensureStrategyAndPrimaryIcp,
   getBrandWithIcps,
@@ -53,17 +59,29 @@ export async function POST(req: NextRequest) {
     const state: OnboardingState = brand.onboarding_state ?? {};
     const history: OnboardingMessage[] = state.messages ?? [];
 
+    const priorTurns: Anthropic.MessageParam[] = history.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    if (priorTurns.length > 0) {
+      priorTurns[priorTurns.length - 1] = withCacheBreakpoint(
+        priorTurns[priorTurns.length - 1],
+      );
+    }
     const messages = [
-      ...history.map((m) => ({ role: m.role, content: m.content })),
+      ...priorTurns,
       { role: "user" as const, content: message.trim() },
     ];
 
-    // One retry on a transient API/parse failure so a flaky turn doesn't break onboarding.
+    const system = cacheableSystem(buildOnboardingSystem(brand));
+
+    // One retry on a transient API/parse failure so a flaky turn doesn't break
+    // onboarding; reusing the same `system` array lets the retry hit cache.
     const call = () =>
       getAnthropic().messages.create({
         model: DRAFT_MODEL,
         max_tokens: 1024,
-        system: buildOnboardingSystem(brand),
+        system,
         messages,
         tools: [ONBOARDING_TOOL],
         tool_choice: { type: "auto" },

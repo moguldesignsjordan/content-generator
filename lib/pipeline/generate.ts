@@ -1,5 +1,5 @@
 import "server-only";
-import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import { DRAFT_MODEL, cacheableSystem, getAnthropic } from "@/lib/clients/anthropic";
 import {
   getCampaign,
   getDraftWithJobContext,
@@ -121,6 +121,13 @@ async function generateEmailCopy(
   system: string,
   user: string,
 ): Promise<EmailDraftOutput> {
+  // The system prompt (brand guidelines/voice/positioning + the email design
+  // system) only varies by template, of which there are three, so it's
+  // identical across every topic generated with the same layout. Caching it
+  // means back-to-back drafts in a session, and same-request retries below,
+  // reprice at roughly a 90% discount instead of full price every time.
+  const cachedSystem = cacheableSystem(system);
+
   // Streamed because copy + a complete designed HTML document + adaptive
   // thinking share this token budget, and the SDK requires streaming for
   // requests that could outlive its non-streaming timeout ceiling.
@@ -130,7 +137,7 @@ async function generateEmailCopy(
         model: DRAFT_MODEL,
         max_tokens: 32000,
         thinking: { type: "adaptive" },
-        system,
+        system: cachedSystem,
         messages: [{ role: "user", content: user }],
         tools: [EMAIL_TOOL],
         tool_choice: { type: "tool", name: "save_email_draft" },

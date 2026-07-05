@@ -1,7 +1,13 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
-import { DRAFT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  cacheableSystem,
+  getAnthropic,
+  isAnthropicConfigured,
+  withCacheBreakpoint,
+} from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { createDraftShell, getBrandWithIcps, getTopicContext, listTopics } from "@/lib/db/queries";
 import { GENERATE_EMAIL_TOOL, buildAssistantSystem } from "@/prompts/assistant";
@@ -37,11 +43,20 @@ export async function POST(req: NextRequest) {
     const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
     const topics = await listTopics();
 
-    const system = buildAssistantSystem(brand, primaryIcp, topics);
+    const system = cacheableSystem(buildAssistantSystem(brand, primaryIcp, topics));
+
+    // Cache the prefix through the end of the prior turn so each new message
+    // only costs full price on the small bit that's actually new.
+    const priorTurns: Anthropic.MessageParam[] = (history ?? [])
+      .slice(-10)
+      .map((m) => ({ role: m.role, content: m.content }));
+    if (priorTurns.length > 0) {
+      priorTurns[priorTurns.length - 1] = withCacheBreakpoint(
+        priorTurns[priorTurns.length - 1],
+      );
+    }
     const messages: Anthropic.MessageParam[] = [
-      ...(history ?? [])
-        .slice(-10)
-        .map((m) => ({ role: m.role, content: m.content })),
+      ...priorTurns,
       { role: "user", content: message.trim() },
     ];
 
@@ -113,7 +128,7 @@ export async function POST(req: NextRequest) {
 }
 
 function callClaude(
-  system: string,
+  system: Anthropic.TextBlockParam[],
   messages: Anthropic.MessageParam[],
 ): Promise<Anthropic.Message> {
   return getAnthropic().messages.create({

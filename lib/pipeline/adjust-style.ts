@@ -1,5 +1,10 @@
 import "server-only";
-import { DRAFT_MODEL, FAST_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  FAST_MODEL,
+  cacheableSystem,
+  getAnthropic,
+} from "@/lib/clients/anthropic";
 import {
   getDraftWithJobContext,
   getTopicContext,
@@ -75,6 +80,10 @@ function applyEdit(html: string, edit: StyleEdit): { html: string } | { error: s
 /**
  * One model call + patch-apply attempt. Returns the failure reason (not yet
  * surfaced to the user) so the caller can retry/escalate before giving up.
+ * `system` only depends on brand tokens, so it's identical across every
+ * style edit for this brand; caching it lets each call after the first (the
+ * same-model retry below, and every later edit within the cache window)
+ * skip most of its input cost.
  */
 async function attemptEdit(
   model: string,
@@ -85,7 +94,7 @@ async function attemptEdit(
   const response = await getAnthropic().messages.create({
     model,
     max_tokens: 2048,
-    system,
+    system: cacheableSystem(system),
     messages: [{ role: "user", content: user }],
     tools: [ADJUST_STYLE_TOOL],
     tool_choice: { type: "tool", name: "save_style_patch" },

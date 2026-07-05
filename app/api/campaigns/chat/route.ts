@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Anthropic } from "@anthropic-ai/sdk";
-import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  cacheableSystem,
+  getAnthropic,
+  withCacheBreakpoint,
+} from "@/lib/clients/anthropic";
 import {
   createCampaign,
   createTopic,
@@ -70,22 +75,38 @@ export async function POST(req: NextRequest) {
     ]);
 
     const history: OnboardingMessage[] = campaign.chat_state?.messages ?? [];
+    // Cache the prefix through the end of the prior turn so each new message
+    // only costs full price on the small bit that's actually new.
+    const priorTurns: Anthropic.MessageParam[] = history.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    if (priorTurns.length > 0) {
+      priorTurns[priorTurns.length - 1] = withCacheBreakpoint(
+        priorTurns[priorTurns.length - 1],
+      );
+    }
     const messages = [
-      ...history.map((m) => ({ role: m.role, content: m.content })),
+      ...priorTurns,
       { role: "user" as const, content: message.trim() },
     ];
 
-    const system = buildCampaignSystem({
-      brand,
-      strategy,
-      primaryIcp: icps.find((i) => i.is_primary) ?? icps[0] ?? null,
-      products,
-      topics,
-      brief: campaign.brief ?? {},
-      topicId: campaign.topic_id,
-    });
+    const system = cacheableSystem(
+      buildCampaignSystem({
+        brand,
+        strategy,
+        primaryIcp: icps.find((i) => i.is_primary) ?? icps[0] ?? null,
+        products,
+        topics,
+        brief: campaign.brief ?? {},
+        topicId: campaign.topic_id,
+      }),
+    );
 
     // One retry on a transient failure so a flaky turn doesn't kill the chat.
+    // Reusing the same `system` array (not rebuilding the string) is what
+    // lets this retry, and the forced-action/follow-up calls below, hit the
+    // prompt cache instead of repricing the whole brand context each time.
     const call = () =>
       getAnthropic().messages.create({
         model: DRAFT_MODEL,
