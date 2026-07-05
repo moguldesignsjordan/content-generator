@@ -150,6 +150,8 @@
     topic_id       uuid references topics(id) on delete set null,
     campaign_id    uuid references campaigns(id) on delete set null,
     type           text not null check (type in ('email', 'blog')),
+    email_type     text check (email_type in ('newsletter', 'product', 'service', 'promotional', 'announcement')),
+    blog_type      text check (blog_type in ('pillar', 'how_to', 'listicle', 'case_study', 'thought_leadership', 'landing')),
     status         text not null default 'pending'
       check (status in ('pending', 'generating', 'in_review', 'published', 'failed')),
     trigger_source text not null default 'manual',
