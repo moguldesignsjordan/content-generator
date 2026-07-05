@@ -2,6 +2,7 @@ import "server-only";
 import { FAST_MODEL, getAnthropic } from "@/lib/clients/anthropic";
 import type { BrandColors, BrandFonts, Positioning, VoiceProfile } from "@/lib/db/types";
 import type { ColorCandidate } from "@/lib/scrape/types";
+import { contrast, luminance } from "@/lib/color/contrast";
 import {
   BRAND_IDENTITY_TOOL,
   FONT_PAIRINGS,
@@ -16,17 +17,6 @@ import {
 // that only use oklch() colors). One cheap Haiku call either way.
 
 const HEX_RE = /^#[0-9a-f]{6}$/i;
-
-function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-function contrast(a: string, b: string): number {
-  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (l1 + 0.05) / (l2 + 0.05);
-}
 
 function hexToRgb(hex: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [

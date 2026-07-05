@@ -82,6 +82,23 @@ is clean — everything below is committed and pushed, not pending.
   merge), from-scratch brand identity generator (palette + font pairing) for
   brands with no site to import from, campaign-chat topic interview with
   quick-reply chips, a brand-readiness checklist on Home.
+- **Brand guidelines document (new, not yet committed):** a visual, shareable
+  rendering of the existing `brands.guidelines` + `visual_identity` +
+  `positioning` data (no new AI call, no new DB column — this is a pure
+  render layer over data that was already synthesized/approved/fed into the
+  brain). `lib/brand-book/` has two selectable template variants (Bold
+  Spectrum: dark, gradient-forward; Clean Minimal: light, editorial) built
+  from shared section-builders (`lib/brand-book/shared.ts`) so both stay in
+  sync. New route `/settings/brand-guidelines`: shows the existing
+  Generate→edit→Save guidelines flow (fields extracted out of
+  `guidelines-form.tsx` into a shared `guidelines-fields.tsx` so both surfaces
+  use one implementation) if nothing's approved yet, otherwise the rendered
+  document in an iframe with a variant switcher and a "Download .html"
+  button (same Blob pattern as the email/blog review screens). Linked from
+  Settings ("View as document") and from the onboarding completion screen
+  ("Create your brand guidelines →"). Also extracted `lib/color/contrast.ts`
+  (luminance/contrast/readableTextColor) out of `lib/pipeline/brand-identity.ts`
+  so the swatch-legibility math isn't duplicated a third time.
 - **Housekeeping:** archive (soft-hide, any status) and hard-delete
   (blocked once a job has a `publications` row — archive instead) for both
   topics and drafts, with inline per-row actions on the Emails/Blogs lists;
@@ -115,6 +132,14 @@ is clean — everything below is committed and pushed, not pending.
 
 Nothing here is blocked on infra (keys/migration/commit are all done) — this
 is purely "click through it as the logged-in user":
+- **Brand guidelines document** (see above): `npm run typecheck` + `npm run
+  build` + `npx vitest run` all pass, and `renderBrandBookTemplate` was
+  exercised directly (outside the app, no browser tool / login available this
+  session) with realistic sample data for both variants, confirming the
+  section pipeline and CSS produce a correct, complete document. Not yet
+  clicked through live: Generate → edit → Save on a real brand with no
+  guidelines yet, the variant switcher and Download button in the browser,
+  and the onboarding completion CTA. Also not yet committed to git.
 - Email image tool: add/move/regenerate at all three placements.
 - Blog: "+ Add image," approve → publish to Sanity, confirm the doc carries
   `mainImage`.

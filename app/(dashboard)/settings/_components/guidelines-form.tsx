@@ -1,9 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Textarea, useToast } from "@/components/ui";
+import { Button, Card, useToast } from "@/components/ui";
 import type { BrandGuidelines } from "@/lib/db/types";
-import { ListInput } from "./list-input";
+import {
+  GuidelinesFields,
+  applyGuidelinesProposal,
+  guidelinesValueFromBrand,
+  guidelinesValueToPayload,
+} from "./guidelines-fields";
 
 interface GuidelinesFormProps {
   brandId: string;
@@ -12,27 +17,22 @@ interface GuidelinesFormProps {
 
 /**
  * Brand guidelines: synthesized by AI from everything stored, but the human
- * edits and explicitly saves. Generate only fills the form (a proposal); Save
- * is the single write path and stamps approved_at server-side.
+ * edits and explicitly saves. Generate only fills the fields (a proposal);
+ * Save is the single write path and stamps approved_at server-side. The
+ * seven editable fields themselves live in guidelines-fields.tsx, shared with
+ * the brand-guidelines document route's own "not generated yet" state.
  */
 export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
-  const g = guidelines ?? {};
-  const [voiceAndTone, setVoiceAndTone] = useState(g.voice_and_tone ?? "");
-  const [audienceSummary, setAudienceSummary] = useState(g.audience_summary ?? "");
-  const [messagingPillars, setMessagingPillars] = useState(g.messaging_pillars ?? []);
-  const [doLanguage, setDoLanguage] = useState(g.do_language ?? []);
-  const [dontLanguage, setDontLanguage] = useState(g.dont_language ?? []);
-  const [visualDirection, setVisualDirection] = useState(g.visual_direction ?? "");
-  const [ctaPhilosophy, setCtaPhilosophy] = useState(g.cta_philosophy ?? "");
-
+  const [value, setValue] = useState(() => guidelinesValueFromBrand(guidelines));
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [proposed, setProposed] = useState(false);
   const toast = useToast();
 
-  const approvedAt = g.approved_at
-    ? new Date(g.approved_at).toLocaleDateString()
+  const approvedAt = guidelines.approved_at
+    ? new Date(guidelines.approved_at).toLocaleDateString()
     : null;
+  const hasContent = Boolean(value.voiceAndTone || value.messagingPillars.length);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -44,14 +44,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
         error?: string;
       };
       if (!res.ok || !data.proposal) throw new Error(data.error);
-      const p = data.proposal;
-      if (p.voice_and_tone) setVoiceAndTone(p.voice_and_tone);
-      if (p.audience_summary) setAudienceSummary(p.audience_summary);
-      if (p.messaging_pillars?.length) setMessagingPillars(p.messaging_pillars);
-      if (p.do_language?.length) setDoLanguage(p.do_language);
-      if (p.dont_language?.length) setDontLanguage(p.dont_language);
-      if (p.visual_direction) setVisualDirection(p.visual_direction);
-      if (p.cta_philosophy) setCtaPhilosophy(p.cta_philosophy);
+      setValue((v) => applyGuidelinesProposal(v, data.proposal!));
       setProposed(true);
     } catch {
       toast.error("Couldn't generate a draft.");
@@ -69,15 +62,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brandId,
-          guidelines: {
-            voice_and_tone: voiceAndTone.trim() || undefined,
-            audience_summary: audienceSummary.trim() || undefined,
-            messaging_pillars: messagingPillars.filter(Boolean),
-            do_language: doLanguage.filter(Boolean),
-            dont_language: dontLanguage.filter(Boolean),
-            visual_direction: visualDirection.trim() || undefined,
-            cta_philosophy: ctaPhilosophy.trim() || undefined,
-          },
+          guidelines: guidelinesValueToPayload(value),
         }),
       });
       if (!res.ok) throw new Error();
@@ -103,7 +88,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
           loading={generating}
           onClick={handleGenerate}
         >
-          ✨ {voiceAndTone || messagingPillars.length ? "Regenerate" : "Generate"}
+          ✨ {hasContent ? "Regenerate" : "Generate"}
         </Button>
       </div>
       {proposed && (
@@ -112,71 +97,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
         </p>
       )}
 
-      <Field
-        label="Voice and tone"
-        hint="How the brand sounds, and how that shifts by context."
-      >
-        <Textarea
-          rows={4}
-          value={voiceAndTone}
-          onChange={(e) => setVoiceAndTone(e.target.value)}
-        />
-      </Field>
-
-      <Field
-        label="Audience summary"
-        hint="Who the content serves and what they care about."
-      >
-        <Textarea
-          rows={3}
-          value={audienceSummary}
-          onChange={(e) => setAudienceSummary(e.target.value)}
-        />
-      </Field>
-
-      <ListInput
-        label="Messaging pillars"
-        values={messagingPillars}
-        onChange={setMessagingPillars}
-        multiline
-        placeholder="Add a core message…"
-      />
-
-      <ListInput
-        label="Say things like"
-        values={doLanguage}
-        onChange={setDoLanguage}
-        placeholder="Add a phrase or framing…"
-      />
-
-      <ListInput
-        label="Never say"
-        values={dontLanguage}
-        onChange={setDontLanguage}
-        placeholder="Add a phrase to avoid…"
-      />
-
-      <Field
-        label="Visual direction"
-        hint="The visual feel: colors, type, layout attitude."
-      >
-        <Textarea
-          rows={2}
-          value={visualDirection}
-          onChange={(e) => setVisualDirection(e.target.value)}
-        />
-      </Field>
-
-      <Field
-        label="CTA philosophy"
-        hint="How the brand asks for action at each funnel stage."
-      >
-        <Textarea
-          rows={2}
-          value={ctaPhilosophy}
-          onChange={(e) => setCtaPhilosophy(e.target.value)}
-        />
-      </Field>
+      <GuidelinesFields value={value} onChange={setValue} />
 
       <div className="flex items-center gap-3 pt-1">
         <Button variant="gradient" loading={saving} onClick={handleSave}>

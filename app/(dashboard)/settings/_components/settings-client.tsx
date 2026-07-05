@@ -99,6 +99,11 @@ export function SettingsClient({
           subtitle="AI-drafted from everything stored, approved by you"
           onClick={() => setOpen("guidelines")}
         />
+        <ListRow
+          title="View as document"
+          subtitle="Your logo, colors, type, and voice as a shareable page"
+          href="/settings/brand-guidelines"
+        />
       </ListGroup>
 
       <ListGroup label="Strategy">
