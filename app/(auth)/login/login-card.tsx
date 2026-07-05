@@ -152,6 +152,18 @@ export function LoginCard() {
           </div>
         </Field>
 
+        {mode === "signin" && (
+          <div className="text-right">
+            <button
+              type="button"
+              onClick={() => router.push("/forgot-password")}
+              className="text-[12px] font-medium text-muted hover:text-foreground"
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
+
         <Button
           type="submit"
           variant="gradient"
