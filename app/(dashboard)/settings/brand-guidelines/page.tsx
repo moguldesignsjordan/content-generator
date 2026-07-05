@@ -86,6 +86,7 @@ export default async function BrandGuidelinesPage() {
         brandId={brand.id}
         brandName={brand.name}
         guidelines={brand.guidelines}
+        visualIdentity={brand.visual_identity}
         documents={documents}
       />
     </>

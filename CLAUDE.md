@@ -25,6 +25,8 @@ npm run seed       # load the Mogul Design Agency strategy into Supabase (tsx db
 
 There is **no test framework yet** — verification is `npm run typecheck` + `npm run build`. The two run in CI-less practice as the "does it compile and pass types" gate after each slice.
 
+**Verify UI changes in the real app, not just at the type level.** A green typecheck/build says the code compiles, not that the screen is right. For any change to a page, form, or component, drive the actual flow with the **Playwright MCP** (`playwright` server in `.mcp.json`) against the running dev server at `http://localhost:3000` — start `npm run dev` first if it isn't up. Navigate to the affected route, exercise the flow, and snapshot or screenshot to confirm the result (check both light and dark where the templates support it). Prefer this over guessing from the diff.
+
 ## Setup the app needs to actually run
 
 The app degrades gracefully without keys (the dashboard shows a "Connect Supabase" guide instead of crashing), but to run for real:

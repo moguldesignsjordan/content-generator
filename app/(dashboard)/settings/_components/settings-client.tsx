@@ -9,7 +9,6 @@ import type { ProviderField } from "@/lib/publishing/provider";
 import type { ConnectionState } from "@/lib/publishing/connections";
 import { BrandBasicsForm } from "./brand-basics-form";
 import { ImportWebsiteForm } from "./import-website-form";
-import { GenerateIdentityForm } from "./generate-identity-form";
 import { BrandVoiceForm } from "./brand-voice-form";
 import { PositioningForm } from "./positioning-form";
 import { VisualIdentityForm } from "./visual-identity-form";
@@ -21,7 +20,6 @@ import { ConnectionForm } from "./connection-form";
 
 type SectionKey =
   | "import"
-  | "generateIdentity"
   | "basics"
   | "voice"
   | "positioning"
@@ -71,8 +69,8 @@ export function SettingsClient({
         />
         <ListRow
           title="Generate brand identity"
-          subtitle="No website? Get a starting color palette and font pairing"
-          onClick={() => setOpen("generateIdentity")}
+          subtitle="No website? Generate your full brand guidelines document, palette included"
+          href="/settings/brand-guidelines"
         />
         <ListRow
           title="Brand basics"
@@ -98,11 +96,6 @@ export function SettingsClient({
           title="Brand guidelines"
           subtitle="AI-drafted from everything stored, approved by you"
           onClick={() => setOpen("guidelines")}
-        />
-        <ListRow
-          title="View as document"
-          subtitle="Your logo, colors, type, and voice as a shareable page"
-          href="/settings/brand-guidelines"
         />
       </ListGroup>
 
@@ -174,16 +167,6 @@ export function SettingsClient({
         size="xl"
       >
         <ImportWebsiteForm brand={brand} products={products} />
-      </Sheet>
-
-      <Sheet
-        open={open === "generateIdentity"}
-        onClose={close}
-        title="Generate brand identity"
-        description="A starting palette and font pairing from your name and voice, for brands with no website yet."
-        size="lg"
-      >
-        <GenerateIdentityForm brand={brand} products={products} />
       </Sheet>
 
       <Sheet

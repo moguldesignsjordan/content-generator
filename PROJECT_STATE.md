@@ -94,11 +94,21 @@ is clean — everything below is committed and pushed, not pending.
   `guidelines-form.tsx` into a shared `guidelines-fields.tsx` so both surfaces
   use one implementation) if nothing's approved yet, otherwise the rendered
   document in an iframe with a variant switcher and a "Download .html"
-  button (same Blob pattern as the email/blog review screens). Linked from
-  Settings ("View as document") and from the onboarding completion screen
-  ("Create your brand guidelines →"). Also extracted `lib/color/contrast.ts`
-  (luminance/contrast/readableTextColor) out of `lib/pipeline/brand-identity.ts`
-  so the swatch-legibility math isn't duplicated a third time.
+  button (same Blob pattern as the email/blog review screens). The old
+  standalone "Generate brand identity" Settings action (palette + font
+  pairing only, for brands with no website) was folded into this same
+  Generate step and its Sheet/form deleted: Settings' "Generate brand
+  identity" row now links straight to `/settings/brand-guidelines`, and if
+  the brand has no colors set yet, the page's one Generate button also calls
+  `/api/settings/brand-identity` (same underlying logic, unchanged) alongside
+  the guidelines synthesis, previews the proposed palette read-only, and
+  saves both together on one Save click. Brands that already have colors
+  skip that call, nothing regenerates an existing palette. Linked from
+  Settings ("Generate brand identity") and from the onboarding completion
+  screen ("Create your brand guidelines →"). Also extracted
+  `lib/color/contrast.ts` (luminance/contrast/readableTextColor) out of
+  `lib/pipeline/brand-identity.ts` so the swatch-legibility math isn't
+  duplicated a third time.
 - **Housekeeping:** archive (soft-hide, any status) and hard-delete
   (blocked once a job has a `publications` row — archive instead) for both
   topics and drafts, with inline per-row actions on the Emails/Blogs lists;
@@ -132,14 +142,19 @@ is clean — everything below is committed and pushed, not pending.
 
 Nothing here is blocked on infra (keys/migration/commit are all done) — this
 is purely "click through it as the logged-in user":
-- **Brand guidelines document** (see above): `npm run typecheck` + `npm run
-  build` + `npx vitest run` all pass, and `renderBrandBookTemplate` was
-  exercised directly (outside the app, no browser tool / login available this
-  session) with realistic sample data for both variants, confirming the
-  section pipeline and CSS produce a correct, complete document. Not yet
-  clicked through live: Generate → edit → Save on a real brand with no
-  guidelines yet, the variant switcher and Download button in the browser,
-  and the onboarding completion CTA. Also not yet committed to git.
+- **Brand guidelines document** (see above, including the "Generate brand
+  identity" merge): `npm run typecheck` + `npm run build` + `npx vitest run`
+  all pass after both rounds of changes, and `renderBrandBookTemplate` was
+  exercised directly (outside the app) with realistic sample data for both
+  variants, confirming the section pipeline and CSS produce a correct,
+  complete document. `.mcp.json` now has a `playwright` MCP server entry for
+  real browser click-through, but it wasn't connected in the session that
+  built this (needs a Claude Code session restart to pick up a newly-added
+  MCP server) — not yet used to verify. Still needs a live click-through:
+  Generate → edit → Save on a real brand with no guidelines/colors yet
+  (confirms the combined identity+guidelines path and the two PATCH calls
+  both land), the variant switcher and Download button, and the onboarding
+  completion CTA.
 - Email image tool: add/move/regenerate at all three placements.
 - Blog: "+ Add image," approve → publish to Sanity, confirm the doc carries
   `mainImage`.
