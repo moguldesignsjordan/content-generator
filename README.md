@@ -3,24 +3,24 @@
 Automated, on-strategy content for one brand (Mogul Design Agency), with a human
 approval gate, publishing to MailerLite (email) and Sanity (blog).
 
-Built in vertical slices — see `v1-build-guide.md` §4. Slices 0–2 (scaffold,
-email generation, review gate) are done; a native-app-style UI overhaul and
-Supabase Auth have since been layered on top (see `UI-REDESIGN-PLAN.md`).
-Publishing (Slice 3+) has not started yet. See `PROJECT_STATE.md` for the
-current save/restore state.
+Built in vertical slices — see `v1-build-guide.md` §4. Slices 0, 1, 2, 3, 5,
+and 6 (scaffold, email generation, review gate, email publishing, blog path,
+SEO/QA pass) are done, with a native-app-style UI overhaul, Supabase Auth,
+and a content assistant layered on top. Keyword research (Slice 4) and the
+distribution checklist (Slice 7) haven't started. See `PROJECT_STATE.md` for
+the current save/restore state.
 
 - Architecture: `automated-content-engine-plan.md`
 - The marketing brain (ICP / pillars / clusters): `brand-strategy-template.md`
 - How to direct the build: `v1-build-guide.md`
-- UI redesign spec (mostly implemented): `UI-REDESIGN-PLAN.md`
 - Living state: `PROJECT_STATE.md`
 
 ## Stack
 
 Next.js (App Router) · Supabase (Postgres + Auth) · Anthropic Claude ·
-MailerLite (planned) · Sanity (planned) · DataForSEO (planned). TypeScript
-end-to-end. Tailwind v4 with a custom "Bold spectrum" dark design system.
-Strategy lives as DB rows, not code.
+MailerLite · Sanity · DataForSEO (planned). TypeScript end-to-end. Tailwind
+v4 with a custom "Bold spectrum" dark design system. Strategy lives as DB
+rows, not code.
 
 ## Setup
 
@@ -80,10 +80,10 @@ db/seed.ts               seeds one brand's strategy
 - [x] **0 — Scaffold:** schema + seed + dashboard topic list
 - [x] **1 — Generate email:** Claude drafts an on-brand email from a topic
 - [x] **2 — Review gate:** approve / edit / reject-with-feedback (regenerate)
-- [ ] **3 — Publish email:** approved draft → MailerLite draft campaign
+- [x] **3 — Publish email:** approved draft → MailerLite draft campaign
 - [ ] **4 — Keyword research:** DataForSEO feeds the brief
-- [ ] **5 — Blog path:** Markdown → Portable Text → Sanity draft
-- [ ] **6 — SEO/QA pass:** second Claude pass adds meta + checks
+- [x] **5 — Blog path:** Markdown → Portable Text → Sanity draft
+- [x] **6 — SEO/QA pass:** second Claude pass adds meta + checks
 - [ ] **7 — Distribution:** repurposing checklist from the topic recipe
 
 ## Beyond the original slice plan
@@ -95,7 +95,7 @@ Built on top of the slice roadmap, not part of it:
 - **Native-app-style dashboard shell** — bottom tab bar on mobile, sidebar on
   desktop, large titles, sheets; Mogul's "Bold spectrum" dark brand system
   (Ink/Carbon neutrals, one spectral gradient per view, Clash + Hanken
-  Grotesk). See `UI-REDESIGN-PLAN.md` and `app/globals.css`.
+  Grotesk). See `app/globals.css`.
 - **Content assistant** (`app/(dashboard)/_components/assistant.tsx`,
   `app/api/assistant/chat/route.ts`) — a chat on the Home tab that answers
   brand questions and can call a `generate_email` tool to kick off a draft

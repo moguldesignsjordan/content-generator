@@ -53,6 +53,12 @@ brands → strategies → icps / pillars → clusters → topics
 
 **DB access** is centralized in `lib/db/`: `client.ts` (server-only Supabase admin client + `isSupabaseConfigured`), `types.ts` (hand-maintained row types — replace with generated types once Supabase is live), `queries.ts` (all reads/writes).
 
+## Git workflow
+
+- **This repo's normal pattern is committing and pushing directly to `main`** — most history (including prior Claude-authored commits) was made this way; feature branches like `feat/dashboard-create-agent` are the exception, not the rule.
+- **A regular (non-force) `git push` to `main` or the current branch is pre-authorized** once the user asks to push (e.g. "push this," "push it up") — treat that request as sufficient without asking for extra confirmation first.
+- This does **not** extend to force-push, `--no-verify`, rewriting published history, or pushing to a branch/remote the user didn't ask about — those still need explicit per-instance approval per standard git safety practice.
+
 ## Conventions and constraints specific to this repo
 
 - **Server-only boundary is enforced, not assumed.** `lib/db/client.ts`, `lib/db/queries.ts`, `lib/clients/anthropic.ts`, and `lib/pipeline/` all import `"server-only"` so secrets (service-role key, Anthropic key) can never reach the client bundle. Keep new secret-touching code behind that boundary.
