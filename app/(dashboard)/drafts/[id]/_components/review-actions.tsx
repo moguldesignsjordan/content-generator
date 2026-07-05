@@ -52,6 +52,9 @@ export function ReviewActions({
   const router = useRouter();
   const [archived, setArchived] = useState(initialArchived);
   const [archiving, setArchiving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [creatingBlog, setCreatingBlog] = useState(false);
 
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
@@ -224,6 +227,55 @@ export function ReviewActions({
       toast.error(`Failed to ${archived ? "unarchive" : "archive"}.`);
     } finally {
       setArchiving(false);
+    }
+  }
+
+  // Permanently removes the draft. Published drafts are blocked server-side
+  // (409); those stay as a permanent record and should be archived instead.
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
+      if (res.status === 409) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(
+          data.error ??
+            "This draft was published, so it can't be deleted. Archive it instead.",
+        );
+      }
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to delete.");
+      }
+      toast.success("Draft deleted.");
+      router.push("/emails");
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete.");
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
+
+  // One-click blog spin-off: starts a fresh blog draft on the same topic (no
+  // re-briefing), then drops onto its review page where generation streams in.
+  async function handleCreateBlog() {
+    setCreatingBlog(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/create-blog`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to start blog post.");
+      }
+      const data = (await res.json()) as { draftId?: string };
+      if (!data.draftId) throw new Error("Failed to start blog post.");
+      router.push(`/drafts/${data.draftId}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to start blog post.");
+      setCreatingBlog(false);
     }
   }
 
@@ -408,6 +460,28 @@ export function ReviewActions({
         </Card>
       )}
 
+      {/* Blog spin-off: one click drafts a long-form, search-optimized post on
+          the same topic as this email, no re-briefing. */}
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">
+            Create a blog post from this topic
+          </p>
+          <p className="text-[13px] text-muted">
+            Drafts a fresh, search-optimized long-form post on the same topic,
+            separate from this email.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          loading={creatingBlog}
+          disabled={busy}
+          onClick={handleCreateBlog}
+        >
+          Create blog post
+        </Button>
+      </Card>
+
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -445,6 +519,15 @@ export function ReviewActions({
             Hidden from the Emails list.
           </span>
         )}
+        <Button
+          variant="ghost"
+          size="lg"
+          className="text-danger hover:bg-danger/10"
+          disabled={busy}
+          onClick={() => setConfirmDelete(true)}
+        >
+          Delete
+        </Button>
         {draftCostUsd > 0 && (
           <span className="ml-auto text-[12px] text-muted">
             This draft cost about ${draftCostUsd < 0.01 ? "0.01" : draftCostUsd.toFixed(2)} to generate.
@@ -482,6 +565,19 @@ export function ReviewActions({
         }
         confirmLabel="Approve anyway"
         cancelLabel="Keep editing"
+      />
+
+      {/* Permanent delete. Published drafts are blocked server-side, so this
+          only ever runs on drafts that haven't gone out. */}
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => void handleDelete()}
+        tone="danger"
+        title="Delete this draft permanently?"
+        description="This removes the draft and its edit history. It can't be undone. If you might still want it, archive it instead."
+        confirmLabel="Delete"
+        loading={deleting}
       />
 
       {/* Reject sheet: closes instantly on submit, regeneration continues

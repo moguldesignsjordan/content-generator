@@ -587,6 +587,51 @@ All uncommitted on `feat/dashboard-create-agent` on top of `bc842a0`.
   preheader "extends, never restates"; `<html lang="en">` required in the
   design brief.
 
+## 2026-07-05 session 2 — draft delete + email-to-blog spin-off
+
+Jordan flagged two missing affordances: no way to delete emails, and no way to
+create a blog from an existing email. Both implemented on top of the work
+above, uncommitted on `feat/dashboard-create-agent`. typecheck + build + test
+green.
+
+- **Hard-delete for drafts.** `deleteDraft()` + `isJobPublished()` in
+  `lib/db/queries.ts`. New `DELETE /api/drafts/[id]` route gates on
+  `isJobPublished`: a draft whose job has any `publications` row is blocked
+  with 409 (permanent record, archive instead); everything else
+  (in-review, approved-not-published, rejected) is deletable. `approvals`
+  cascade automatically (FK is ON DELETE CASCADE), so a delete is literally
+  `delete from drafts`. The parent `content_job` and topic are deliberately
+  left in place so a delete means exactly "remove this draft," not a silent
+  topic status flip. Delete button (ghost, danger text) + ConfirmDialog on
+  BOTH review screens (`review-actions.tsx`, `blog-review-actions.tsx`),
+  alongside the existing Archive.
+- **Per-row actions on the Emails list.** The list used to be navigation-only;
+  every action needed opening the draft. Each row now has inline Archive
+  (toggles to Unarchive in the Archived tab) and Delete icon buttons. Built as
+  a custom row in `emails-list.tsx` rather than the `href` `ListRow`, because
+  `ListRow` renders a single `<a>` and can't nest action buttons (invalid
+  HTML): the open-link is the row's text block, the icon buttons are siblings,
+  so they never trigger navigation. Three new icons (`ArchiveIcon`,
+  `UnarchiveIcon`, `TrashIcon`) in `components/ui/icons.tsx`. Archive is
+  instant with a toast + `router.refresh()`; Delete opens the same
+  `ConfirmDialog` used on the review screen and reuses the published-blocks
+  409 path.
+- **Create blog post from an email.** New `POST /api/drafts/[id]/create-blog`
+  route resolves the source draft's topic (and campaign, if any) via
+  `getDraftWithJobContext`, then calls `createDraftShell({ type: "blog" })` on
+  that same topic, no re-briefing. The blog pipeline generates fresh long-form
+  SEO content from the topic independently of the email; the new draft's page
+  picks up generation via the SSE stream (same shape as `/api/generate`, fast
+  DB writes only). The email review screen gained a "Create a blog post from
+  this topic" card above the actions row; clicking it navigates to the new
+  blog draft, which streams in like any other generation. The email's own
+  copy is NOT threaded into the blog prompt by design (the blog pipeline is
+  topic-grounded and standalone); that's a possible later enhancement.
+- Not yet exercised against a live logged-in browser session this pass (auth
+  middleware blocks plain curl); the routes are server-only and behind the
+  existing server-only boundary. Click through both in the browser before
+  calling fully verified.
+
 ## What's not built yet
 
 - **Live verification of this session's work** — nothing above has run

@@ -394,6 +394,17 @@ export async function getPublication(
   return (data as PublicationRecord) ?? null;
 }
 
+/** True if the job has been published to ANY target (draft deletion gate). */
+export async function isJobPublished(jobId: string): Promise<boolean> {
+  const db = getAdminClient();
+  const { count, error } = await db
+    .from("publications")
+    .select("*", { count: "exact", head: true })
+    .eq("job_id", jobId);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
 /** The most recent publication for the job a draft belongs to (review screen). */
 export async function getPublicationForDraft(
   draftId: string,
@@ -1231,6 +1242,21 @@ export async function listDrafts(): Promise<
 export async function archiveDraft(draftId: string, archived: boolean): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("drafts").update({ archived }).eq("id", draftId);
+  if (error) throw error;
+}
+
+/**
+ * Hard-deletes a draft. `approvals.draft_id` is ON DELETE CASCADE, so a draft's
+ * approval history is cleaned up automatically; publications live on the job,
+ * not the draft, so they're untouched. The caller MUST gate this on
+ * `isJobPublished` returning false — a published draft is a permanent record
+ * (archive it instead). The parent content_job and topic are deliberately left
+ * in place: a delete should mean exactly "remove this draft," not a silent
+ * status flip on the topic.
+ */
+export async function deleteDraft(draftId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("drafts").delete().eq("id", draftId);
   if (error) throw error;
 }
 

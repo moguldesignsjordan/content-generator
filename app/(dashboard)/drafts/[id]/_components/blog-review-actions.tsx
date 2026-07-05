@@ -53,6 +53,8 @@ export function BlogReviewActions({
   const [state, setState] = useState(initialState);
   const [archived, setArchived] = useState(initialArchived);
   const [archiving, setArchiving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
   const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
   const [approving, setApproving] = useState(false);
@@ -168,6 +170,34 @@ export function BlogReviewActions({
       toast.error(`Failed to ${archived ? "unarchive" : "archive"}.`);
     } finally {
       setArchiving(false);
+    }
+  }
+
+  // Permanently removes the draft. Published drafts (already sent to Sanity)
+  // are blocked server-side (409); those should be archived instead.
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
+      if (res.status === 409) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(
+          data.error ??
+            "This post was published, so it can't be deleted. Archive it instead.",
+        );
+      }
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to delete.");
+      }
+      toast.success("Draft deleted.");
+      router.push("/emails");
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete.");
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -307,6 +337,15 @@ export function BlogReviewActions({
         >
           {archived ? "Unarchive" : "Archive"}
         </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="text-danger hover:bg-danger/10"
+          disabled={approving || archiving || publishing}
+          onClick={() => setConfirmDelete(true)}
+        >
+          Delete
+        </Button>
         {draftCostUsd > 0 && (
           <span className="ml-auto text-[12px] text-muted">
             This draft cost about ${draftCostUsd < 0.01 ? "0.01" : draftCostUsd.toFixed(2)} to generate.
@@ -340,6 +379,16 @@ export function BlogReviewActions({
         }
         confirmLabel="Approve anyway"
         cancelLabel="Keep editing"
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => void handleDelete()}
+        tone="danger"
+        title="Delete this draft permanently?"
+        description="This removes the draft and its edit history. It can't be undone. If you might still want it, archive it instead."
+        confirmLabel="Delete"
+        loading={deleting}
       />
     </div>
   );
