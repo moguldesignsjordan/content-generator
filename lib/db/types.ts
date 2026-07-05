@@ -305,6 +305,19 @@ export type EmailTemplateId =
   | "newsletter_feature"
   | "newsletter_howto";
 
+// The marketing PURPOSE of an email. Kept deliberately separate from
+// EmailTemplateId (which is layout) and FunnelStage (which picks the CTA):
+// email_type picks length, depth, and tone. Derived deterministically at
+// generation time from the topic plus any campaign brief (see resolveEmailType
+// in prompts/generate-email.ts), so every existing topic gets a type with no
+// migration. A future content_jobs.email_type column makes it settable per job.
+export type EmailType =
+  | "newsletter"
+  | "product"
+  | "service"
+  | "promotional"
+  | "announcement";
+
 export interface EmailCopySection {
   heading?: string;
   body: string;
@@ -420,6 +433,10 @@ export interface DraftMeta {
   meta_title?: string;
   meta_description?: string;
   email_template_id?: EmailTemplateId;
+  // The marketing purpose that drove this draft's length budget. Set at
+  // generation time from resolveEmailType so the review surface and future
+  // logic know which length target the draft was shaped against.
+  email_type?: EmailType;
   email_copy?: EmailCopy;
   // Structured blog post for content_jobs.type='blog' drafts; the source of
   // truth the Sanity publish converts to Portable Text.

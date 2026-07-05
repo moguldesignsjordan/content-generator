@@ -4,6 +4,8 @@ import type {
   CampaignBrief,
   ContentImage,
   EmailTemplateId,
+  EmailType,
+  Product,
   TopicContext,
   Topic,
 } from "@/lib/db/types";
@@ -159,6 +161,139 @@ export function resolveEmailTemplateId(topic: Topic): EmailTemplateId {
   return "newsletter_tip";
 }
 
+// Per-type length budgets. email_type is the axis that decides how long an
+// email should be (layout and funnel stage are orthogonal: they pick shape and
+// CTA). These ranges are injected into the prompt as a hard constraint AND
+// enforced after generation (see countEmailWords + the retry in generate.ts),
+// so "make sure the email is long enough" is no longer left to the model's
+// discretion. Tune here in one place; a future settings form can write through
+// this map.
+export interface EmailLengthTarget {
+  words: [number, number];
+  sections: [number, number];
+  /** Plain-English shape of the email, injected so the model understands the intent, not just the numbers. */
+  directive: string;
+}
+
+export const EMAIL_LENGTH_TARGETS: Record<EmailType, EmailLengthTarget> = {
+  newsletter: {
+    words: [300, 700],
+    sections: [2, 5],
+    directive:
+      "a substantive newsletter. Open with a hook, deliver one genuinely useful idea with enough depth to feel worth reading (examples, the reasoning behind the advice, a concrete takeaway), then a clear CTA. Aim for the middle of the word range and never pad with filler.",
+  },
+  product: {
+    words: [300, 450],
+    sections: [2, 3],
+    directive:
+      "a product spotlight. Lead with the outcome the reader gets, explain what it is and why it matters, give one or two concrete specifics, then a confident CTA to see it. Specifics over adjectives.",
+  },
+  service: {
+    words: [350, 550],
+    sections: [3, 4],
+    directive:
+      "a service pitch. Frame the problem, show how the service solves it and what working together looks like, add proof or specificity, then a CTA to book or learn more.",
+  },
+  promotional: {
+    words: [120, 250],
+    sections: [1, 2],
+    directive:
+      "a short, punchy promotional email. Lead with the offer and the reason to act now, keep copy minimal, and put one dominant CTA above the fold. Brief beats long here.",
+  },
+  announcement: {
+    words: [200, 350],
+    sections: [1, 3],
+    directive:
+      "a clear announcement. Put the news up top, explain why it matters to the reader, and say what to do next. Informative and confident, not salesy.",
+  },
+};
+
+// Service-y keywords in a product name/description. Agency brands (Mogul
+// included) sell services far more often than products, so a mapped offer that
+// reads like a service is typed as `service` (its own length budget) rather
+// than collapsed into `product`. Soft heuristic; a future product.category
+// column replaces it.
+const SERVICE_KEYWORDS = [
+  "service",
+  "audit",
+  "call",
+  "consult",
+  "consulting",
+  "session",
+  "coaching",
+  "workshop",
+  "retainer",
+  "advisory",
+  "strategy",
+  "design",
+  "development",
+];
+
+const PROMO_KEYWORDS = [
+  "launch",
+  "offer",
+  "sale",
+  "discount",
+  "limited",
+  "promot",
+  "register",
+  "rsvp",
+  "webinar",
+  "event",
+  "enroll",
+  "book now",
+  "sign up",
+];
+
+/**
+ * Derives the marketing purpose of an email, deterministically, from the topic
+ * and any campaign brief. No model classification: the rule is stable and
+ * free. Priority:
+ *   1. campaign offer with a commercial angle -> promotional
+ *   2. brand-stage topic -> announcement
+ *   3. mapped offer -> product (or service, by keyword)
+ *   4. otherwise -> newsletter (the recurring default)
+ * A future content_jobs.email_type column overrides this the way
+ * templateOverride already overrides resolveEmailTemplateId.
+ */
+export function resolveEmailType(
+  topic: Topic,
+  opts: { brief?: CampaignBrief | null; product?: Product | null } = {},
+): EmailType {
+  const { brief, product } = opts;
+
+  const promoHaystack =
+    `${brief?.goal ?? ""} ${brief?.angle ?? ""} ${brief?.key_message ?? ""}`.toLowerCase();
+  if (
+    brief?.offer_slug &&
+    PROMO_KEYWORDS.some((k) => promoHaystack.includes(k))
+  ) {
+    return "promotional";
+  }
+
+  if (topic.funnel_stage === "brand") return "announcement";
+
+  if (topic.maps_to_product) {
+    const nameHay =
+      `${product?.name ?? ""} ${product?.description ?? ""}`.toLowerCase();
+    const isService = SERVICE_KEYWORDS.some((k) => nameHay.includes(k));
+    return isService ? "service" : "product";
+  }
+
+  return "newsletter";
+}
+
+/** Word count of an email's body copy (the sections, not the one-line headline). */
+export function countEmailWords(
+  copy: { body_sections: { body: string }[] },
+): number {
+  return copy.body_sections.reduce(
+    (sum, s) =>
+      sum + s.body.trim().split(/\s+/).filter(Boolean).length,
+    0,
+  );
+}
+
 /** Builds the offer block from the topic's resolved product row. */
 export function buildOfferBlock(ctx: TopicContext): string {
   const p = ctx.product;
@@ -195,6 +330,7 @@ export function buildEmailMessages(
 ): {
   system: string;
   user: string;
+  emailType: EmailType;
 } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
@@ -202,6 +338,11 @@ export function buildEmailMessages(
   const positioningBlock = buildPositioningBlock(brand);
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const { ctaText } = resolveCta(ctx);
+  const emailType = resolveEmailType(topic, {
+    brief: opts.brief ?? null,
+    product: ctx.product,
+  });
+  const length = EMAIL_LENGTH_TARGETS[emailType];
   const templateId = opts.templateOverride ?? resolveEmailTemplateId(topic);
   const designBrief = buildEmailDesignBrief(tokens, templateId, {
     heroImage: opts.heroImage,
@@ -255,6 +396,8 @@ export function buildEmailMessages(
     "Write and design one email.",
     "",
     briefBlock,
+    `EMAIL TYPE: ${emailType}`,
+    `LENGTH FOR THIS EMAIL (required, not optional): ${length.words[0]} to ${length.words[1]} words of body copy across ${length.sections[0]} to ${length.sections[1]} body_sections. This is ${emailType === "promotional" || emailType === "announcement" ? `an ${emailType}` : `a ${emailType}`} email: ${length.directive} The body_sections array must hold ${length.sections[0]} to ${length.sections[1]} entries that together total ${length.words[0]} to ${length.words[1]} words.`,
     `TITLE: ${topic.title}`,
     topic.target_keyword ? `TARGET KEYWORD: ${topic.target_keyword}` : "",
     topic.intent ? `SEARCH INTENT: ${topic.intent}` : "",
@@ -282,5 +425,5 @@ export function buildEmailMessages(
     .filter(Boolean)
     .join("\n");
 
-  return { system, user };
+  return { system, user, emailType };
 }

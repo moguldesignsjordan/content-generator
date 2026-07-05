@@ -20,9 +20,12 @@ import {
 import {
   EMAIL_TOOL,
   EmailDraftSchema,
+  EMAIL_LENGTH_TARGETS,
   buildEmailMessages,
+  countEmailWords,
   resolveEmailTemplateId,
   type EmailDraftOutput,
+  type EmailLengthTarget,
 } from "@/prompts/generate-email";
 import { QA_TOOL, QaSchema, buildQaMessages } from "@/prompts/qa-email";
 import {
@@ -36,6 +39,7 @@ import type {
   EmailCopy,
   EmailDraftContent,
   EmailTemplateId,
+  EmailType,
   DraftMeta,
   DraftSeoData,
   DraftUsage,
@@ -80,8 +84,14 @@ export async function generateEmailForTopicStreamed(
 
     const brief = await loadCampaignBrief(opts.campaignId);
     const tokens = resolveBrandTokens(ctx.brand);
-    const { system, user } = buildEmailMessages(ctx, tokens, { brief });
-    const { parsed, usageDeltas } = await generateEmailCopy(system, user);
+    const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
+      brief,
+    });
+    const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
+    const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
+      lengthTarget,
+      emailType,
+    });
 
     const { content, copy, templateId, designSource } = renderEmailForContext(
       ctx,
@@ -104,7 +114,7 @@ export async function generateEmailForTopicStreamed(
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const qa = await runQaPass(ctx, copy, content.html);
+    const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType);
     usageDeltas.push(...qa.usageDeltas);
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -112,6 +122,7 @@ export async function generateEmailForTopicStreamed(
     const meta: DraftMeta = {
       ...qa.meta,
       email_template_id: templateId,
+      email_type: emailType,
       email_copy: copy,
       email_design_source: designSource,
       ...(heroImage ? { hero_image: heroImage } : {}),
@@ -195,6 +206,7 @@ async function loadCampaignBrief(
 async function generateEmailCopy(
   system: string,
   user: string,
+  opts: { lengthTarget?: EmailLengthTarget; emailType?: EmailType } = {},
 ): Promise<{ parsed: EmailDraftOutput; usageDeltas: UsageDelta[] }> {
   // The system prompt (brand guidelines/voice/positioning + the email design
   // system) only varies by template, of which there are three, so it's
@@ -206,14 +218,14 @@ async function generateEmailCopy(
   // Streamed because copy + a complete designed HTML document + adaptive
   // thinking share this token budget, and the SDK requires streaming for
   // requests that could outlive its non-streaming timeout ceiling.
-  const call = () =>
+  const call = (u: string) =>
     getAnthropic()
       .messages.stream({
         model: DRAFT_MODEL,
         max_tokens: 32000,
         thinking: { type: "adaptive" },
         system: cachedSystem,
-        messages: [{ role: "user", content: user }],
+        messages: [{ role: "user", content: u }],
         tools: [EMAIL_TOOL],
         tool_choice: { type: "tool", name: "save_email_draft" },
       })
@@ -240,19 +252,63 @@ async function generateEmailCopy(
     return parsed.data;
   };
 
-  const usageDeltas: UsageDelta[] = [];
-  try {
-    const resp = await call();
-    logUsage("email-copy", resp.usage);
+  const runOnce = async (label: string, u: string): Promise<EmailDraftOutput> => {
+    const resp = await call(u);
+    logUsage(label, resp.usage);
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
-    return { parsed: extract(resp), usageDeltas };
+    return extract(resp);
+  };
+
+  const usageDeltas: UsageDelta[] = [];
+  let parsed: EmailDraftOutput;
+  try {
+    parsed = await runOnce("email-copy", user);
   } catch (err) {
     console.error("[generate] email copy failed, retrying once:", err);
-    const resp = await call();
-    logUsage("email-copy-retry", resp.usage);
-    usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
-    return { parsed: extract(resp), usageDeltas };
+    parsed = await runOnce("email-copy-retry", user);
   }
+
+  // Length enforcement: if the draft came in under this email type's minimum
+  // word count, hand the model its actual word count and the target and try
+  // once more (reusing the cached system prompt). One retry only, matching the
+  // existing retry posture; a still-short result is still surfaced as a QA
+  // issue by runQaPass so the reviewer sees it.
+  const { lengthTarget, emailType } = opts;
+  if (lengthTarget) {
+    const words = countEmailWords(parsed);
+    if (words < lengthTarget.words[0]) {
+      console.warn(
+        `[generate] email too short (${words} < ${lengthTarget.words[0]} for ${emailType ?? "this type"}); retrying once`,
+      );
+      const nudge = [
+        "",
+        "LENGTH CHECK: the previous draft was only " +
+          words +
+          " words of body copy.",
+        "This email must be " +
+          lengthTarget.words[0] +
+          " to " +
+          lengthTarget.words[1] +
+          " words across " +
+          lengthTarget.sections[0] +
+          " to " +
+          lengthTarget.sections[1] +
+          " body_sections.",
+        "Rewrite with more depth: expand each section with concrete examples, named specifics, and the reasoning behind the advice. Keep it tight and on-brand; do not pad with filler or repeat yourself.",
+        "Reach at least " + lengthTarget.words[0] + " words this time.",
+      ].join("\n");
+      try {
+        parsed = await runOnce("email-copy-length-retry", user + nudge);
+      } catch (err) {
+        console.error(
+          "[generate] length retry failed, keeping first draft:",
+          err,
+        );
+      }
+    }
+  }
+
+  return { parsed, usageDeltas };
 }
 
 /**
@@ -374,6 +430,8 @@ async function runQaPass(
   ctx: TopicContext,
   copy: EmailCopy,
   html: string,
+  lengthTarget?: EmailLengthTarget,
+  emailType?: EmailType,
 ): Promise<{ meta: DraftMeta; seoData: DraftSeoData; usageDeltas: UsageDelta[] }> {
   const usageDeltas: UsageDelta[] = [];
   let meta: DraftMeta = {};
@@ -431,6 +489,33 @@ async function runQaPass(
     seoData = { ...seoData, issues: [...(seoData.issues ?? []), ...contrast] };
   }
 
+  // Length check (code-level, authoritative): the prompt asks for a type-specific
+  // word range and generateEmailCopy retries once if the first draft is short,
+  // but the model can still miss. Surface the actual count vs. target so the
+  // reviewer sees "248 / 300 words for a newsletter email" before approving.
+  if (lengthTarget) {
+    const words = countEmailWords(copy);
+    const [min, max] = lengthTarget.words;
+    const typeLabel = emailType ? `${emailType} email` : "this email type";
+    if (words < min) {
+      seoData = {
+        ...seoData,
+        issues: [
+          ...(seoData.issues ?? []),
+          `Length: ${words} of ${min} to ${max} words for a ${typeLabel}. Too short; expand the body with more depth.`,
+        ],
+      };
+    } else if (words > max) {
+      seoData = {
+        ...seoData,
+        issues: [
+          ...(seoData.issues ?? []),
+          `Length: ${words} words, over the ${max}-word target for a ${typeLabel}.`,
+        ],
+      };
+    }
+  }
+
   return { meta, seoData, usageDeltas };
 }
 
@@ -466,7 +551,7 @@ export async function regenerateEmailDraft(
   const brief = await loadCampaignBrief(draftCtx.campaignId);
   const tokens = resolveBrandTokens(ctx.brand);
   const heroImage = draftCtx.meta.hero_image;
-  const { system, user } = buildEmailMessages(ctx, tokens, {
+  const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
     brief,
     templateOverride: opts.templateOverride,
     heroImage,
@@ -476,8 +561,12 @@ export async function regenerateEmailDraft(
       previousPreheader: draftCtx.content.preheader,
     },
   });
+  const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
 
-  const { parsed, usageDeltas } = await generateEmailCopy(system, user);
+  const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
+    lengthTarget,
+    emailType,
+  });
 
   const { content, copy, templateId, designSource } = renderEmailForContext(
     ctx,
@@ -486,7 +575,7 @@ export async function regenerateEmailDraft(
     heroImage,
   );
 
-  const qa = await runQaPass(ctx, copy, content.html);
+  const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType);
   usageDeltas.push(...qa.usageDeltas);
   let usage: DraftUsage | undefined;
   for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -494,6 +583,7 @@ export async function regenerateEmailDraft(
   const meta: DraftMeta = {
     ...qa.meta,
     email_template_id: templateId,
+    email_type: emailType,
     email_copy: copy,
     email_design_source: designSource,
     ...(heroImage ? { hero_image: heroImage } : {}),
