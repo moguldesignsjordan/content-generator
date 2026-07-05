@@ -145,9 +145,9 @@ export function buildImagePromptMessages(args: {
   const { brandName, topicTitle, headline, style, subject, referenceUse } = args;
 
   const system = [
-    "You write scene descriptions for marketing-email hero images. Given the",
-    "email's topic and headline, describe ONE concrete, visually interesting",
-    "scene that represents the idea. Rules:",
+    "You write scene descriptions for marketing hero images (emails and blog",
+    "posts). Given the piece's topic and headline, describe ONE concrete,",
+    "visually interesting scene that represents the idea. Rules:",
     "- Concrete and specific: objects, settings, actions. Never abstract nouns alone.",
     "- No style, palette, lighting, or quality words; a fixed scaffold adds those.",
     "- No text, letters, numbers, screens with readable UI, or logos in the scene.",

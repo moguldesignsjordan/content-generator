@@ -42,7 +42,11 @@ import type {
 } from "@/lib/db/types";
 import { stripEmDashes } from "@/lib/text";
 import { contrastIssues, findBannedTerms } from "@/lib/email/quality";
-import { spliceHeroImage } from "./generate-image";
+import {
+  generateContentImage,
+  isGeminiConfigured,
+  spliceHeroImage,
+} from "./generate-image";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 
@@ -83,6 +87,18 @@ export async function generateEmailForTopicStreamed(
       parsed,
     );
 
+    // Brand-level opt-in (asked during onboarding): auto-create the hero
+    // image on FIRST generation only. Regenerations keep whatever image the
+    // draft already has, so a deliberately removed image never comes back.
+    // Non-fatal by design: an image hiccup must never cost the whole draft.
+    const heroImage = await maybeAutoHeroImage(ctx, copy.headline, usageDeltas, {
+      draftId,
+      onEvent,
+    });
+    if (heroImage) {
+      content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
+    }
+
     const checking = { phase: "checking", label: "Running quality checks" };
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
@@ -97,6 +113,7 @@ export async function generateEmailForTopicStreamed(
       email_template_id: templateId,
       email_copy: copy,
       email_design_source: designSource,
+      ...(heroImage ? { hero_image: heroImage } : {}),
       usage,
     };
     const seoData = qa.seoData;
@@ -115,6 +132,46 @@ export async function generateEmailForTopicStreamed(
     );
     onEvent({ type: "error", message });
     throw err;
+  }
+}
+
+/**
+ * Auto-generates a hero image when the brand opted in
+ * (visual_identity.image_gen.auto) and Gemini is configured. Returns
+ * undefined (and just logs) on any failure or when the pref is off: the
+ * approval gate still covers the image, and the reviewer can always
+ * regenerate, replace, move, or remove it on the review screen.
+ */
+export async function maybeAutoHeroImage(
+  ctx: TopicContext,
+  headline: string | undefined,
+  usageDeltas: UsageDelta[],
+  progress?: {
+    draftId: string;
+    onEvent: (event: GenerationEvent) => void;
+  },
+): Promise<ContentImage | undefined> {
+  const prefs = ctx.brand.visual_identity?.image_gen;
+  if (!prefs?.auto || !isGeminiConfigured()) return undefined;
+
+  if (progress) {
+    const imaging = { phase: "imaging", label: "Creating your image" };
+    await patchDraftGeneration(progress.draftId, imaging).catch(() => {});
+    progress.onEvent({ type: "phase", ...imaging });
+  }
+  try {
+    const generated = await generateContentImage({
+      tokens: resolveBrandTokens(ctx.brand),
+      brandName: ctx.brand.name,
+      topicTitle: ctx.topic.title,
+      headline,
+      style: prefs.style ?? "illustration",
+    });
+    usageDeltas.push(...generated.usage);
+    return { ...generated.image, placement: "top" };
+  } catch (err) {
+    console.error("[generate] auto hero image failed (non-fatal):", err);
+    return undefined;
   }
 }
 

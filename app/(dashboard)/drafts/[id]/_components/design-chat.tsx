@@ -180,15 +180,10 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
             Adjust the design
           </p>
           <p className="text-[12.5px] text-muted">
-            Style only, in plain words. Copy doesn&apos;t change and this
-            doesn&apos;t use a draft version. Be specific about what you mean:
-            &ldquo;the header bar&rdquo; (background) is different from
-            &ldquo;the header text&rdquo; or &ldquo;the headline&rdquo;. If the
-            design has drifted out of sync with your brand colors in several
-            places, Redesign is faster than chasing each one, and if you
-            want it to look different from your saved brand colors just for
-            this one email, type that here first, e.g. &ldquo;darker, purple
-            accent instead&rdquo;, then hit Redesign instead of Apply.
+            Describe a style change in plain words; the copy stays put.
+            Redesign restyles the whole email from your brand colors (type a
+            direction first, like &ldquo;darker, purple accent&rdquo;, to steer
+            it).
           </p>
         </div>
         <Button

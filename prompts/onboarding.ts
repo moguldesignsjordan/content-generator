@@ -22,6 +22,7 @@ export interface OnboardingToolInput {
   icp_vocabulary?: string[];
   icp_jobs?: string[];
   icp_objections?: string[];
+  auto_images?: boolean;
   complete?: boolean;
 }
 
@@ -36,7 +37,8 @@ export const ONBOARDING_TOOL: Anthropic.Tool = {
     "Save brand-profile fields you have just confirmed from the user's answer. " +
     "Pass ONLY the fields the user has clearly given you this turn (don't guess). " +
     "Set complete=true once you have gathered: name, what they do, tagline, " +
-    "differentiators, competitors, ideal customer, voice/tone, and sender info.",
+    "differentiators, competitors, ideal customer, voice/tone, sender info, " +
+    "and the auto-images preference.",
   input_schema: {
     type: "object",
     properties: {
@@ -79,6 +81,13 @@ export const ONBOARDING_TOOL: Anthropic.Tool = {
         description: "Jobs to be done for the customer.",
       },
       icp_objections: { type: "array", items: { type: "string" }, description: "Customer objections." },
+      auto_images: {
+        type: "boolean",
+        description:
+          "True if the user wants an on-brand image created automatically " +
+          "with each new email/blog draft, false if they'd rather add images " +
+          "themselves. They always review and approve before anything publishes.",
+      },
       complete: {
         type: "boolean",
         description: "True once all onboarding topics are gathered.",
@@ -107,6 +116,8 @@ export function buildOnboardingSystem(brand: Brand): string {
   if (v.tone) filled.push("tone");
   if (m.sender_name) filled.push("sender_name");
   if (m.sender_email) filled.push("sender_email");
+  const autoImages = brand.visual_identity?.image_gen?.auto;
+  if (autoImages !== undefined) filled.push("auto_images");
 
   const currentProfile = [
     "CURRENT PROFILE (already collected, don't re-ask these unless you need to refine):",
@@ -119,6 +130,7 @@ export function buildOnboardingSystem(brand: Brand): string {
     `  Tone: ${v.tone || "(not set)"}`,
     `  Sender name: ${m.sender_name || "(not set)"}`,
     `  Sender email: ${m.sender_email || "(not set)"}`,
+    `  Auto images: ${autoImages === undefined ? "(not asked)" : autoImages ? "yes" : "no"}`,
     `  Already gathered: ${filled.length ? filled.join(", ") : "nothing yet"}`,
   ].join("\n");
 
@@ -138,6 +150,11 @@ export function buildOnboardingSystem(brand: Brand): string {
     "   (icp_label, icp_demographics, icp_pains, icp_vocabulary)",
     "7. How the brand should sound, voice and tone",
     "8. Who emails come from, sender name and email",
+    "9. Whether they want an image created automatically with each draft",
+    "   (auto_images). Frame it plainly: an on-brand image is generated with",
+    "   every new email or blog draft, and they always review and approve",
+    "   before anything publishes. They can also skip this and add images by",
+    "   hand per draft.",
     "",
     "RULES:",
     "- Ask ONE focused question at a time. Don't dump a list of questions.",
@@ -147,7 +164,8 @@ export function buildOnboardingSystem(brand: Brand): string {
     "- If an answer is vague or thin, ask one clarifying follow-up before saving.",
     "- Always reply with a normal message (your next question/acknowledgement). Never",
     "  reply with only a tool call, the user must see your words.",
-    "- Colors, fonts, and logo are handled elsewhere, don't ask about visuals. You can",
+    "- Colors, fonts, and logo are handled elsewhere, don't ask about those. The",
+    "  auto-images question (topic 9) is the ONE visual thing you do ask. You can",
     "  mention they can fine-tune everything later in Settings.",
     "- When ALL topics are gathered, call save_brand_profile with complete=true and give",
     "  a warm wrap-up telling them they're ready to generate content.",

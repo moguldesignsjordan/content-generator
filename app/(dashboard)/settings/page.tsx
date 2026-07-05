@@ -1,6 +1,7 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandWithIcps, listProducts } from "@/lib/db/queries";
+import { getBrandIntegrations, getBrandWithIcps, listProducts } from "@/lib/db/queries";
 import { listProviders } from "@/lib/publishing/registry";
+import { describeConnection } from "@/lib/publishing/connections";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { SettingsClient } from "./_components/settings-client";
@@ -52,6 +53,7 @@ export default async function SettingsPage() {
   const { brand, strategy, icps } = data;
   const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
   const products = await listProducts(brand.id);
+  const integrations = await getBrandIntegrations(brand.id);
 
   return (
     <>
@@ -64,13 +66,18 @@ export default async function SettingsPage() {
         strategy={strategy}
         primaryIcp={primaryIcp}
         products={products}
-        connections={listProviders().map((p) => ({
-          id: p.id,
-          label: p.label,
-          kind: p.kind,
-          configured: p.isConfigured(),
-          configHint: p.configHint,
-        }))}
+        connections={listProviders().map((p) => {
+          const integration =
+            integrations.find((i) => i.provider_id === p.id) ?? null;
+          return {
+            id: p.id,
+            label: p.label,
+            kind: p.kind,
+            configHint: p.configHint,
+            fields: p.fields,
+            ...describeConnection(p, brand, integration),
+          };
+        })}
       />
     </>
   );

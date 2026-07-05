@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getBlogDraftFromEmail,
+  getBrandIntegration,
   getDraftForReview,
   getDraftSubject,
   getPublicationForDraft,
+  getSingleBrand,
 } from "@/lib/db/queries";
-import { isSanityConfigured } from "@/lib/clients/sanity";
+import { resolveSanityConfig } from "@/lib/clients/sanity";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
@@ -43,6 +45,19 @@ export default async function DraftReviewPage({
       : null;
   const existingBlog =
     !isBlog ? await getBlogDraftFromEmail(id).catch(() => null) : null;
+
+  // The blog publish card shows when Sanity is reachable through the brand's
+  // saved connection OR the env-var fallback.
+  let sanityConfigured = false;
+  if (isBlog) {
+    const brand = await getSingleBrand().catch(() => null);
+    const integration = brand
+      ? await getBrandIntegration(brand.id, "sanity").catch(() => null)
+      : null;
+    sanityConfigured = integration
+      ? resolveSanityConfig(integration) !== null
+      : false;
+  }
 
   return (
     <>
@@ -92,7 +107,7 @@ export default async function DraftReviewPage({
           seoData={draft.seo_data}
           initialArchived={draft.archived}
           publication={publication}
-          sanityConfigured={isSanityConfigured()}
+          sanityConfigured={sanityConfigured}
         />
       ) : (
         <ReviewActions

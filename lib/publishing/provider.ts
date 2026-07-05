@@ -1,6 +1,7 @@
 import "server-only";
 import type {
   Brand,
+  BrandIntegration,
   ContentJobType,
   DraftMeta,
   EmailDraftContent,
@@ -13,12 +14,38 @@ import type {
 // This mirrors the repo's "strategy is data" philosophy: destinations are
 // config, not code paths.
 
+/**
+ * One connection field a user can set in Settings → Connections. The provider's
+ * `fields` array is the single source of truth shared by the Connections form
+ * and the connections API route (no separate field-schema metaprogramming).
+ */
+export interface ProviderField {
+  /** Key in brand_integrations.config (and the form payload). */
+  key: string;
+  /** Form label. */
+  label: string;
+  /** Help text under the field. */
+  hint?: string;
+  /** Input placeholder. */
+  placeholder?: string;
+  /** Masked in the UI and encrypted at rest; never returned decrypted. */
+  secret?: boolean;
+  /** A string[] field rendered with the list editor (e.g. group IDs). */
+  list?: boolean;
+  /** Non-required fields can be left blank. */
+  optional?: boolean;
+  /** The env var used as fallback when this field is unset. Shown as a hint. */
+  envVar?: string;
+}
+
 export interface PublishInput {
   jobId: string;
   draftId: string;
   content: EmailDraftContent;
   meta: DraftMeta;
   brand: Brand;
+  /** The brand's saved connection for this provider, if any (env is fallback). */
+  integration: BrandIntegration | null;
 }
 
 export interface PublishResult {
@@ -33,10 +60,17 @@ export interface PublishProvider {
   kind: ContentJobType;
   /** Human name for the Connections settings surface. */
   label: string;
-  /** The env vars (v1) this provider needs; shown in Connections. */
+  /** The env vars (fallback) this provider needs; shown when not connected. */
   configHint: string;
-  /** True when credentials are present. Never throws. */
-  isConfigured(): boolean;
+  /** Connection fields this provider needs (the Connections form contract). */
+  fields: ProviderField[];
+  /**
+   * True when credentials are present from EITHER the brand's connection OR
+   * the env-var fallback. Never throws. Per-field env fallback is deliberate
+   * graceful degradation (a connected provider with one blank secret still
+   * works if the env var fills it).
+   */
+  isConfigured(brand: Brand, integration: BrandIntegration | null): boolean;
   /**
    * Pushes one approved draft to the destination. MUST be safe to retry:
    * either internally idempotent (deterministic external id) or tolerant of

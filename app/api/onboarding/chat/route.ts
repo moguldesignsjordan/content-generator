@@ -14,6 +14,7 @@ import {
   updateIcp,
   updateOnboardingState,
   updatePositioning,
+  updateVisualIdentity,
 } from "@/lib/db/queries";
 import type {
   Brand,
@@ -194,6 +195,16 @@ async function applyProfileUpdates(
       ...(input.banned_terms !== undefined && { banned_terms: input.banned_terms }),
     };
     await updateBrandVoice(brand.id, next);
+  }
+
+  // Auto-images preference; merged so colors/fonts/logo are untouched. The
+  // approval gate is unaffected: auto only changes when an image is CREATED.
+  if (input.auto_images !== undefined) {
+    const vi = brand.visual_identity ?? {};
+    await updateVisualIdentity(brand.id, {
+      ...vi,
+      image_gen: { ...(vi.image_gen ?? {}), auto: input.auto_images },
+    });
   }
 
   // ICP, needs a strategy + primary ICP row.

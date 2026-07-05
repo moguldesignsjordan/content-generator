@@ -46,7 +46,7 @@ export const newsletterFeature: EmailTemplate = {
 
     const inner =
       renderEyebrow("Feature", tokens) +
-      `<h1 data-region="headline" style="margin:0 0 22px;font-family:${tokens.fonts.heading};` +
+      `<h1 data-region="headline" class="em-heading" style="margin:0 0 22px;font-family:${tokens.fonts.heading};` +
       `font-size:32px;line-height:1.2;letter-spacing:-0.5px;color:${c.primary};">` +
       `${escapeHtml(copy.headline)}</h1>` +
       lead +

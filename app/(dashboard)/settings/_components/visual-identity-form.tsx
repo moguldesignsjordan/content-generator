@@ -1,8 +1,31 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Button, Card, Field, Input, Label, useToast } from "@/components/ui";
-import type { BrandColors, BrandFonts, VisualIdentity } from "@/lib/db/types";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Field,
+  Input,
+  Label,
+  Select,
+  useToast,
+} from "@/components/ui";
+import type {
+  BrandColors,
+  BrandFonts,
+  ContentImageStyle,
+  VisualIdentity,
+} from "@/lib/db/types";
+
+const IMAGE_STYLE_OPTIONS: { value: ContentImageStyle; label: string }[] = [
+  { value: "illustration", label: "Illustration" },
+  { value: "photo", label: "Photo" },
+  { value: "texture", label: "Brand texture" },
+  { value: "render3d", label: "Soft 3D" },
+  { value: "collage", label: "Collage" },
+  { value: "lineart", label: "Line art" },
+];
 
 interface VisualIdentityFormProps {
   brandId: string;
@@ -44,6 +67,10 @@ export function VisualIdentityForm({
     initialFooter.postal_address ?? "",
   );
   const [social, setSocial] = useState(initialSocial);
+  const [autoImages, setAutoImages] = useState(vi.image_gen?.auto ?? false);
+  const [imageStyle, setImageStyle] = useState<ContentImageStyle>(
+    vi.image_gen?.style ?? "illustration",
+  );
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,6 +117,7 @@ export function VisualIdentityForm({
               postal_address: postalAddress.trim() || undefined,
               social,
             },
+            image_gen: { auto: autoImages, style: imageStyle },
           },
         }),
       });
@@ -246,6 +274,41 @@ export function VisualIdentityForm({
             />
           </Field>
         </div>
+      </div>
+
+      {/* AI images */}
+      <div>
+        <Label>AI images</Label>
+        <p className="-mt-1 mb-2 text-xs text-muted">
+          You always review and approve drafts, image included, before
+          anything publishes.
+        </p>
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <Checkbox
+            size="sm"
+            checked={autoImages}
+            onChange={(e) => setAutoImages(e.target.checked)}
+          />
+          <span className="text-sm text-foreground">
+            Create an image automatically with each new draft
+          </span>
+        </label>
+        {autoImages && (
+          <div className="mt-3 max-w-xs">
+            <Field label="Default style">
+              <Select
+                value={imageStyle}
+                onChange={(e) => setImageStyle(e.target.value as ContentImageStyle)}
+              >
+                {IMAGE_STYLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        )}
       </div>
 
       {/* Social */}

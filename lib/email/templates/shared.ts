@@ -31,7 +31,7 @@ export function paragraphs(text: string, color = "inherit"): string {
  */
 export function leadParagraph(text: string, tokens: BrandTokens): string {
   return (
-    `<p style="margin:0 0 24px;font-size:19px;line-height:1.55;` +
+    `<p class="em-lead" style="margin:0 0 24px;font-size:19px;line-height:1.55;` +
     `color:${tokens.colors.secondary};font-weight:400;">${escapeHtml(text)}</p>`
   );
 }
@@ -47,7 +47,7 @@ export function renderEyebrow(text: string, tokens: BrandTokens): string {
 
 /** A thin horizontal rule used to separate sections. */
 export function renderDivider(): string {
-  return `<div style="height:1px;line-height:1px;font-size:0;background:#E6EAF0;margin:32px 0;">&nbsp;</div>`;
+  return `<div class="em-hairline" style="height:1px;line-height:1px;font-size:0;background:#E6EAF0;margin:32px 0;">&nbsp;</div>`;
 }
 
 /**
@@ -73,13 +73,13 @@ export function renderHeader(tokens: BrandTokens): string {
   const brand = tokens.logo_url
     ? `<img src="${escapeHtml(tokens.logo_url)}" alt="${escapeHtml(tokens.logo_alt)}" ` +
       `style="display:inline-block;max-width:170px;max-height:48px;" />`
-    : `<span style="font-family:${tokens.fonts.heading};font-size:20px;font-weight:700;` +
+    : `<span class="em-heading" style="font-family:${tokens.fonts.heading};font-size:20px;font-weight:700;` +
       `letter-spacing:-0.3px;color:${tokens.colors.primary};">${escapeHtml(tokens.logo_alt)}` +
       `<span style="color:${tokens.colors.accent};">.</span></span>`;
 
   return (
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-region="header">` +
-    `<tr><td style="padding:0 0 24px;border-bottom:1px solid #E6EAF0;">${brand}</td></tr>` +
+    `<tr><td class="em-border" style="padding:0 0 24px;border-bottom:1px solid #E6EAF0;">${brand}</td></tr>` +
     `</table>`
   );
 }
@@ -114,9 +114,9 @@ export function renderFooter(tokens: BrandTokens): string {
     : "";
 
   return (
-    `<table role="presentation" width="100%" data-region="footer" style="margin-top:40px;padding-top:24px;` +
+    `<table role="presentation" width="100%" data-region="footer" class="em-border" style="margin-top:40px;padding-top:24px;` +
     `border-top:1px solid #E6EAF0;font-family:${tokens.fonts.body};">` +
-    `<tr><td style="text-align:center;color:${muted};font-size:12px;line-height:1.6;">` +
+    `<tr><td class="em-muted" style="text-align:center;color:${muted};font-size:12px;line-height:1.6;">` +
     `<div style="margin:0 0 4px;">${website}</div>` +
     (f.contact_email
       ? `<div style="margin:0 0 4px;"><a href="mailto:${escapeHtml(f.contact_email)}" style="color:${muted};text-decoration:none;">${escapeHtml(f.contact_email)}</a></div>`
@@ -150,6 +150,45 @@ export function renderCtaButton(
   );
 }
 
+// Neutral dark-scheme palette for automatic dark mode. Brand-agnostic on
+// purpose: brand hues stay on the accent (CTA, eyebrow, top bar) which reads
+// fine on dark; surfaces and text swap to these. Clients without
+// prefers-color-scheme support simply keep the light design.
+const DARK = {
+  page: "#17181D",
+  card: "#1F2026",
+  heading: "#F5F6F8",
+  lead: "#B9BCC5",
+  text: "#D6D8DE",
+  muted: "#8E9098",
+  hairline: "#33353C",
+};
+
+/**
+ * Automatic dark mode: declares light+dark support (so clients don't
+ * force-invert on their own) and restyles the classed surfaces/text via
+ * prefers-color-scheme with !important (the only way head CSS beats the
+ * inline styles email requires). The light design is the base; stripping
+ * this block leaves a correct light email.
+ */
+function renderDarkModeStyle(): string {
+  return (
+    `<style>` +
+    `:root{color-scheme:light dark;supported-color-schemes:light dark;}` +
+    `@media (prefers-color-scheme:dark){` +
+    `body,.em-bg{background:${DARK.page} !important;}` +
+    `.em-card{background:${DARK.card} !important;border-color:${DARK.hairline} !important;}` +
+    `.em-heading{color:${DARK.heading} !important;}` +
+    `.em-lead{color:${DARK.lead} !important;}` +
+    `.em-text,.em-text p{color:${DARK.text} !important;}` +
+    `.em-muted,.em-muted a,.em-muted span{color:${DARK.muted} !important;}` +
+    `.em-hairline{background:${DARK.hairline} !important;}` +
+    `.em-border{border-color:${DARK.hairline} !important;}` +
+    `}` +
+    `</style>`
+  );
+}
+
 /**
  * The full HTML document shell: inline styles only, single column, max-width
  * 600px. An accent top bar gives the card brand presence; `bodyInner` is the
@@ -165,16 +204,19 @@ export function renderShell(
     `<!DOCTYPE html>` +
     `<html lang="en"><head><meta charset="utf-8" />` +
     `<meta name="viewport" content="width=device-width,initial-scale=1" />` +
+    `<meta name="color-scheme" content="light dark" />` +
+    `<meta name="supported-color-schemes" content="light dark" />` +
+    renderDarkModeStyle() +
     `<title>Email</title></head>` +
-    `<body style="margin:0;padding:0;background:#EEF1F6;-webkit-font-smoothing:antialiased;">` +
+    `<body class="em-bg" style="margin:0;padding:0;background:#EEF1F6;-webkit-font-smoothing:antialiased;">` +
     renderPreheader(opts.preheader ?? "") +
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEF1F6;">` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="em-bg" style="background:#EEF1F6;">` +
     `<tr><td align="center" style="padding:40px 16px;">` +
-    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" ` +
+    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-card" ` +
     `style="width:600px;max-width:600px;background:${c.background};border-radius:16px;` +
     `overflow:hidden;border:1px solid #E6EAF0;">` +
     `<tr><td style="height:5px;line-height:5px;font-size:0;background:${c.accent};">&nbsp;</td></tr>` +
-    `<tr><td style="padding:40px 44px 44px;font-family:${tokens.fonts.body};color:${c.text};">` +
+    `<tr><td class="em-text" style="padding:40px 44px 44px;font-family:${tokens.fonts.body};color:${c.text};">` +
     renderHeader(tokens) +
     `<div style="padding-top:32px;">${bodyInner}</div>` +
     renderFooter(tokens) +

@@ -20,12 +20,13 @@ import type { ContentImage, ContentImageStyle, ReferenceUse } from "@/lib/db/typ
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
 
-// AI hero images for emails (and blog heroes later). Cost discipline: this
-// runs ONLY on explicit user action from the review screen, never
-// automatically on generation. The scene is crafted by FAST_MODEL (cheap),
-// the render is one Gemini call, and the result is optimized to an
-// email-safe JPEG hosted on Supabase Storage (absolute HTTPS URL; email
-// clients can't load data URIs).
+// AI hero images for emails and blogs. Cost discipline: this runs on explicit
+// user action from the review screen, or during generation ONLY when the
+// brand opted in (visual_identity.image_gen.auto, asked during onboarding);
+// the human approval gate still covers the result either way. The scene is
+// crafted by FAST_MODEL (cheap), the render is one Gemini call, and the
+// result is optimized to an email-safe JPEG hosted on Supabase Storage
+// (absolute HTTPS URL; email clients can't load data URIs).
 
 const BUCKET = "content-images";
 
@@ -201,58 +202,11 @@ async function uploadContentImage(data: Buffer): Promise<string> {
   return pub.publicUrl;
 }
 
-// ── Splicing the image into the email HTML ──────────────────────────────────
-//
-// The hero block is a single flat <div data-region="image"> with no nested
-// divs, so it can be found and replaced with a non-greedy regex safely. The
-// <img> follows email best practice: explicit dimensions, display:block,
-// max-width:100%, meaningful alt, never a CSS background-image.
-
-const HERO_BLOCK_RE = /<div data-region="image"[\s\S]*?<\/div>/;
-
-export function renderHeroImageBlock(img: ContentImage): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  return (
-    `<div data-region="image" style="margin:0 0 28px;">` +
-    `<img src="${esc(img.url)}" alt="${esc(img.alt)}" width="552" ` +
-    `style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:12px;" />` +
-    `</div>`
-  );
-}
-
-/**
- * Places (or replaces) the hero image block in a draft's HTML. Insertion
- * order of preference: replace an existing image region → before the
- * headline → before the first body region. Returns null when no anchor
- * exists (a document with no tagged regions can't be spliced safely).
- */
-export function spliceHeroImage(html: string, img: ContentImage): string | null {
-  const block = renderHeroImageBlock(img);
-
-  if (HERO_BLOCK_RE.test(html)) {
-    return html.replace(HERO_BLOCK_RE, block);
-  }
-
-  for (const anchor of ['data-region="headline"', 'data-region="body"']) {
-    const attrIdx = html.indexOf(anchor);
-    if (attrIdx === -1) continue;
-    const tagStart = html.lastIndexOf("<", attrIdx);
-    if (tagStart === -1) continue;
-    return html.slice(0, tagStart) + block + html.slice(tagStart);
-  }
-
-  // Untagged documents (agent-generated or fully rewritten emails carry no
-  // data-region attributes): anchor on the headline <h1> instead. The block
-  // itself is tagged, so later regenerations take the replace path above.
-  const h1 = html.search(/<h1[\s>]/i);
-  if (h1 !== -1) {
-    return html.slice(0, h1) + block + html.slice(h1);
-  }
-  return null;
-}
-
-/** Removes the hero image block. Returns the html unchanged if none exists. */
-export function removeHeroImage(html: string): string {
-  return html.replace(HERO_BLOCK_RE, "");
-}
+// The hero splice/remove/render string transforms live in
+// lib/email/hero-image.ts (pure, unit-tested); re-exported here so every
+// pipeline/route keeps importing them from the image pipeline module.
+export {
+  removeHeroImage,
+  renderHeroImageBlock,
+  spliceHeroImage,
+} from "@/lib/email/hero-image";

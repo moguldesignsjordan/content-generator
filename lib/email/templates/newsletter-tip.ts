@@ -28,7 +28,7 @@ export const newsletterTip: EmailTemplate = {
 
     const inner =
       renderEyebrow("Quick Tip", tokens) +
-      `<h1 data-region="headline" style="margin:0 0 22px;font-family:${tokens.fonts.heading};` +
+      `<h1 data-region="headline" class="em-heading" style="margin:0 0 22px;font-family:${tokens.fonts.heading};` +
       `font-size:30px;line-height:1.22;letter-spacing:-0.4px;color:${c.primary};">` +
       `${escapeHtml(copy.headline)}</h1>` +
       callout +

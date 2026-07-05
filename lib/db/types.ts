@@ -66,12 +66,22 @@ export interface BrandFooter {
   postal_address?: string;
 }
 
+// Brand-level image generation preference, set during onboarding or in
+// Settings → Visual identity. `auto` means every new email/blog draft gets a
+// generated hero image; the human approval gate still applies to the whole
+// draft, image included, before anything publishes.
+export interface ImageGenPrefs {
+  auto?: boolean;
+  style?: ContentImageStyle;
+}
+
 export interface VisualIdentity {
   logo_url?: string;
   logo_alt?: string;
   colors?: BrandColors;
   fonts?: BrandFonts;
   footer?: BrandFooter;
+  image_gen?: ImageGenPrefs;
 }
 
 // ── Positioning: context the generation prompt reads to sharpen copy ────────
@@ -335,6 +345,9 @@ export type ContentImageStyle =
 /** How an attached reference image steers generation. */
 export type ReferenceUse = "style" | "subject" | "both";
 
+/** Where the hero image sits in an email's layout. */
+export type HeroPlacement = "top" | "below_headline" | "above_cta";
+
 export interface ContentImage {
   url: string; // absolute HTTPS URL on Supabase Storage
   alt: string; // meaningful alt text (accessibility + images-blocked fallback)
@@ -342,6 +355,8 @@ export interface ContentImage {
   height: number;
   // "uploaded" marks a user-provided image (no generation involved).
   style: ContentImageStyle | "uploaded";
+  // Undefined on images placed before placement existed; treated as "top".
+  placement?: HeroPlacement;
 }
 
 // Rolled-up token/image spend for one draft, persisted on drafts.meta so the
@@ -492,4 +507,16 @@ export interface PublicationRecord {
   external_id: string | null;
   url: string | null;
   published_at: string;
+}
+
+// A per-brand publishing connection (MailerLite, Sanity, ...). `config` holds
+// the connection's fields: plain values as-is, secret values as the
+// "gcm:v1:..." ciphertext from lib/crypto/secrets.ts. One row per
+// (brand, provider); env vars remain the fallback when a field is unset here.
+export interface BrandIntegration {
+  id: string;
+  brand_id: string;
+  provider_id: string;
+  config: Record<string, unknown>;
+  connected_at: string;
 }

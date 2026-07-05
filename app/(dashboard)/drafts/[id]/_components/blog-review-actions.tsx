@@ -13,11 +13,13 @@ import {
   useToast,
 } from "@/components/ui";
 import type {
+  ContentImage,
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
   PublicationRecord,
 } from "@/lib/db/types";
+import { ImageSheet } from "./image-sheet";
 
 interface BlogReviewActionsProps {
   draftId: string;
@@ -33,9 +35,11 @@ interface BlogReviewActionsProps {
 
 /**
  * Review surface for blog drafts. Simpler than the email one by design:
- * the article preview is read-only v1 (the Portable Text that ships to Sanity
+ * the article text is read-only v1 (the Portable Text that ships to Sanity
  * is exactly what's shown), with the same approve gates (QA nudge + server
- * banned-terms block) and a publish-to-Sanity step once approved.
+ * banned-terms block) and a publish-to-Sanity step once approved. The one
+ * editable visual is the hero image (generate or upload; it publishes to
+ * Sanity as the post's main image).
  */
 export function BlogReviewActions({
   draftId,
@@ -51,6 +55,11 @@ export function BlogReviewActions({
   const toast = useToast();
 
   const [state, setState] = useState(initialState);
+  const [html, setHtml] = useState(initialContent.html);
+  const [heroImage, setHeroImage] = useState<ContentImage | null>(
+    initialMeta.hero_image ?? null,
+  );
+  const [imageOpen, setImageOpen] = useState(false);
   const [archived, setArchived] = useState(initialArchived);
   const [archiving, setArchiving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -70,7 +79,7 @@ export function BlogReviewActions({
   function handleDownload() {
     const filename =
       (copy?.slug || "blog-post").replace(/[^\w.-]+/g, "_").slice(0, 80) + ".html";
-    const blob = new Blob([initialContent.html], { type: "text/html" });
+    const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -256,25 +265,48 @@ export function BlogReviewActions({
 
       {/* Article preview */}
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <p className="text-[13px] font-medium text-muted">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <p className="min-w-0 truncate text-[13px] font-medium text-muted">
             Article preview — exactly what publishes to Sanity
           </p>
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
-          >
-            Download .html
-          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setImageOpen(true)}
+              className="text-[12px] font-medium text-accent transition-colors hover:text-accent-press"
+            >
+              {heroImage ? "Change image" : "+ Add image"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+            >
+              Download .html
+            </button>
+          </div>
         </div>
         <iframe
           title="Blog preview"
-          srcDoc={initialContent.html}
+          srcDoc={html}
           sandbox=""
           className="h-[720px] w-full bg-white"
         />
       </Card>
+
+      {/* Hero image tool: generate or upload; publishes to Sanity as the
+          post's main image. */}
+      <ImageSheet
+        open={imageOpen}
+        onClose={() => setImageOpen(false)}
+        draftId={draftId}
+        kind="blog"
+        hasImage={!!heroImage}
+        onApplied={(newHtml, newImage) => {
+          setHtml(newHtml);
+          setHeroImage(newImage);
+        }}
+      />
 
       {/* Publish (appears once approved) */}
       {state === "approved" && (

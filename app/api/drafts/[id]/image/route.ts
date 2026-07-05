@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext, getTopicContext } from "@/lib/db/queries";
+import {
+  getDraftWithJobContext,
+  getTopicContext,
+  updateDraftContent,
+} from "@/lib/db/queries";
 import { resolveBrandTokens } from "@/lib/email/templates";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import { accumulateUsage } from "@/lib/pipeline/cost";
@@ -9,9 +13,18 @@ import {
   saveUploadedHeroImage,
   spliceHeroImage,
 } from "@/lib/pipeline/generate-image";
+import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { prepareReferenceImage } from "@/lib/images/optimize";
 import { IMAGE_STYLE_LABELS } from "@/prompts/generate-image";
-import type { ContentImage, ContentImageStyle, ReferenceUse } from "@/lib/db/types";
+import type {
+  ContentImage,
+  ContentImageStyle,
+  DraftJobContext,
+  DraftMeta,
+  HeroPlacement,
+  ReferenceUse,
+  TopicContext,
+} from "@/lib/db/types";
 import type { UsageDelta } from "@/lib/pipeline/cost";
 
 // A Gemini render + Haiku prompt-craft + optimize + upload usually lands in
@@ -20,6 +33,7 @@ export const maxDuration = 120;
 
 const STYLES = Object.keys(IMAGE_STYLE_LABELS) as ContentImageStyle[];
 const REFERENCE_USES: ReferenceUse[] = ["style", "subject", "both"];
+const PLACEMENTS: HeroPlacement[] = ["top", "below_headline", "above_cta"];
 // Generous input cap; everything is re-encoded server-side anyway.
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -42,14 +56,47 @@ function readImageFile(
   return { ok: true, file: value };
 }
 
+/** The requested placement, defaulting to the image's current spot, then "top". */
+function readPlacement(form: FormData, current?: HeroPlacement): HeroPlacement {
+  const raw = form.get("placement") as string | null;
+  if (raw && PLACEMENTS.includes(raw as HeroPlacement)) return raw as HeroPlacement;
+  return current ?? "top";
+}
+
+/**
+ * Persists a new/updated hero on a BLOG draft: blogs re-render the whole
+ * preview from blog_copy (the HTML is code-rendered, not model HTML, so the
+ * email edit pipeline's validation/unsubscribe guarantees don't apply here).
+ */
+async function commitBlogHero(
+  draftCtx: DraftJobContext,
+  topicCtx: TopicContext,
+  image: ContentImage | undefined,
+  extraMeta: Partial<DraftMeta>,
+): Promise<{ html: string } | { error: string }> {
+  const copy = draftCtx.meta.blog_copy;
+  if (!copy) return { error: "This blog draft has no stored copy yet." };
+  const html = renderBlogPreviewHtml(copy, topicCtx.brand, image);
+  await updateDraftContent(
+    draftCtx.draftId,
+    { ...draftCtx.content, html },
+    { ...draftCtx.meta, ...extraMeta, hero_image: image },
+  );
+  return { html };
+}
+
 /**
  * POST multipart/form-data:
- *  - mode "generate" (default): { style, subject?, reference?, referenceUse? }
- *    generates a brand-grounded hero image, optionally steered by an attached
- *    reference image. Opt-in per draft, never automatic (cost control).
- *  - mode "upload": { file, alt? } places the user's own image as the hero.
- *    No AI involved.
- * Either way the image lands in the draft's HTML, replacing any existing hero.
+ *  - mode "generate" (default): { style, subject?, placement?, reference?,
+ *    referenceUse? } generates a brand-grounded hero image, optionally steered
+ *    by an attached reference image.
+ *  - mode "upload": { file, alt?, placement? } places the user's own image as
+ *    the hero. No AI involved.
+ *  - mode "move": { placement } re-places the existing hero instantly, no
+ *    model call and no new image.
+ * Emails splice the image into the draft's HTML at the chosen placement;
+ * blogs attach it as the post's hero (rendered under the title, published to
+ * Sanity as the main image).
  */
 export async function POST(
   req: NextRequest,
@@ -74,12 +121,23 @@ export async function POST(
     if (!topicCtx) {
       return NextResponse.json({ error: "Topic not found." }, { status: 404 });
     }
+    const isBlog = draftCtx.jobType === "blog";
 
     let image: ContentImage;
     let usage: UsageDelta[] = [];
     let label: string;
 
-    if (mode === "upload") {
+    if (mode === "move") {
+      const current = draftCtx.meta.hero_image;
+      if (!current) {
+        return NextResponse.json(
+          { error: "This email has no image to move yet." },
+          { status: 400 },
+        );
+      }
+      image = { ...current, placement: readPlacement(form) };
+      label = "Moved the image";
+    } else if (mode === "upload") {
       const read = readImageFile(form, "file");
       if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });
       if (!read.file) {
@@ -87,10 +145,13 @@ export async function POST(
       }
       const alt =
         (form.get("alt") as string | null)?.trim() || topicCtx.topic.title;
-      image = await saveUploadedHeroImage({
-        file: Buffer.from(await read.file.arrayBuffer()),
-        alt,
-      });
+      image = {
+        ...(await saveUploadedHeroImage({
+          file: Buffer.from(await read.file.arrayBuffer()),
+          alt,
+        })),
+        placement: readPlacement(form, draftCtx.meta.hero_image?.placement),
+      };
       label = "Uploaded a hero image";
     } else {
       const style = (form.get("style") ?? "") as ContentImageStyle;
@@ -113,17 +174,35 @@ export async function POST(
         tokens: resolveBrandTokens(topicCtx.brand),
         brandName: topicCtx.brand.name,
         topicTitle: topicCtx.topic.title,
-        headline: draftCtx.meta.email_copy?.headline,
+        headline: isBlog
+          ? draftCtx.meta.blog_copy?.title
+          : draftCtx.meta.email_copy?.headline,
         style,
         subject,
         reference,
         referenceUse,
       });
-      image = generated.image;
+      image = {
+        ...generated.image,
+        placement: readPlacement(form, draftCtx.meta.hero_image?.placement),
+      };
       usage = generated.usage;
       label = reference
         ? `Added a ${style} hero image from a reference`
         : `Added a ${style} hero image`;
+    }
+
+    let rolled = draftCtx.meta.usage;
+    for (const delta of usage) rolled = accumulateUsage(rolled, delta);
+
+    if (isBlog) {
+      const result = await commitBlogHero(draftCtx, topicCtx, image, {
+        usage: rolled,
+      });
+      if ("error" in result) {
+        return NextResponse.json({ error: result.error }, { status: 422 });
+      }
+      return NextResponse.json({ html: result.html, image });
     }
 
     const spliced = spliceHeroImage(draftCtx.content.html, image);
@@ -133,9 +212,6 @@ export async function POST(
         { status: 422 },
       );
     }
-
-    let rolled = draftCtx.meta.usage;
-    for (const delta of usage) rolled = accumulateUsage(rolled, delta);
 
     const result = await commitHtmlEdit({
       draftCtx,
@@ -156,7 +232,7 @@ export async function POST(
   }
 }
 
-/** DELETE: removes the hero image from the draft's HTML (storage object stays; cheap and reusable via undo). */
+/** DELETE: removes the hero image from the draft (storage object stays; cheap and reusable via undo). */
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -166,6 +242,21 @@ export async function DELETE(
     const draftCtx = await getDraftWithJobContext(id);
     if (!draftCtx) {
       return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+
+    if (draftCtx.jobType === "blog") {
+      if (!draftCtx.meta.hero_image) {
+        return NextResponse.json({ error: "This post has no image." }, { status: 400 });
+      }
+      const topicCtx = await getTopicContext(draftCtx.topicId);
+      if (!topicCtx) {
+        return NextResponse.json({ error: "Topic not found." }, { status: 404 });
+      }
+      const result = await commitBlogHero(draftCtx, topicCtx, undefined, {});
+      if ("error" in result) {
+        return NextResponse.json({ error: result.error }, { status: 422 });
+      }
+      return NextResponse.json({ html: result.html });
     }
 
     const stripped = removeHeroImage(draftCtx.content.html);

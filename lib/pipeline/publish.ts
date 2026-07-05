@@ -1,11 +1,13 @@
 import "server-only";
 import {
+  getBrandIntegrations,
   getDraftWithJobContext,
   getPublication,
   getSingleBrand,
   markJobPublished,
   recordPublication,
 } from "@/lib/db/queries";
+import type { BrandIntegration } from "@/lib/db/types";
 import { getProvider, providersForKind } from "@/lib/publishing/registry";
 
 export interface PublishOutcome {
@@ -26,7 +28,10 @@ export interface PublishOutcome {
  * tolerates the raced-insert case, so a retry never double-posts.
  *
  * The human-approval gate is enforced here, not just in the UI: only drafts
- * in state "approved" can publish, ever.
+ * in state "approved" can publish, ever. Provider credentials resolve from
+ * the brand's saved connection with env-var fallback (see lib/publishing/
+ * credentials.ts), so a brand with its own API key takes precedence over the
+ * shared server env.
  */
 export async function publishDraft(
   draftId: string,
@@ -38,9 +43,21 @@ export async function publishDraft(
     throw new Error("Only approved drafts can be published. Approve it first.");
   }
 
+  // Load the brand and its connections BEFORE provider selection: isConfigured
+  // now needs (brand, integration), and the chosen provider's publish() needs
+  // the matching integration row.
+  const brand = await getSingleBrand();
+  if (!brand) throw new Error("No brand found.");
+
+  const integrations = await getBrandIntegrations(brand.id);
+  const integrationFor = (providerId: string): BrandIntegration | null =>
+    integrations.find((i) => i.provider_id === providerId) ?? null;
+
   const provider = targetId
     ? getProvider(targetId)
-    : (providersForKind(draft.jobType).find((p) => p.isConfigured()) ?? null);
+    : (providersForKind(draft.jobType).find((p) =>
+        p.isConfigured(brand, integrationFor(p.id)),
+      ) ?? null);
   if (!provider) {
     throw new Error(
       targetId
@@ -53,8 +70,12 @@ export async function publishDraft(
       `${provider.label} publishes ${provider.kind} drafts, not ${draft.jobType}.`,
     );
   }
-  if (!provider.isConfigured()) {
-    throw new Error(`${provider.label} is not configured. ${provider.configHint}`);
+
+  const integration = integrationFor(provider.id);
+  if (!provider.isConfigured(brand, integration)) {
+    throw new Error(
+      `${provider.label} is not configured. Connect it in Settings → Connections.`,
+    );
   }
 
   const existing = await getPublication(draft.jobId, provider.id);
@@ -67,15 +88,13 @@ export async function publishDraft(
     };
   }
 
-  const brand = await getSingleBrand();
-  if (!brand) throw new Error("No brand found.");
-
   const result = await provider.publish({
     jobId: draft.jobId,
     draftId: draft.draftId,
     content: draft.content,
     meta: draft.meta,
     brand,
+    integration,
   });
 
   const row = await recordPublication({

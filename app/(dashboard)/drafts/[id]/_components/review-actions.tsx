@@ -285,6 +285,80 @@ export function ReviewActions({
 
   return (
     <div className="space-y-5">
+      {/* Live preview: the draft is the hero of this screen; every tool
+          orbits it. */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <p className="text-[13px] font-medium text-muted">
+            Click any part of the email to edit it
+          </p>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Download .html
+          </button>
+        </div>
+        <EmailPreview
+          draftId={draftId}
+          html={html}
+          onHtmlChange={setHtml}
+          initialImage={initialMeta.hero_image}
+          onEdited={() => setHistoryRefreshKey((k) => k + 1)}
+        />
+      </Card>
+
+      <DesignChat
+        key={historyRefreshKey}
+        draftId={draftId}
+        html={html}
+        onHtmlChange={setHtml}
+      />
+
+      {/* Editable copy */}
+      <Card className="space-y-4 p-5">
+        <h3 className="text-[15px] font-semibold">Email details</h3>
+        <Field label="Subject">
+          <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+        </Field>
+        {subjectVariants.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs text-muted">Other subject line ideas, click one to use it:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {subjectVariants.map((variant) => (
+                <button
+                  key={variant}
+                  type="button"
+                  onClick={() => setSubject(variant)}
+                  className={`rounded-full border px-3 py-1 text-left text-[12px] transition-colors ${
+                    variant === subject
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border text-muted hover:border-accent/50 hover:text-foreground"
+                  }`}
+                >
+                  {variant}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <Field label="Preheader">
+          <Input
+            value={preheader}
+            onChange={(e) => setPreheader(e.target.value)}
+          />
+        </Field>
+        <Field label="CTA link" hint="Where the button in this email points.">
+          <Input
+            type="url"
+            value={ctaUrl}
+            onChange={(e) => handleCtaChange(e.target.value)}
+            placeholder="https://…"
+          />
+        </Field>
+      </Card>
+
       {/* Quality check */}
       {hasQa && (
         <Card className="p-5">
@@ -362,77 +436,6 @@ export function ReviewActions({
           </div>
         </Card>
       )}
-
-      {/* Editable copy */}
-      <Card className="space-y-4 p-5">
-        <Field label="Subject">
-          <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
-        </Field>
-        {subjectVariants.length > 0 && (
-          <div>
-            <p className="mb-1.5 text-xs text-muted">Other subject line ideas, click one to use it:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {subjectVariants.map((variant) => (
-                <button
-                  key={variant}
-                  type="button"
-                  onClick={() => setSubject(variant)}
-                  className={`rounded-full border px-3 py-1 text-left text-[12px] transition-colors ${
-                    variant === subject
-                      ? "border-accent bg-accent/10 text-foreground"
-                      : "border-border text-muted hover:border-accent/50 hover:text-foreground"
-                  }`}
-                >
-                  {variant}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <Field label="Preheader">
-          <Input
-            value={preheader}
-            onChange={(e) => setPreheader(e.target.value)}
-          />
-        </Field>
-        <Field label="CTA link" hint="Where the button in this email points.">
-          <Input
-            type="url"
-            value={ctaUrl}
-            onChange={(e) => handleCtaChange(e.target.value)}
-            placeholder="https://…"
-          />
-        </Field>
-      </Card>
-
-      {/* Live preview */}
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <p className="text-[13px] font-medium text-muted">
-            Rendered email — click any part to tweak it
-          </p>
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
-          >
-            Download .html
-          </button>
-        </div>
-        <EmailPreview
-          draftId={draftId}
-          html={html}
-          onHtmlChange={setHtml}
-          onEdited={() => setHistoryRefreshKey((k) => k + 1)}
-        />
-      </Card>
-
-      <DesignChat
-        key={historyRefreshKey}
-        draftId={draftId}
-        html={html}
-        onHtmlChange={setHtml}
-      />
 
       {/* Background regeneration status: never blocks the page, closes the
           moment you submit feedback. Leave, keep reviewing, whatever, it

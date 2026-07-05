@@ -5,6 +5,8 @@ import { ListGroup, ListRow, Sheet } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
 import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
+import type { ProviderField } from "@/lib/publishing/provider";
+import type { ConnectionState } from "@/lib/publishing/connections";
 import { BrandBasicsForm } from "./brand-basics-form";
 import { ImportWebsiteForm } from "./import-website-form";
 import { GenerateIdentityForm } from "./generate-identity-form";
@@ -15,6 +17,7 @@ import { GuidelinesForm } from "./guidelines-form";
 import { ProductsForm } from "./products-form";
 import { FunnelForm } from "./funnel-form";
 import { IcpForm } from "./icp-form";
+import { ConnectionForm } from "./connection-form";
 
 type SectionKey =
   | "import"
@@ -32,8 +35,11 @@ export interface ConnectionStatus {
   id: string;
   label: string;
   kind: "email" | "blog";
-  configured: boolean;
   configHint: string;
+  fields: ProviderField[];
+  state: ConnectionState;
+  values: Record<string, string | string[]>;
+  secretIsSet: Record<string, boolean>;
 }
 
 export function SettingsClient({
@@ -50,6 +56,9 @@ export function SettingsClient({
   connections?: ConnectionStatus[];
 }) {
   const [open, setOpen] = useState<SectionKey | null>(null);
+  // Open connection sheet keyed by provider id (separate from SectionKey so
+  // adding a provider needs no enum change here).
+  const [openConnection, setOpenConnection] = useState<string | null>(null);
   const close = () => setOpen(null);
 
   return (
@@ -132,12 +141,8 @@ export function SettingsClient({
             <ListRow
               key={c.id}
               title={c.label}
-              subtitle={
-                c.configured
-                  ? `Connected · publishes ${c.kind === "blog" ? "blog posts" : "emails"}`
-                  : `Not connected · set ${c.configHint} in .env.local`
-              }
-              chevron={false}
+              subtitle={connectionSubtitle(c)}
+              onClick={() => setOpenConnection(c.id)}
             />
           ))}
         </ListGroup>
@@ -277,6 +282,35 @@ export function SettingsClient({
           <IcpForm icp={primaryIcp} />
         </Sheet>
       )}
+
+      {connections.map((c) => (
+        <Sheet
+          key={c.id}
+          open={openConnection === c.id}
+          onClose={() => setOpenConnection(null)}
+          title={c.label}
+          description="Connect your own account. Credentials are encrypted; server env vars stay as a fallback."
+          size="lg"
+        >
+          <ConnectionForm
+            brandId={brand.id}
+            providerId={c.id}
+            fields={c.fields}
+            initial={{
+              state: c.state,
+              values: c.values,
+              secretIsSet: c.secretIsSet,
+            }}
+          />
+        </Sheet>
+      ))}
     </div>
   );
+}
+
+function connectionSubtitle(c: ConnectionStatus): string {
+  const what = c.kind === "blog" ? "blog posts" : "emails";
+  if (c.state === "account") return `Connected · publishes ${what}`;
+  if (c.state === "env") return `Using server default · publishes ${what}`;
+  return "Not connected · tap to set up";
 }

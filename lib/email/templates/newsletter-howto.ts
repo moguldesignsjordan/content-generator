@@ -41,7 +41,7 @@ export const newsletterHowto: EmailTemplate = {
 
     const inner =
       renderEyebrow("Step by Step", tokens) +
-      `<h1 data-region="headline" style="margin:0 0 28px;font-family:${tokens.fonts.heading};` +
+      `<h1 data-region="headline" class="em-heading" style="margin:0 0 28px;font-family:${tokens.fonts.heading};` +
       `font-size:30px;line-height:1.22;letter-spacing:-0.4px;color:${c.primary};">` +
       `${escapeHtml(copy.headline)}</h1>` +
       `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${steps}</table>` +

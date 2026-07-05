@@ -632,6 +632,215 @@ green.
   existing server-only boundary. Click through both in the browser before
   calling fully verified.
 
+## 2026-07-05 session 3 — image placement, editor simplification, blog images, auto-image setting, dark mode (CODE COMPLETE)
+
+Jordan's asks this session: (1) fix the email image landing in the wrong
+place, (2) make the email editor simpler while keeping every tool, (3) image
+creation for blogs, (4) ask during project setup whether images should be
+auto-created (still human-approved), (5) automatic dark/light mode for emails
+and blogs (added mid-session). All five are implemented. All work is
+UNCOMMITTED on `feat/dashboard-create-agent` on top of `875df0f` (which is 1
+commit ahead of origin). Verified: `npm run typecheck` clean, clean
+`npm run build` green (note: two builds racing over one `.next` dir corrupt
+it — always build once, cleanly), `npx vitest run` 19/19 (9 NEW placement
+tests in `lib/email/hero-image.test.ts`), dev server boots with the correct
+auth redirect. NOT yet verified: logged-in browser click-through (all keys
+incl. GEMINI/SANITY are present in `.env.local`, so image generate, blog
+publish-with-mainImage, and the dark variants can all be exercised live).
+
+**The plan (decisions locked this session):**
+- Image placement is a first-class control: `ContentImage.placement`
+  (`"top" | "below_headline" | "above_cta"`, undefined reads as "top").
+  Moving an existing image is a pure string splice (mode "move" on the image
+  route), instant, no model call. The design brief tells regenerating models
+  where the hero goes via `HERO_PLACEMENT_DIRECTIVES` so prompt and code
+  splice never disagree.
+- One shared ImageSheet component for emails AND blogs (generate/upload
+  tabs, style chips, reference image + use, placement chips for email only;
+  tapping a placement chip with an image present moves it immediately and
+  closes the sheet).
+- Editor simplification: preview card FIRST (review is the product), then
+  DesignChat, then an "Email details" card (subject/variants/preheader/CTA),
+  then Quality check. Region sheet is now ONE tool at a time via
+  SegmentedControl tabs (Wording | Color | Style). DesignChat helper text
+  cut from a paragraph to two sentences. All tools kept.
+- Blog heroes: pinned under the title (no placement choice), stored in
+  `meta.hero_image`, preview re-rendered server-side from `blog_copy` via
+  `renderBlogPreviewHtml(copy, brand, hero)` (blogs do NOT go through
+  commitHtmlEdit — no unsubscribe/email-validation on blog HTML). Sanity
+  publish uploads the hero via `assets.upload("image", ...)` and attaches it
+  as `mainImage` (+alt); publish fails loudly if the image can't be
+  mirrored (what you review is what ships).
+- Auto-image pref lives in `brand.visual_identity.image_gen`
+  (`ImageGenPrefs { auto?: boolean; style?: ContentImageStyle }`, jsonb, NO
+  migration needed). Onboarding chat asks it; Settings → Visual identity
+  gets a toggle + default style. Generation pipelines (email + blog)
+  auto-generate a hero when `auto && isGeminiConfigured()`, non-fatal on
+  error, FIRST generation only (regenerations keep the existing hero;
+  a deliberately removed image must not come back). Approval gate unchanged.
+
+**Done so far (files touched, all working-tree only):**
+- `PRODUCT.md` — new (impeccable skill context; register=product).
+- `lib/db/types.ts` — `HeroPlacement`, `ContentImage.placement`,
+  `ImageGenPrefs`, `VisualIdentity.image_gen`.
+- `lib/pipeline/generate-image.ts` — `spliceHeroImage` rewritten
+  placement-aware (removes any existing hero block first, then inserts at
+  the placement's anchor with graceful fallback chain; `elementStart`/
+  `elementEnd` helpers). Header comment updated for the auto mode.
+- `prompts/email-design.ts` — `HERO_PLACEMENT_DIRECTIVES`, IMAGE block now
+  placement-aware.
+- `prompts/generate-image.ts` — scene-crafting wording covers blogs too.
+- `lib/blog/render-preview.ts` — optional `hero` param renders
+  `<figure class="hero">` under the title.
+- `app/api/drafts/[id]/image/route.ts` — rewritten: `placement` form field,
+  new mode `"move"`, blog branch (`commitBlogHero` re-renders the preview and
+  writes `meta.hero_image`; DELETE also branches for blogs).
+- `app/(dashboard)/drafts/[id]/_components/image-sheet.tsx` — NEW shared
+  ImageSheet as described above.
+- `email-preview.tsx` — rewritten: image tool delegated to ImageSheet
+  (image hotspot + "+ Add image" open it), region sheet tabbed
+  (Wording | Color | Style), takes `initialImage` prop.
+- `review-actions.tsx` — reordered (preview → DesignChat → Email details →
+  Quality check → regen status → blog card → actions); passes
+  `initialImage={initialMeta.hero_image}`.
+- `design-chat.tsx` — helper copy trimmed.
+- `blog-review-actions.tsx` — html/heroImage state, "+ Add image"/"Change
+  image" button on the preview header, ImageSheet kind="blog", download uses
+  live html.
+- `lib/publishing/providers/sanity.ts` — `uploadMainImage()` + `mainImage`
+  on the published doc (API shape verified against installed
+  @sanity/client typings: `assets.upload("image", Buffer, opts) →
+  SanityImageAssetDocument`).
+
+**Also done since the first save point:**
+- Auto-image setting COMPLETE end to end:
+  - `prompts/onboarding.ts`: `auto_images` tool field + checklist topic 9
+    ("one visual thing you do ask"), current-profile line, complete-list
+    mention.
+  - `app/api/onboarding/chat/route.ts`: `applyProfileUpdates` writes
+    `visual_identity.image_gen.auto` via `updateVisualIdentity` (merged,
+    colors/fonts/logo untouched).
+  - `visual-identity-form.tsx`: "AI images" section — Checkbox ("Create an
+    image automatically with each new draft") + default-style Select, saved
+    through the existing PATCH payload as `image_gen: { auto, style }`.
+  - `lib/pipeline/generate.ts`: exported `maybeAutoHeroImage(ctx, headline,
+    usageDeltas, {draftId, onEvent})` — checks pref + `isGeminiConfigured`,
+    emits phase "imaging"/"Creating your image" (progress UI is label-driven,
+    renders automatically), returns image with placement "top", try/catch
+    non-fatal. Called in `generateEmailForTopicStreamed` after
+    `renderEmailForContext` (splices + sets `meta.hero_image`); NOT called in
+    `regenerateEmailDraft` (first generation only, by design).
+  - `lib/pipeline/generate-blog.ts`: calls `maybeAutoHeroImage` with
+    `copy.title`, passes hero to `renderBlogPreviewHtml`, sets
+    `meta.hero_image`.
+- Dark mode COMPLETE, both paths:
+  - Template path: `lib/email/templates/shared.ts` `renderShell` emits both
+    color-scheme meta tags + `renderDarkModeStyle()` (a neutral `DARK`
+    palette; `@media (prefers-color-scheme: dark)` overriding `.em-bg`,
+    `.em-card`, `.em-heading`, `.em-lead`, `.em-text`, `.em-muted`,
+    `.em-hairline`, `.em-border` with !important — the only way head CSS
+    beats inline styles in email). Class hooks across the helpers
+    (header wordmark/divider, footer, `renderDivider`, `leadParagraph`) and
+    on all three templates' `<h1 data-region="headline">`.
+  - Model path: `prompts/email-design.ts` gained the two required meta tags
+    in Structure plus a DARK MODE section (stable em-* class names, a
+    prefers-color-scheme block with !important, accent/CTA unchanged, never
+    invert images, light stays the base); the style-block rule widened to
+    "mobile and dark-mode".
+  - Blogs: `lib/blog/render-preview.ts` has the color-scheme meta,
+    `:root{color-scheme:light dark}`, and a dark `@media` block (dark
+    surfaces, light text, tuned post-meta/blockquote).
+  - Decision: NO blind code-level meta injector — declaring dark support
+    without dark CSS suppresses client auto-inversion and looks worse; both
+    real HTML paths carry full support by construction instead.
+- Splice logic extracted to `lib/email/hero-image.ts` (pure, NOT
+  server-only, same pattern as to-portable-text) so it could be unit-tested;
+  `lib/pipeline/generate-image.ts` re-exports it so all existing imports
+  stand. 9 tests in `lib/email/hero-image.test.ts` cover every placement,
+  the move-not-duplicate property, untagged-document fallbacks, the
+  no-anchor null case, and remove round-trips.
+
+**Remaining:**
+1. Live browser click-through (Jordan, logged in): add/move/regenerate an
+   email image (all three positions), blog "+ Add image", approve → publish
+   a blog and confirm the Sanity doc carries `mainImage`, onboarding asks
+   the auto-images question, Settings → Visual identity shows the AI images
+   toggle, and a generated email/blog renders correctly in dark mode
+   (macOS dark appearance, Apple Mail or the preview iframe).
+2. Commit this branch when Jordan says so.
+
+## 2026-07-05 session 4 — Connections feature (per-brand MailerLite + Sanity credentials, encrypted)
+
+Implemented the plan `~/.claude/plans/how-does-cosmic-nova.md` end to end.
+Lets a user connect their OWN MailerLite/Sanity credentials in Settings →
+Connections, stored per-brand encrypted at rest (AES-256-GCM), with the
+server env vars remaining as a per-field fallback. All UNCOMMITTED on
+`feat/dashboard-create-agent` on top of the session-3 work. `npm run
+typecheck`, `npm run build`, and `npx vitest run` (22/22) all green.
+
+**What changed:**
+- `lib/crypto/secrets.ts` (NEW) — `encryptSecret`/`decryptSecret`/`isEncryptedSecret`,
+  format `gcm:v1:<iv>:<tag>:<ct>` (5 parts when split), lazy-reads
+  `INTEGRATION_ENCRYPTION_KEY` (32-byte base64) inside each fn. NOT `import
+  "server-only"` on purpose: vitest breaks on it (mirrors `lib/email/hero-image.ts`'s
+  stated convention); the boundary holds via callers + the `node:crypto` import.
+  3 round-trip tests in `lib/crypto/secrets.test.ts`.
+- `lib/db/types.ts` — `BrandIntegration` row type. `lib/db/queries.ts` —
+  `getBrandIntegrations`/`getBrandIntegration`/`upsertBrandIntegration`
+  (`onConflict: "brand_id,provider_id"`)/`deleteBrandIntegration`. The two
+  reads degrade to `[]`/`null` on Postgres `42P01` (undefined_table) so the
+  settings page keeps rendering before migration 004 is applied — the
+  Connections feature lights up once the table exists.
+- `lib/publishing/provider.ts` — `isConfigured(brand, integration)` (was no-arg,
+  env-only); `PublishInput.integration`; new `ProviderField` type + `fields`
+  on `PublishProvider` (single source of truth for the form + API route).
+- `lib/publishing/credentials.ts` (NEW) — `resolveSecret`/`resolvePlain`:
+  stored-then-env-fallback per field. `lib/publishing/connections.ts` (NEW) —
+  `describeConnection(provider, brand, integration)` → `{state, values,
+  secretIsSet}`; the ONE place the form's view-model is computed, used by both
+  the settings page and the API route. Never decrypts.
+- `lib/clients/sanity.ts` — dropped the pure-env lazy singleton; now
+  `resolveSanityConfig(integration): SanityConfig | null` + `getSanity(config)`.
+  `isSanityConfigured()`/no-arg `getSanity()`/`SANITY_POST_TYPE` const removed.
+- `lib/publishing/providers/{mailerlite,sanity}.ts` — each got a `fields` array;
+  `isConfigured` + `publish` resolve via the helpers instead of raw env.
+  MailerLite sender stays on `brand.mailerlite_config` (Brand basics); apiKey +
+  groupIds live on the connection (groupIds falls back to the legacy brand
+  column at publish time).
+- `lib/pipeline/publish.ts` — reordered: `getSingleBrand` + `getBrandIntegrations`
+  now load BEFORE provider selection (isConfigured needs them); the matching
+  `integration` is threaded into `provider.publish`.
+- `app/api/settings/connections/route.ts` (NEW) — GET (per-provider view-model,
+  never decrypts), PATCH (merge: plain overwrites, secret encrypts only when
+  non-empty → "leave blank to keep"), DELETE (query params). Both GET+PATCH
+  validate `brandId` against the single brand.
+- Settings UI: `connection-form.tsx` (NEW, shared, field-driven; masked secrets
+  with "•••• saved — leave blank to keep"; banner by state; Disconnect →
+  ConfirmDialog; refetches GET after save/disconnect). `settings-client.tsx`
+  `ConnectionStatus` restructured (`state`/`values`/`secretIsSet`/`fields`);
+  Connections ListRows now clickable w/ chevron + state subtitle; one Sheet per
+  provider. `settings/page.tsx` computes connections via `describeConnection`.
+- `app/(dashboard)/drafts/[id]/page.tsx` — blog publish card now resolves Sanity
+  reachability from brand+integration (was env-only `isSanityConfigured()`).
+- `.env.example` — `INTEGRATION_ENCRYPTION_KEY=` with `openssl rand -base64 32`.
+
+**Plan deviations (intentional, documented above):** (1) `secrets.ts` omits the
+literal `import "server-only"` for vitest compatibility (boundary holds by other
+means). (2) Added a small `lib/publishing/connections.ts` + made the read
+queries migration-resilient — not in the plan, but needed so the live settings
+page doesn't break before migration 004 is applied. (3) Dropped the unused
+`brand` param from `resolveSanityConfig` (Sanity has no brand-column legacy).
+
+**NOT yet verified live (needs Jordan):**
+1. Apply migration 004 (`brand_integrations` table) in the Supabase SQL editor.
+2. Generate + set `INTEGRATION_ENCRYPTION_KEY` in `.env.local`
+   (`openssl rand -base64 32`).
+3. Logged-in browser click-through: Settings → Connections opens each provider's
+   sheet; save a fake MailerLite key → banner "Connected via your account";
+   disconnect → falls back to "Using server default (.env)"; then one real
+   end-to-end publish (email via MailerLite, blog via Sanity) confirming the
+   connected credentials resolve. Auth middleware blocks plain curl.
+
 ## What's not built yet
 
 - **Live verification of this session's work** — nothing above has run

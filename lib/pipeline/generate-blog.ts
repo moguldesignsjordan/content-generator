@@ -24,7 +24,7 @@ import type {
   TopicContext,
 } from "@/lib/db/types";
 import { accumulateUsage, type UsageDelta } from "./cost";
-import type { GenerationEvent } from "./generate";
+import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
 
 /**
  * Fills in a blog draft shell (content_jobs.type='blog'), mirroring
@@ -50,7 +50,15 @@ export async function generateBlogForTopicStreamed(
     const { parsed, usageDeltas } = await generateBlogCopy(system, user);
 
     const copy = cleanBlogCopy(parsed);
-    const html = renderBlogPreviewHtml(copy, ctx.brand);
+
+    // Brand-level opt-in: auto-create the post's hero image (first
+    // generation only; non-fatal, the draft ships without one on failure).
+    // Blog heroes have no placement choice; they render under the title.
+    const heroImage = await maybeAutoHeroImage(ctx, copy.title, usageDeltas, {
+      draftId,
+      onEvent,
+    });
+    const html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
 
     const checking = { phase: "checking", label: "Running quality checks" };
     await patchDraftGeneration(draftId, checking);
@@ -65,6 +73,7 @@ export async function generateBlogForTopicStreamed(
       meta_title: copy.meta_title,
       meta_description: copy.meta_description,
       blog_copy: copy,
+      ...(heroImage ? { hero_image: heroImage } : {}),
       usage,
     };
 

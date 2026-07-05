@@ -1,5 +1,15 @@
 import type { BrandTokens } from "@/lib/email/templates/types";
-import type { ContentImage, EmailTemplateId } from "@/lib/db/types";
+import type { ContentImage, EmailTemplateId, HeroPlacement } from "@/lib/db/types";
+
+// Where the design prompt tells the model to put the hero image; mirrors the
+// code-level anchors in spliceHeroImage so prompt and splice never disagree.
+const HERO_PLACEMENT_DIRECTIVES: Record<HeroPlacement, string> = {
+  top: "directly ABOVE the headline (below the header/eyebrow), full column width.",
+  below_headline:
+    "directly BELOW the headline, before the body copy, full column width.",
+  above_cta:
+    "directly ABOVE the call-to-action button, after the body copy, full column width.",
+};
 
 // The codified email design system: every generated email is designed under
 // this brief. It encodes the constraints email clients actually impose (email
@@ -45,6 +55,9 @@ export function buildEmailDesignBrief(
     "Structure:",
     "- Produce ONE complete HTML document: <!DOCTYPE html>, <html lang=\"en\">,",
     "  <head> with <meta charset> + viewport meta + <title>, and <body>.",
+    "- Also in <head>: <meta name=\"color-scheme\" content=\"light dark\"> AND",
+    "  <meta name=\"supported-color-schemes\" content=\"light dark\"> (required for",
+    "  the dark-mode block below to take effect instead of client auto-inversion).",
     "- Immediately inside <body>, a hidden preheader div (display:none;max-height:0;",
     "  overflow:hidden) containing the preheader text, padded with repeated",
     "  '&#847;&zwnj;&nbsp;' so body copy never leaks into the inbox preview line.",
@@ -67,8 +80,21 @@ export function buildEmailDesignBrief(
     "CSS rules:",
     "- ALL styles inline on elements. No external stylesheets, no <link>, no JavaScript,",
     "  no web-font imports (brand font stacks below are already email-safe).",
-    "- An optional single <style> block in <head> may ONLY hold @media tweaks for mobile;",
-    "  the email must look correct even if that block is stripped.",
+    "- A single <style> block in <head> may ONLY hold @media tweaks for mobile and the",
+    "  dark-mode block below; the email must look correct even if it's stripped.",
+    "",
+    "DARK MODE (automatic; the light design stays the base):",
+    "- Give stable class names to the page background element (e.g. em-bg), the card",
+    "  (em-card), headings (em-heading), body copy wrappers (em-text), and the footer",
+    "  (em-muted). Classes are invisible in clients that ignore them.",
+    "- In the <style> block, add @media (prefers-color-scheme: dark) rules that restyle",
+    "  exactly those classes, each declaration with !important (head CSS must beat the",
+    "  inline styles): a near-black page background, a slightly lighter dark card",
+    "  surface, near-white headings, soft light-gray body text, muted-but-readable",
+    "  footer. Keep the accent (top bar, CTA button) unchanged, its white button text",
+    "  already reads on dark. Never invert or restyle images.",
+    "- Dark rules live ONLY inside that media query, so clients that strip <style>",
+    "  still get the correct light email.",
     hero
       ? "- Images: ONLY the brand logo (if provided) and the hero image specified in" +
         " the IMAGE block below. Never invent or reference any other image."
@@ -81,7 +107,7 @@ export function buildEmailDesignBrief(
           `- Insert <div data-region="image" style="margin:0 0 28px;"><img src="${hero.url}"`,
           `  alt="${hero.alt.replace(/"/g, "&quot;")}" width="552" style="display:block;width:100%;`,
           `  max-width:100%;height:auto;border:0;border-radius:12px;" /></div>`,
-          "  directly ABOVE the headline (below the header/eyebrow), full column width.",
+          `  ${HERO_PLACEMENT_DIRECTIVES[hero.placement ?? "top"]}`,
           "- Keep it a real <img>, never a CSS background-image (Outlook drops those).",
           "- Keep the copy prominent: one hero image plus real body text, never an",
           "  image-heavy layout (spam filters penalize low text-to-image ratios).",

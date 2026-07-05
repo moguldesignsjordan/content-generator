@@ -23,6 +23,7 @@ import type {
   Positioning,
   Product,
   PublicationRecord,
+  BrandIntegration,
   SeoDefaults,
   Strategy,
   Topic,
@@ -494,6 +495,84 @@ export async function markJobPublished(
       .eq("id", job.topic_id as string);
     if (error) throw error;
   }
+}
+
+// ── Brand integrations (per-brand publishing connections; env stays fallback) ──
+
+/** All configured connections for a brand. Empty before the user connects any. */
+export async function getBrandIntegrations(
+  brandId: string,
+): Promise<BrandIntegration[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_integrations")
+    .select("*")
+    .eq("brand_id", brandId);
+  if (error) {
+    // Migration 004 (this table) may not be applied on live Supabase yet;
+    // degrade to "no connections" instead of breaking the settings page.
+    // The Connections UI lights up once the migration is run.
+    if ((error as { code?: string }).code === "42P01") return [];
+    throw error;
+  }
+  return (data ?? []) as BrandIntegration[];
+}
+
+/** One connection by provider, or null if the brand hasn't connected it. */
+export async function getBrandIntegration(
+  brandId: string,
+  providerId: string,
+): Promise<BrandIntegration | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_integrations")
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("provider_id", providerId)
+    .maybeSingle();
+  if (error) {
+    if ((error as { code?: string }).code === "42P01") return null;
+    throw error;
+  }
+  return (data as BrandIntegration) ?? null;
+}
+
+/**
+ * Creates or replaces a connection row. The caller merges `config` first
+ * (plain fields overwrite; secret fields only overwrite when a new value is
+ * submitted, else the existing ciphertext is preserved), then hands the full
+ * merged object here. unique(brand_id, provider_id) backs the upsert.
+ */
+export async function upsertBrandIntegration(
+  brandId: string,
+  providerId: string,
+  config: Record<string, unknown>,
+): Promise<BrandIntegration> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_integrations")
+    .upsert(
+      { brand_id: brandId, provider_id: providerId, config },
+      { onConflict: "brand_id,provider_id" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as BrandIntegration;
+}
+
+/** Removes a connection so the provider falls back to env vars (or "none"). */
+export async function deleteBrandIntegration(
+  brandId: string,
+  providerId: string,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("brand_integrations")
+    .delete()
+    .eq("brand_id", brandId)
+    .eq("provider_id", providerId);
+  if (error) throw error;
 }
 
 /** Returns the highest draft version number for a content job. */
