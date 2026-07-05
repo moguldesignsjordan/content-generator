@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Sheet, Skeleton, Textarea } from "@/components/ui";
+import {
+  Button,
+  Input,
+  SegmentedControl,
+  Sheet,
+  Skeleton,
+  Textarea,
+} from "@/components/ui";
 
 // Click-to-edit creative control: overlays the rendered email with invisible
 // hotspot buttons over every [data-region] element the design/templates tag
@@ -33,9 +40,42 @@ const REGION_LABELS: Record<string, string> = {
 };
 
 const IMAGE_STYLES = [
-  { id: "illustration", label: "Illustration" },
-  { id: "photo", label: "Photo" },
-  { id: "texture", label: "Brand texture" },
+  {
+    id: "illustration",
+    label: "Illustration",
+    description: "Flat editorial vector art in brand colors, bold and clean.",
+  },
+  {
+    id: "photo",
+    label: "Photo",
+    description: "Premium photography, natural light, graded to the brand palette.",
+  },
+  {
+    id: "texture",
+    label: "Brand texture",
+    description: "Abstract gradient backdrop built only from brand colors.",
+  },
+  {
+    id: "render3d",
+    label: "Soft 3D",
+    description: "Soft matte 3D shapes with studio lighting, playful but polished.",
+  },
+  {
+    id: "collage",
+    label: "Collage",
+    description: "Layered paper-cutout collage, tactile and editorial.",
+  },
+  {
+    id: "lineart",
+    label: "Line art",
+    description: "Minimal single-line drawing with one accent fill, gallery-sparse.",
+  },
+] as const;
+
+const REFERENCE_USES = [
+  { id: "style", label: "Match its style" },
+  { id: "subject", label: "Feature its subject" },
+  { id: "both", label: "Both" },
 ] as const;
 
 const SUGGESTION_CHIPS = [
@@ -65,6 +105,70 @@ interface Hotspot {
   rect: { top: number; left: number; width: number; height: number };
 }
 
+/** Local image chooser with a thumbnail preview; parent owns the File. */
+function ImageFilePicker({
+  file,
+  onChange,
+  disabled,
+  emptyLabel,
+}: {
+  file: File | null;
+  onChange: (f: File | null) => void;
+  disabled?: boolean;
+  emptyLabel: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={disabled}
+        onChange={(e) => {
+          onChange(e.target.files?.[0] ?? null);
+          e.target.value = "";
+        }}
+      />
+      {file && preview ? (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview} alt="" className="h-12 w-20 shrink-0 rounded-lg object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[12.5px] text-foreground">{file.name}</p>
+            <p className="text-[11px] text-muted">{Math.max(1, Math.round(file.size / 1024))} KB</p>
+          </div>
+          <Button variant="outline" size="sm" disabled={disabled} onClick={() => onChange(null)}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => inputRef.current?.click()}
+          className="w-full rounded-xl border border-dashed border-border bg-surface-2 px-3 py-4 text-[12.5px] text-muted transition-colors hover:bg-surface-3 hover:text-foreground disabled:opacity-50"
+        >
+          {emptyLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface EmailPreviewProps {
   draftId: string;
   html: string;
@@ -83,6 +187,11 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
   const [colorValue, setColorValue] = useState("#000000");
   const [imageStyle, setImageStyle] = useState<string>("illustration");
   const [imageSubject, setImageSubject] = useState("");
+  const [imageTab, setImageTab] = useState<"generate" | "upload">("generate");
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [referenceUse, setReferenceUse] = useState<string>("style");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadAlt, setUploadAlt] = useState("");
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -149,12 +258,21 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
     };
   }, [html]);
 
+  function resetImageState() {
+    setImageSubject("");
+    setImageTab("generate");
+    setReferenceFile(null);
+    setReferenceUse("style");
+    setUploadFile(null);
+    setUploadAlt("");
+  }
+
   function openHotspot(h: Hotspot) {
     setActive(h);
     setTextValue(h.text);
     setColorValue(h.color);
     setCustomInput("");
-    setImageSubject("");
+    resetImageState();
     setEditError(null);
   }
 
@@ -168,7 +286,7 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
       color: "#000000",
       rect: { top: 0, left: 0, width: 0, height: 0 },
     });
-    setImageSubject("");
+    resetImageState();
     setEditError(null);
   }
 
@@ -281,24 +399,36 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
     }
   }
 
-  /** Generates (or regenerates) the hero image, or removes it. */
-  async function applyImage(action: "generate" | "remove") {
+  /** Generates the hero image, uploads the user's own, or removes it. */
+  async function applyImage(action: "generate" | "upload" | "remove") {
     if (applying) return;
+    if (action === "upload" && !uploadFile) {
+      setEditError("Choose an image to upload first.");
+      return;
+    }
     setApplying(true);
     setEditError(null);
     try {
-      const res = await fetch(`/api/drafts/${draftId}/image`, {
-        method: action === "remove" ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        ...(action === "generate"
-          ? {
-              body: JSON.stringify({
-                style: imageStyle,
-                subject: imageSubject.trim() || undefined,
-              }),
-            }
-          : {}),
-      });
+      let init: RequestInit;
+      if (action === "remove") {
+        init = { method: "DELETE" };
+      } else {
+        const form = new FormData();
+        form.set("mode", action);
+        if (action === "upload") {
+          form.set("file", uploadFile!);
+          if (uploadAlt.trim()) form.set("alt", uploadAlt.trim());
+        } else {
+          form.set("style", imageStyle);
+          if (imageSubject.trim()) form.set("subject", imageSubject.trim());
+          if (referenceFile) {
+            form.set("reference", referenceFile);
+            form.set("referenceUse", referenceUse);
+          }
+        }
+        init = { method: "POST", body: form };
+      }
+      const res = await fetch(`/api/drafts/${draftId}/image`, init);
       const data = (await res.json()) as { html?: string; error?: string };
       if (!res.ok || !data.html) {
         throw new Error(data.error ?? "Couldn't update the image.");
@@ -370,67 +500,166 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
         title={active?.label}
         description={
           isImageRegion
-            ? "Generate an on-brand image for this email."
+            ? "Generate an on-brand image or upload your own."
             : "Edit the wording, color, or look of just this part."
         }
       >
         {/* IMAGE (its own mode; wording/color/style don't apply) */}
         {isImageRegion && (
           <div>
-            <p className="text-xs font-medium text-muted">Style</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {IMAGE_STYLES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  disabled={applying}
-                  onClick={() => setImageStyle(s.id)}
-                  className={`rounded-full border px-3 py-1.5 text-[12.5px] transition-colors disabled:opacity-50 ${
-                    imageStyle === s.id
-                      ? "border-accent bg-accent/10 text-foreground"
-                      : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3">
-              <p className="text-xs font-medium text-muted">
-                What should it show? (optional)
-              </p>
-              <Input
-                value={imageSubject}
-                onChange={(e) => setImageSubject(e.target.value)}
-                placeholder="e.g. a desk with a laptop and coffee"
-                disabled={applying}
-                className="mt-1.5"
-              />
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <Button
-                variant="gradient"
-                size="sm"
-                loading={applying}
-                disabled={applying}
-                onClick={() => applyImage("generate")}
-              >
-                {hasImage ? "Regenerate image" : "Generate image"}
-              </Button>
-              {hasImage && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={applying}
-                  onClick={() => applyImage("remove")}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-            <p className="mt-2 text-[11px] text-muted">
-              Takes about 20 seconds. Only runs when you ask, never automatically.
-            </p>
+            <SegmentedControl
+              size="sm"
+              value={imageTab}
+              onChange={setImageTab}
+              options={[
+                { value: "generate", label: "Generate" },
+                { value: "upload", label: "Upload" },
+              ]}
+            />
+
+            {imageTab === "generate" && (
+              <>
+                <p className="mt-4 text-xs font-medium text-muted">Style</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {IMAGE_STYLES.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      disabled={applying}
+                      onClick={() => setImageStyle(s.id)}
+                      className={`rounded-full border px-3 py-1.5 text-[12.5px] transition-colors disabled:opacity-50 ${
+                        imageStyle === s.id
+                          ? "border-accent bg-accent/10 text-foreground"
+                          : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted">
+                  {IMAGE_STYLES.find((s) => s.id === imageStyle)?.description}
+                </p>
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted">
+                    What should it show? (optional)
+                  </p>
+                  <Input
+                    value={imageSubject}
+                    onChange={(e) => setImageSubject(e.target.value)}
+                    placeholder="e.g. a desk with a laptop and coffee"
+                    disabled={applying}
+                    className="mt-1.5"
+                  />
+                </div>
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted">
+                    Reference image (optional)
+                  </p>
+                  <div className="mt-1.5">
+                    <ImageFilePicker
+                      file={referenceFile}
+                      onChange={setReferenceFile}
+                      disabled={applying}
+                      emptyLabel="+ Add a reference image to steer the result"
+                    />
+                  </div>
+                  {referenceFile && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {REFERENCE_USES.map((u) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          disabled={applying}
+                          onClick={() => setReferenceUse(u.id)}
+                          className={`rounded-full border px-3 py-1.5 text-[12px] transition-colors disabled:opacity-50 ${
+                            referenceUse === u.id
+                              ? "border-accent bg-accent/10 text-foreground"
+                              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+                          }`}
+                        >
+                          {u.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    variant="gradient"
+                    size="sm"
+                    loading={applying}
+                    disabled={applying}
+                    onClick={() => applyImage("generate")}
+                  >
+                    {hasImage ? "Regenerate image" : "Generate image"}
+                  </Button>
+                  {hasImage && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={applying}
+                      onClick={() => applyImage("remove")}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-muted">
+                  Takes about 20 seconds. Only runs when you ask, never automatically.
+                </p>
+              </>
+            )}
+
+            {imageTab === "upload" && (
+              <>
+                <p className="mt-4 text-xs font-medium text-muted">Your image</p>
+                <div className="mt-1.5">
+                  <ImageFilePicker
+                    file={uploadFile}
+                    onChange={setUploadFile}
+                    disabled={applying}
+                    emptyLabel="+ Choose an image (JPEG, PNG, WebP, up to 10MB)"
+                  />
+                </div>
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted">
+                    Describe it for readers (alt text, optional)
+                  </p>
+                  <Input
+                    value={uploadAlt}
+                    onChange={(e) => setUploadAlt(e.target.value)}
+                    placeholder="e.g. our team reviewing a homepage redesign"
+                    disabled={applying}
+                    className="mt-1.5"
+                  />
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    variant="gradient"
+                    size="sm"
+                    loading={applying}
+                    disabled={applying || !uploadFile}
+                    onClick={() => applyImage("upload")}
+                  >
+                    {hasImage ? "Replace with this image" : "Use this image"}
+                  </Button>
+                  {hasImage && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={applying}
+                      onClick={() => applyImage("remove")}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-muted">
+                  Resized and compressed for email automatically (JPEG, under 150KB).
+                </p>
+              </>
+            )}
           </div>
         )}
 

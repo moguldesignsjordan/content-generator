@@ -36,3 +36,24 @@ export async function optimizeEmailImage(input: Buffer): Promise<OptimizedImage>
   // Unreachable (the last ladder step always returns), but keeps TS honest.
   throw new Error("Image optimization failed.");
 }
+
+/**
+ * Prepares a user-attached reference image for model input: downscaled to fit
+ * 1024px, re-encoded as JPEG, returned base64. Also validates the bytes are a
+ * real decodable image (sharp throws on garbage, which we translate).
+ */
+export async function prepareReferenceImage(
+  input: Buffer,
+): Promise<{ data: string; mimeType: string }> {
+  try {
+    const data = await sharp(input)
+      .rotate()
+      .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 80, mozjpeg: true })
+      .toBuffer();
+    return { data: data.toString("base64"), mimeType: "image/jpeg" };
+  } catch {
+    throw new Error("That reference file isn't a readable image. Try a JPEG or PNG.");
+  }
+}

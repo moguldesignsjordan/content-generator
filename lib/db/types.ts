@@ -324,14 +324,24 @@ export type EditType = "style" | "copy" | "recolor" | "image";
 
 // ── AI-generated content images (hero image in emails, blog hero later) ─────
 
-export type ContentImageStyle = "illustration" | "photo" | "texture";
+export type ContentImageStyle =
+  | "illustration"
+  | "photo"
+  | "texture"
+  | "render3d"
+  | "collage"
+  | "lineart";
+
+/** How an attached reference image steers generation. */
+export type ReferenceUse = "style" | "subject" | "both";
 
 export interface ContentImage {
   url: string; // absolute HTTPS URL on Supabase Storage
   alt: string; // meaningful alt text (accessibility + images-blocked fallback)
   width: number;
   height: number;
-  style: ContentImageStyle;
+  // "uploaded" marks a user-provided image (no generation involved).
+  style: ContentImageStyle | "uploaded";
 }
 
 // Rolled-up token/image spend for one draft, persisted on drafts.meta so the

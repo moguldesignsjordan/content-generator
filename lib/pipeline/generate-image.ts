@@ -1,4 +1,5 @@
 import "server-only";
+import type { Anthropic } from "@anthropic-ai/sdk";
 import {
   FAST_MODEL,
   cacheableSystem,
@@ -15,7 +16,7 @@ import {
   type ImagePromptOutput,
 } from "@/prompts/generate-image";
 import { stripEmDashes } from "@/lib/text";
-import type { ContentImage, ContentImageStyle } from "@/lib/db/types";
+import type { ContentImage, ContentImageStyle, ReferenceUse } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
 
@@ -38,6 +39,10 @@ export interface GenerateContentImageArgs {
   style: ContentImageStyle;
   /** Optional user-typed subject for the scene. */
   subject?: string;
+  /** Optional user-attached reference image (base64 JPEG, already downscaled). */
+  reference?: { data: string; mimeType: string };
+  /** How the reference steers generation. Defaults to "style" when a reference is present. */
+  referenceUse?: ReferenceUse;
 }
 
 export interface GenerateContentImageResult {
@@ -61,20 +66,39 @@ export async function generateContentImage(
   }
 
   const usage: UsageDelta[] = [];
+  const reference = args.reference;
+  const referenceUse: ReferenceUse | undefined = reference
+    ? (args.referenceUse ?? "style")
+    : undefined;
 
-  // 1. Cheap scene-crafting call.
+  // 1. Cheap scene-crafting call. When a reference is attached, FAST_MODEL
+  // sees it too, so the scene it writes actually relates to the reference.
   const { system, user } = buildImagePromptMessages({
     brandName: args.brandName,
     topicTitle: args.topicTitle,
     headline: args.headline,
     style: args.style,
     subject: args.subject,
+    referenceUse,
   });
+  const userContent: Anthropic.ContentBlockParam[] = [
+    { type: "text", text: user },
+  ];
+  if (reference) {
+    userContent.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: reference.mimeType as "image/jpeg",
+        data: reference.data,
+      },
+    });
+  }
   const response = await getAnthropic().messages.create({
     model: FAST_MODEL,
     max_tokens: 512,
     system: cacheableSystem(system),
-    messages: [{ role: "user", content: user }],
+    messages: [{ role: "user", content: userContent }],
     tools: [IMAGE_PROMPT_TOOL],
     tool_choice: { type: "tool", name: "save_image_prompt" },
   });
@@ -93,10 +117,16 @@ export async function generateContentImage(
   }
 
   // 2. Render. 16:9 fits the 600px email column as a wide hero.
-  const finalPrompt = buildFinalImagePrompt(args.style, promptOut.scene, args.tokens);
+  const finalPrompt = buildFinalImagePrompt(
+    args.style,
+    promptOut.scene,
+    args.tokens,
+    referenceUse,
+  );
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: "16:9",
+    reference,
   });
   usage.push({ model: FAST_MODEL, images: 1 });
 
@@ -115,6 +145,30 @@ export async function generateContentImage(
       style: args.style,
     },
     usage,
+  };
+}
+
+/**
+ * The no-AI path: takes a user-uploaded image, optimizes it for email (same
+ * JPEG/size budget as generated ones), hosts it, and returns the ContentImage.
+ */
+export async function saveUploadedHeroImage(args: {
+  file: Buffer;
+  alt: string;
+}): Promise<ContentImage> {
+  let optimized;
+  try {
+    optimized = await optimizeEmailImage(args.file);
+  } catch {
+    throw new Error("That file isn't a readable image. Try a JPEG or PNG.");
+  }
+  const url = await uploadContentImage(optimized.data);
+  return {
+    url,
+    alt: stripEmDashes(args.alt.trim()).slice(0, 160),
+    width: optimized.width,
+    height: optimized.height,
+    style: "uploaded",
   };
 }
 
@@ -186,6 +240,14 @@ export function spliceHeroImage(html: string, img: ContentImage): string | null 
     const tagStart = html.lastIndexOf("<", attrIdx);
     if (tagStart === -1) continue;
     return html.slice(0, tagStart) + block + html.slice(tagStart);
+  }
+
+  // Untagged documents (agent-generated or fully rewritten emails carry no
+  // data-region attributes): anchor on the headline <h1> instead. The block
+  // itself is tagged, so later regenerations take the replace path above.
+  const h1 = html.search(/<h1[\s>]/i);
+  if (h1 !== -1) {
+    return html.slice(0, h1) + block + html.slice(h1);
   }
   return null;
 }
