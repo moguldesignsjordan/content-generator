@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  disabled?: boolean;
 }
 
 export function SegmentedControl<T extends string>({
@@ -36,13 +37,16 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
+            disabled={opt.disabled}
             onClick={() => onChange(opt.value)}
             className={cn(
               "rounded-full font-medium transition-colors",
               size === "sm" ? "h-8 px-3.5 text-[13px]" : "h-9 px-4 text-[13px]",
-              active
-                ? "bg-surface text-foreground shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_4px_12px_-6px_rgba(0,0,0,0.6)]"
-                : "text-muted hover:text-foreground",
+              opt.disabled
+                ? "cursor-not-allowed text-muted/40"
+                : active
+                  ? "bg-surface text-foreground shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_4px_12px_-6px_rgba(0,0,0,0.6)]"
+                  : "text-muted hover:text-foreground",
             )}
           >
             {opt.label}

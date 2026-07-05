@@ -29,6 +29,7 @@ import {
   renderEmailTemplate,
   resolveBrandTokens,
 } from "@/lib/email/templates";
+import { hasDarkModeSupport } from "@/lib/email/preview-mode";
 import type {
   CampaignBrief,
   ContentImage,
@@ -291,15 +292,24 @@ function renderEmailForContext(
   const templateId = templateOverride ?? resolveEmailTemplateId(ctx.topic);
   const tokens = resolveBrandTokens(ctx.brand);
 
+  // Dark-mode CSS is gated here, at fresh generation, not inside
+  // validateModelEmailHtml (that validator is shared with edit/redesign
+  // flows, which shouldn't be rejected just for patching a draft that
+  // predates dark-mode support). The prompt asks the model to add it, but it
+  // skips it often enough in practice that this can't be prompt-only trust:
+  // the light/dark preview toggle and the "always adaptive when deployed"
+  // guarantee both depend on the CSS actually being there, so a model design
+  // missing it falls back to the code template (which always has it via
+  // renderShell) rather than persisting a draft the toggle can't act on.
   const modelHtml = validateModelEmailHtml(parsed.html);
   let designSource: "model" | "template";
   let html: string;
-  if (modelHtml) {
+  if (modelHtml && hasDarkModeSupport(modelHtml)) {
     designSource = "model";
     html = modelHtml;
   } else {
     console.warn(
-      "[generate] model HTML failed validation; falling back to code template",
+      "[generate] model HTML failed validation or lacked dark-mode CSS; falling back to code template",
       templateId,
     );
     designSource = "template";
@@ -327,6 +337,14 @@ function renderEmailForContext(
  * complete document and must not smuggle in script. Returns the trimmed HTML
  * or null (null → the caller falls back to the code template). Kept strict
  * and code-level, never trust the model for safety guarantees.
+ *
+ * Deliberately does NOT require dark-mode CSS here: this validator is shared
+ * with html-edit.ts's commitHtmlEdit (every "Apply text/color/style" patch
+ * re-validates the whole patched document), and a content edit isn't
+ * responsible for authoring head-level dark-mode CSS. Requiring it here would
+ * reject every edit on any draft that doesn't already have it. The dark-mode
+ * requirement lives at the fresh-generation callsite instead (see
+ * renderEmailForContext), where there's a safe template fallback.
  */
 export function validateModelEmailHtml(html: string | undefined): string | null {
   if (!html) return null;
@@ -425,9 +443,16 @@ export async function regenerateEmailDraft(
   draftId: string,
   feedback: string,
   opts: { templateOverride?: EmailTemplateId } = {},
-): Promise<{ newDraftId: string } | { capped: true }> {
+): Promise<{ newDraftId: string } | { capped: true } | { notInReview: true }> {
   const draftCtx = await getDraftWithJobContext(draftId);
   if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
+
+  // A draft that's already approved/rejected/superseded isn't the active
+  // review target anymore: rejecting it would overwrite its state (even an
+  // already-approved, possibly already-published draft) purely because the
+  // client-side disable was bypassed or stale. The version cap check alone
+  // doesn't cover this, since an approved draft can be well under the cap.
+  if (draftCtx.state !== "in_review") return { notInReview: true };
 
   const latestVersion = await getLatestDraftVersion(draftCtx.jobId);
   if (latestVersion >= MAX_DRAFT_VERSIONS) return { capped: true };

@@ -113,6 +113,7 @@ export default async function DraftReviewPage({
         <ReviewActions
           draftId={draft.id}
           version={draft.version}
+          state={draft.state}
           initialContent={draft.content}
           initialMeta={draft.meta}
           seoData={draft.seo_data}

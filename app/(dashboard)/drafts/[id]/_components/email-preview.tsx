@@ -11,6 +11,7 @@ import {
 } from "@/components/ui";
 import { ImageSheet } from "./image-sheet";
 import type { ContentImage } from "@/lib/db/types";
+import { forceColorScheme, type EmailPreviewMode } from "@/lib/email/preview-mode";
 
 // Click-to-edit creative control: overlays the rendered email with invisible
 // hotspot buttons over every [data-region] element the design/templates tag
@@ -79,6 +80,8 @@ interface EmailPreviewProps {
   initialImage?: ContentImage;
   /** Notified after a successful region edit, so sibling UI (DesignChat's history log) can refresh. */
   onEdited?: () => void;
+  /** Preview-only: forces the iframe to render light/dark regardless of system preference. Never affects `html` or persisted content. */
+  previewMode: EmailPreviewMode;
 }
 
 export function EmailPreview({
@@ -87,6 +90,7 @@ export function EmailPreview({
   onHtmlChange,
   initialImage,
   onEdited,
+  previewMode,
 }: EmailPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -162,7 +166,7 @@ export function EmailPreview({
       window.removeEventListener("resize", recompute);
       detachScroll?.();
     };
-  }, [html]);
+  }, [html, previewMode]);
 
   function openHotspot(h: Hotspot) {
     if (h.region === "image") {
@@ -301,9 +305,9 @@ export function EmailPreview({
       )}
       <iframe
         ref={iframeRef}
-        key={html}
+        key={`${html}::${previewMode}`}
         title="Email preview"
-        srcDoc={html}
+        srcDoc={forceColorScheme(html, previewMode)}
         sandbox="allow-same-origin"
         className="h-[600px] w-full bg-white"
       />

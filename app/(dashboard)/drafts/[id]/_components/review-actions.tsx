@@ -9,6 +9,7 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  SegmentedControl,
   Sheet,
   Textarea,
   Tooltip,
@@ -16,12 +17,19 @@ import {
 } from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
+import {
+  forceColorScheme,
+  hasDarkModeSupport,
+  type EmailPreviewMode,
+} from "@/lib/email/preview-mode";
 import { DesignChat } from "./design-chat";
 import { EmailPreview } from "./email-preview";
 
 interface ReviewActionsProps {
   draftId: string;
   version: number;
+  /** "in_review" | "approved" | "rejected" | "superseded". Only "in_review" can still be approved or rejected. */
+  state: string;
   initialContent: EmailDraftContent;
   initialMeta: DraftMeta;
   seoData: DraftSeoData;
@@ -47,6 +55,7 @@ function applyCtaHref(html: string, url: string): string {
 export function ReviewActions({
   draftId,
   version,
+  state,
   initialContent,
   initialMeta,
   seoData,
@@ -65,6 +74,11 @@ export function ReviewActions({
   const [html, setHtml] = useState(initialContent.html);
   const initialCtaUrl = initialMeta.email_copy?.cta_url ?? "";
   const [ctaUrl, setCtaUrl] = useState(initialCtaUrl);
+  const [previewMode, setPreviewMode] = useState<EmailPreviewMode>("auto");
+  // Older drafts, and any model-authored draft that skipped the dark-mode CSS
+  // the prompt asks for, have nothing for the toggle to force — disable
+  // Light/Dark rather than let them silently do nothing.
+  const darkSupported = hasDarkModeSupport(html);
 
   function handleCtaChange(value: string) {
     setCtaUrl(value);
@@ -72,9 +86,10 @@ export function ReviewActions({
   }
 
   function handleDownload() {
+    const suffix = previewMode === "auto" ? "" : `_${previewMode}`;
     const filename =
-      (subject.trim() || "email").replace(/[^\w.-]+/g, "_").slice(0, 80) + ".html";
-    const blob = new Blob([html], { type: "text/html" });
+      (subject.trim() || "email").replace(/[^\w.-]+/g, "_").slice(0, 80) + suffix + ".html";
+    const blob = new Blob([forceColorScheme(html, previewMode)], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -109,6 +124,9 @@ export function ReviewActions({
     html !== initialContent.html;
 
   const atCap = version >= MAX_DRAFT_VERSIONS;
+  // Only the active in-review draft can still be approved or rejected.
+  // Approved/rejected/superseded versions are historical.
+  const isActionable = state === "in_review";
   const hasQa = seoData.qa_pass !== undefined;
   const hasBannedTerms = (seoData.banned_terms_found?.length ?? 0) > 0;
 
@@ -154,7 +172,19 @@ export function ReviewActions({
         body: JSON.stringify(body),
       });
       if (res.status === 409) {
-        const data = (await res.json().catch(() => ({}))) as { bannedTerms?: string[] };
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          bannedTerms?: string[];
+          notInReview?: boolean;
+        };
+        if (data.notInReview) {
+          // Not a soft nudge like banned terms: there's nothing to "approve
+          // anyway" once the draft is no longer the active review target.
+          toast.error(data.error ?? "This draft is no longer awaiting review.");
+          setLoading(null);
+          router.refresh();
+          return;
+        }
         setBannedBlock(data.bannedTerms ?? []);
         setLoading(null);
         return;
@@ -199,7 +229,13 @@ export function ReviewActions({
         const data = (await res.json()) as {
           newDraftId?: string;
           capped?: boolean;
+          notInReview?: boolean;
         };
+        if (data.notInReview) {
+          setRegenError("This draft is no longer awaiting review, so it can't be rejected.");
+          router.refresh();
+          return;
+        }
         if (data.capped) {
           setRegenError(
             `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Edit the draft manually or start fresh.`,
@@ -283,6 +319,17 @@ export function ReviewActions({
     }
   }
 
+  // Why the Reject button won't respond, surfaced via tooltip since the
+  // explanatory text used to live only inside the sheet it opens — which
+  // never opens once the button is disabled, making the reason unreachable.
+  const rejectDisabledReason = atCap
+    ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Edit the draft manually or start fresh.`
+    : rejectedThisDraft
+      ? "A new version is already being generated for this draft."
+      : busy
+        ? "Please wait for the current action to finish."
+        : null;
+
   return (
     <div className="space-y-5">
       {/* Live preview: the draft is the hero of this screen; every tool
@@ -292,13 +339,34 @@ export function ReviewActions({
           <p className="text-[13px] font-medium text-muted">
             Click any part of the email to edit it
           </p>
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
-          >
-            Download .html
-          </button>
+          <div className="flex items-center gap-3">
+            <Tooltip
+              label={
+                darkSupported
+                  ? "Preview and download this email locked to light or dark."
+                  : "This draft doesn't have dark-mode styling. Reject & regenerate to get a version that supports it."
+              }
+              side="bottom"
+            >
+              <SegmentedControl
+                size="sm"
+                value={previewMode}
+                onChange={setPreviewMode}
+                options={[
+                  { value: "auto", label: "Auto" },
+                  { value: "light", label: "Light", disabled: !darkSupported },
+                  { value: "dark", label: "Dark", disabled: !darkSupported },
+                ]}
+              />
+            </Tooltip>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+            >
+              Download .html
+            </button>
+          </div>
         </div>
         <EmailPreview
           draftId={draftId}
@@ -306,6 +374,7 @@ export function ReviewActions({
           onHtmlChange={setHtml}
           initialImage={initialMeta.hero_image}
           onEdited={() => setHistoryRefreshKey((k) => k + 1)}
+          previewMode={previewMode}
         />
       </Card>
 
@@ -511,27 +580,46 @@ export function ReviewActions({
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="gradient"
-          size="lg"
-          loading={loading === "approve"}
-          disabled={busy || rejectedThisDraft}
-          onClick={handleApproveClick}
-        >
-          {loading === "approve"
-            ? "Approving…"
-            : isEdited
-              ? "Save & approve"
-              : "Approve"}
-        </Button>
-        <Button
-          variant="outline"
-          size="lg"
-          disabled={busy || rejectedThisDraft || atCap}
-          onClick={() => setShowReject(true)}
-        >
-          Reject
-        </Button>
+        {isActionable ? (
+          <>
+            <Button
+              variant="gradient"
+              size="lg"
+              loading={loading === "approve"}
+              disabled={busy || rejectedThisDraft}
+              onClick={handleApproveClick}
+            >
+              {loading === "approve"
+                ? "Approving…"
+                : isEdited
+                  ? "Save & approve"
+                  : "Approve"}
+            </Button>
+            {rejectDisabledReason ? (
+              <Tooltip label={rejectDisabledReason} side="top">
+                <Button variant="outline" size="lg" disabled>
+                  Reject
+                </Button>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={() => setShowReject(true)}
+              >
+                Reject
+              </Button>
+            )}
+          </>
+        ) : (
+          <p className="text-[13px] text-muted">
+            {state === "approved"
+              ? "This draft has already been approved."
+              : state === "rejected"
+                ? "This draft was rejected. Check for a newer version of this email."
+                : "This is no longer the active version of this draft."}
+          </p>
+        )}
         <Button
           variant="ghost"
           size="lg"

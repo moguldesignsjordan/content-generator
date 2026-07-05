@@ -15,6 +15,24 @@ export async function POST(
       force?: boolean;
     };
 
+    // A draft that's no longer awaiting review (already approved, rejected,
+    // or superseded by a newer version) isn't a valid approve target, even if
+    // a stale client re-submits. Checked here, not just via the client's
+    // disabled button, since that can be bypassed or out of sync.
+    const draftCtx = await getDraftWithJobContext(id);
+    if (!draftCtx) {
+      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+    if (draftCtx.state !== "in_review") {
+      return NextResponse.json(
+        {
+          error: "This draft is no longer awaiting review, so it can't be approved again.",
+          notInReview: true,
+        },
+        { status: 409 },
+      );
+    }
+
     // Code-level banned-terms gate: the QA pass only DETECTS banned vocabulary;
     // this is the guarantee it can't ship. Re-scan the HTML that would actually
     // be approved (edits included) and refuse unless explicitly overridden.
@@ -22,10 +40,7 @@ export async function POST(
       const brand = await getSingleBrand();
       const terms = brand?.voice_profile?.banned_terms ?? [];
       if (terms.length) {
-        const html =
-          body.editedContent?.html ??
-          (await getDraftWithJobContext(id))?.content?.html ??
-          "";
+        const html = body.editedContent?.html ?? draftCtx.content?.html ?? "";
         const found = findBannedTerms(html, terms);
         if (found.length) {
           return NextResponse.json(
