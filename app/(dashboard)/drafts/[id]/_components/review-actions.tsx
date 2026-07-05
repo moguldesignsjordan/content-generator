@@ -16,7 +16,12 @@ import {
   useToast,
 } from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
-import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
+import type {
+  DraftMeta,
+  DraftSeoData,
+  EmailDraftContent,
+  PublicationRecord,
+} from "@/lib/db/types";
 import {
   forceColorScheme,
   hasDarkModeSupport,
@@ -37,6 +42,10 @@ interface ReviewActionsProps {
   /** A blog already spun off this email, if any. When present, the blog card
    * links to it instead of offering to create a duplicate. */
   existingBlog?: { draftId: string; subject: string } | null;
+  /** The MailerLite campaign row if this email was already pushed, else null. */
+  publication: PublicationRecord | null;
+  /** True when MailerLite has an API key + sender identity and can actually send. */
+  mailerliteConfigured: boolean;
 }
 
 /**
@@ -61,6 +70,8 @@ export function ReviewActions({
   seoData,
   initialArchived,
   existingBlog,
+  publication: initialPublication,
+  mailerliteConfigured,
 }: ReviewActionsProps) {
   const router = useRouter();
   const [archived, setArchived] = useState(initialArchived);
@@ -68,6 +79,8 @@ export function ReviewActions({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creatingBlog, setCreatingBlog] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publication, setPublication] = useState(initialPublication);
 
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
@@ -316,6 +329,46 @@ export function ReviewActions({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start blog post.");
       setCreatingBlog(false);
+    }
+  }
+
+  // Push the approved email to MailerLite as a draft campaign. Idempotent
+  // server-side (the pipeline's publications row check + the route return
+  // alreadyPublished), so a double-click never double-creates.
+  async function handlePublish() {
+    setPublishing(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "mailerlite" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        target?: string;
+        externalId?: string;
+        url?: string;
+        alreadyPublished?: boolean;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Failed to publish.");
+      setPublication({
+        id: "",
+        job_id: "",
+        target: data.target ?? "mailerlite",
+        external_id: data.externalId ?? null,
+        url: data.url ?? null,
+        published_at: "",
+      });
+      toast.success(
+        data.alreadyPublished
+          ? "Already in MailerLite, nothing sent twice."
+          : "Sent to MailerLite as a draft campaign.",
+      );
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to publish.");
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -575,6 +628,49 @@ export function ReviewActions({
           >
             Create blog post
           </Button>
+        </Card>
+      )}
+
+      {/* Publish to MailerLite (appears once approved). Mirrors the blog
+          screen's Sanity card: shows the existing campaign if already pushed,
+          the send button when MailerLite is reachable, or a connect hint. */}
+      {state === "approved" && (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          {publication?.external_id ? (
+            <>
+              <p className="text-sm text-foreground">
+                In MailerLite as a draft campaign
+                <span className="ml-2 font-mono text-[12px] text-muted">
+                  {publication.external_id}
+                </span>
+              </p>
+              {publication.url && (
+                <a
+                  href={publication.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[13px] font-medium text-accent hover:text-accent-press"
+                >
+                  Open MailerLite →
+                </a>
+              )}
+            </>
+          ) : mailerliteConfigured ? (
+            <>
+              <p className="text-sm text-muted">
+                Creates a DRAFT campaign in MailerLite. You schedule and send it
+                there, so the audience and timing stay your call.
+              </p>
+              <Button variant="gradient" loading={publishing} onClick={handlePublish}>
+                Send to MailerLite
+              </Button>
+            </>
+          ) : (
+            <p className="text-sm text-muted">
+              Connect MailerLite to publish: add an API key in Settings →
+              Connections, and set sender name + email in Brand basics.
+            </p>
+          )}
         </Card>
       )}
 

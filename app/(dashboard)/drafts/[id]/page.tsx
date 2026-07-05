@@ -9,6 +9,7 @@ import {
   getSingleBrand,
 } from "@/lib/db/queries";
 import { resolveSanityConfig } from "@/lib/clients/sanity";
+import { resolveMailerliteConfig } from "@/lib/publishing/providers/mailerlite";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
@@ -31,9 +32,7 @@ export default async function DraftReviewPage({
   const isGenerating =
     generation ? generation.status !== "ready" : !draft.content.html;
   const isBlog = draft.job_type === "blog";
-  const publication = isBlog
-    ? await getPublicationForDraft(id).catch(() => null)
-    : null;
+  const publication = await getPublicationForDraft(id).catch(() => null);
 
   // Resolve the cross-link between paired drafts: a blog's source email (via
   // meta.source_draft_id), or — for an email — the blog already spun off it.
@@ -49,6 +48,10 @@ export default async function DraftReviewPage({
   // The blog publish card shows when Sanity is reachable through the brand's
   // saved connection OR the env-var fallback.
   let sanityConfigured = false;
+  // The email publish card shows when MailerLite can actually send: an API key
+  // AND a sender identity (name + verified email). That mirrors the provider's
+  // own preflight so the button never offers a path that would just throw.
+  let mailerliteConfigured = false;
   if (isBlog) {
     const brand = await getSingleBrand().catch(() => null);
     const integration = brand
@@ -57,6 +60,17 @@ export default async function DraftReviewPage({
     sanityConfigured = integration
       ? resolveSanityConfig(integration) !== null
       : false;
+  } else {
+    const brand = await getSingleBrand().catch(() => null);
+    const integration = brand
+      ? await getBrandIntegration(brand.id, "mailerlite").catch(() => null)
+      : null;
+    if (brand) {
+      const ml = resolveMailerliteConfig(brand, integration);
+      mailerliteConfigured = Boolean(
+        ml.apiKey && ml.senderName && ml.senderEmail,
+      );
+    }
   }
 
   return (
@@ -119,6 +133,8 @@ export default async function DraftReviewPage({
           seoData={draft.seo_data}
           initialArchived={draft.archived}
           existingBlog={existingBlog}
+          publication={publication}
+          mailerliteConfigured={mailerliteConfigured}
         />
       )}
     </>
