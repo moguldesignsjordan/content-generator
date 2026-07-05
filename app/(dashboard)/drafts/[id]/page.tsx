@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
 import { ReviewActions } from "./_components/review-actions";
+import { GenerationProgress } from "./_components/generation-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export default async function DraftReviewPage({
   const { id } = await params;
   const draft = await getDraftForReview(id);
   if (!draft) notFound();
+
+  const generation = draft.meta.generation;
+  const isGenerating =
+    generation ? generation.status !== "ready" : !draft.content.html;
 
   return (
     <>
@@ -30,14 +35,23 @@ export default async function DraftReviewPage({
         subtitle={`Version ${draft.version}`}
         actions={<DraftStateBadge state={draft.state} />}
       />
-      <ReviewActions
-        draftId={draft.id}
-        version={draft.version}
-        initialContent={draft.content}
-        initialMeta={draft.meta}
-        seoData={draft.seo_data}
-        initialArchived={draft.archived}
-      />
+      {isGenerating ? (
+        <GenerationProgress
+          draftId={draft.id}
+          topicTitle={draft.topic_title}
+          initialPhase={generation?.phase}
+          initialLabel={generation?.label}
+        />
+      ) : (
+        <ReviewActions
+          draftId={draft.id}
+          version={draft.version}
+          initialContent={draft.content}
+          initialMeta={draft.meta}
+          seoData={draft.seo_data}
+          initialArchived={draft.archived}
+        />
+      )}
     </>
   );
 }

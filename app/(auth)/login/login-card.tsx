@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Button, Field, Input, SegmentedControl } from "@/components/ui";
+import { Button, Field, Input, SegmentedControl, useToast } from "@/components/ui";
 
 type Mode = "signin" | "signup";
 
@@ -18,8 +18,8 @@ export function LoginCard() {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState<"pw" | "magic" | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [magicSent, setMagicSent] = useState(false);
+  const toast = useToast();
 
   function finish() {
     router.refresh();
@@ -28,9 +28,8 @@ export function LoginCard() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     if (!email.trim() || !password) {
-      setError("Enter your email and password.");
+      toast.error("Enter your email and password.");
       return;
     }
     setLoading("pw");
@@ -50,21 +49,19 @@ export function LoginCard() {
           return;
         }
         setMagicSent(true);
-        setError(null);
         setLoading(null);
         return;
       }
       finish();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      toast.error(err instanceof Error ? err.message : "Something went wrong.");
       setLoading(null);
     }
   }
 
   async function handleMagic() {
-    setError(null);
     if (!email.trim()) {
-      setError("Enter your email first.");
+      toast.error("Enter your email first.");
       return;
     }
     setLoading("magic");
@@ -76,7 +73,7 @@ export function LoginCard() {
       if (error) throw error;
       setMagicSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send the link.");
+      toast.error(err instanceof Error ? err.message : "Couldn't send the link.");
     } finally {
       setLoading(null);
     }
@@ -154,8 +151,6 @@ export function LoginCard() {
             </button>
           </div>
         </Field>
-
-        {error && <p className="text-sm text-danger">{error}</p>}
 
         <Button
           type="submit"

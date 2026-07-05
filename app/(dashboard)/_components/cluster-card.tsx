@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, ConfirmDialog, Field, Input, Select, useToast } from "@/components/ui";
 import type {
   ClusterWithTopics,
   FunnelStage,
@@ -30,9 +30,6 @@ function topicToForm(topic: Topic): TopicFormData {
   };
 }
 
-const SELECT_CLS =
-  "mt-1 h-11 w-full rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 text-[15px] text-foreground focus:border-accent focus:outline-none disabled:opacity-50";
-
 interface ClusterCardProps {
   cluster: ClusterWithTopics;
   latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
@@ -46,17 +43,17 @@ export function ClusterCard({
   showArchived = false,
 }: ClusterCardProps) {
   const router = useRouter();
+  const toast = useToast();
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState<TopicFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const visibleTopics = cluster.topics.filter((t) => showArchived || !t.archived);
 
   async function handleUpdateTopic(topicId: string) {
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch(`/api/topics/${topicId}`, {
         method: "PATCH",
@@ -70,7 +67,7 @@ export function ClusterCard({
       setEditingTopicId(null);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
+      toast.error(e instanceof Error ? e.message : "Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -78,7 +75,6 @@ export function ClusterCard({
 
   async function handleCreateTopic() {
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch("/api/topics", {
         method: "POST",
@@ -93,16 +89,14 @@ export function ClusterCard({
       setFormData(EMPTY_FORM);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create.");
+      toast.error(e instanceof Error ? e.message : "Failed to create.");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDeleteTopic(topicId: string) {
-    if (!confirm("Delete this topic? This cannot be undone.")) return;
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch(`/api/topics/${topicId}`, { method: "DELETE" });
       if (!res.ok) {
@@ -112,15 +106,15 @@ export function ClusterCard({
       setEditingTopicId(null);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete.");
+      toast.error(e instanceof Error ? e.message : "Failed to delete.");
     } finally {
       setSaving(false);
+      setConfirmDeleteId(null);
     }
   }
 
   async function handleToggleArchive(topicId: string, archive: boolean) {
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch(`/api/topics/${topicId}/archive`, {
         method: archive ? "POST" : "DELETE",
@@ -130,9 +124,10 @@ export function ClusterCard({
         throw new Error(d.error ?? "Failed to update.");
       }
       setEditingTopicId(null);
+      toast.success(archive ? "Topic archived." : "Topic unarchived.");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update.");
+      toast.error(e instanceof Error ? e.message : "Failed to update.");
     } finally {
       setSaving(false);
     }
@@ -192,7 +187,6 @@ export function ClusterCard({
                       setFormData(topicToForm(topic));
                       setEditingTopicId(topic.id);
                       setShowAddForm(false);
-                      setError(null);
                     }
                   }}
                   className="text-[13px] text-muted transition-colors hover:text-foreground"
@@ -210,7 +204,6 @@ export function ClusterCard({
                   onChange={setFormData}
                   saving={saving}
                 />
-                {error && <p className="mt-2 text-xs text-danger">{error}</p>}
                 <div className="mt-4 flex items-center gap-2">
                   <Button
                     variant="solid"
@@ -238,7 +231,7 @@ export function ClusterCard({
                   </button>
                   {topic.status === "idea" && (
                     <button
-                      onClick={() => handleDeleteTopic(topic.id)}
+                      onClick={() => setConfirmDeleteId(topic.id)}
                       disabled={saving}
                       className="text-[13px] text-danger transition-colors hover:opacity-80 disabled:opacity-50"
                     >
@@ -266,7 +259,6 @@ export function ClusterCard({
               onChange={setFormData}
               saving={saving}
             />
-            {error && <p className="mt-2 text-xs text-danger">{error}</p>}
             <div className="mt-4 flex items-center gap-2">
               <Button
                 variant="solid"
@@ -283,7 +275,6 @@ export function ClusterCard({
                 onClick={() => {
                   setShowAddForm(false);
                   setFormData(EMPTY_FORM);
-                  setError(null);
                 }}
                 disabled={saving}
               >
@@ -302,7 +293,6 @@ export function ClusterCard({
               setFormData(EMPTY_FORM);
               setShowAddForm(true);
               setEditingTopicId(null);
-              setError(null);
             }}
             className="text-[13px] font-medium text-accent transition-colors hover:text-accent-press"
           >
@@ -310,6 +300,17 @@ export function ClusterCard({
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={() => confirmDeleteId && handleDeleteTopic(confirmDeleteId)}
+        tone="danger"
+        title="Delete this topic?"
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        loading={saving}
+      />
     </Card>
   );
 }
@@ -361,23 +362,19 @@ function TopicFields({
         />
       </Field>
 
-      <div>
-        <label className="mb-1.5 block text-[13px] font-medium text-foreground/90">
-          Funnel stage
-        </label>
-        <select
+      <Field label="Funnel stage">
+        <Select
           value={formData.funnel_stage}
           onChange={(e) => set("funnel_stage", e.target.value as FunnelStage | "")}
           disabled={saving}
-          className={SELECT_CLS}
         >
           <option value="">Inherit from pillar</option>
           <option value="awareness">Awareness</option>
           <option value="consideration">Consideration</option>
           <option value="decision">Decision</option>
           <option value="brand">Brand</option>
-        </select>
-      </div>
+        </Select>
+      </Field>
 
       <Field label="Maps to product">
         <Input

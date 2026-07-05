@@ -316,6 +316,18 @@ export interface StyleEditHistoryEntry {
   at: string; // ISO timestamp
 }
 
+// Tracks a draft's generation progress so the review page can render a real
+// wait state instead of a fake rotator. A draft is a "shell" (empty content)
+// while status is "generating"; the draft page swaps in the review UI once
+// status is "ready".
+export interface DraftGenerationState {
+  status: "generating" | "ready" | "error";
+  phase: string;
+  label: string;
+  started_at: string; // ISO timestamp
+  error?: string;
+}
+
 export interface DraftMeta {
   meta_title?: string;
   meta_description?: string;
@@ -327,6 +339,7 @@ export interface DraftMeta {
   // needed) since style edits update drafts.content in place with no
   // versioning of their own.
   style_edit_history?: StyleEditHistoryEntry[];
+  generation?: DraftGenerationState;
 }
 
 // What we store in drafts.seo_data, QA findings from the second Claude pass.

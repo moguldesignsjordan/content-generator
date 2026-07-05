@@ -3,7 +3,7 @@
 Living save/restore doc. Read this first to pick up context; update it
 whenever progress, blockers, or decisions change.
 
-Last updated: 2026-07-03 (evening: email-creation slice built).
+Last updated: 2026-07-05 (Email Creator UX Overhaul, all 6 phases landed).
 
 ## Locked decisions
 
@@ -312,6 +312,121 @@ Last updated: 2026-07-03 (evening: email-creation slice built).
   token; redesigning with an explicit "use a deep purple background
   instead of black, #4C1D95" correctly dropped the token and used exactly
   that purple.
+
+- **Email Creator UX Overhaul, Phase 0 + Phase 1 (2026-07-04):** working
+  through `structured-gliding-sunrise.md` (non-technical-owner UX pass).
+  - **Phase 0 — UI-kit primitives:** added `Progress` (bar/ring,
+    determinate/indeterminate), `Tooltip`, `Toast`/`ToastProvider`/`useToast`
+    (mounted in `app/layout.tsx`), `Checkbox`, `Select`, `Skeleton`,
+    `ConfirmDialog` to `components/ui/`, all exported from the barrel. Not
+    yet wired to call sites except `Select` in `quick-generate.tsx` — the
+    rest (toasts replacing inline error `<p>`s, checkbox/select swaps,
+    `ConfirmDialog` replacing `window.confirm`) is Phase 5.
+  - **Phase 1 — Honest generation wait:** killed the fake 7-string/5s
+    rotator. `DraftMeta.generation` (`lib/db/types.ts`) tracks
+    `status/phase/label/started_at/error`. `persistEmailDraft` split into
+    `createDraftShell` + `populateDraft` + `patchDraftGeneration`
+    (`lib/db/queries.ts`). `lib/pipeline/generate.ts`'s old synchronous
+    `generateEmailForTopic` is gone, replaced by
+    `generateEmailForTopicStreamed(draftId, ctx, opts, onEvent)` which fills
+    in an existing shell and emits `phase`/`done`/`error` events.
+    `POST /api/generate` and the assistant's `generate_email` tool
+    (`app/api/assistant/chat/route.ts`) now just call `createDraftShell` and
+    return instantly. New `GET /api/drafts/[id]/generate-stream` (SSE,
+    `maxDuration=300`) does the actual work: idempotent (emits `done`
+    immediately if already ready), and dedupes concurrent connections for
+    the same draft via an in-memory run registry
+    (`lib/pipeline/generation-runs.ts`, single-instance only — noted as a
+    known limitation for multi-instance hosting). Client:
+    `lib/use-generation-stream.ts` (SSE reader hook) +
+    `GenerationProgress` (`app/(dashboard)/drafts/[id]/_components/`),
+    swapped in on the draft page whenever `meta.generation.status !==
+    "ready"`. `quick-generate.tsx` no longer has the `STATUSES`
+    array/`setInterval`/`PenAnimation`/`ThinkingDots`; all three triggers
+    (QuickGenerate, GenerateButton, Assistant) now navigate the instant a
+    draft id comes back.
+  - Verified live (not just typecheck/build): a standalone script drove
+    `createDraftShell` → `generateEmailForTopicStreamed` against the real
+    Supabase + Anthropic, confirmed shell → `writing` → `checking` → `done`
+    → populated content, then cleaned up the test row. The SSE route itself
+    is behind Supabase Auth middleware, so its HTTP path wasn't
+    curl-tested — verify Phases 1's UI in-browser (logged in) before
+    considering it fully done.
+  - **Phase 2 — Click-to-edit creative control:** `data-region` attrs
+    (header/eyebrow/headline/body/cta/footer) added to both HTML paths —
+    the model prompt (`prompts/email-design.ts`, a new "REGIONS" block) and
+    the code-template fallback (`lib/email/templates/shared.ts` +
+    `paragraphs()` wraps body copy in `data-region="body"`, each template's
+    inline `<h1>` tagged `headline`). New `EmailPreview`
+    (`app/(dashboard)/drafts/[id]/_components/email-preview.tsx`) reads
+    `iframe.contentDocument` (sandbox now `allow-same-origin`, still no
+    `allow-scripts`), overlays hover hotspots, and opens a `Sheet` with
+    suggestion chips ("Make it bolder", etc.) + free text. `adjustEmailStyle`
+    (`lib/pipeline/adjust-style.ts`) and `buildAdjustStyleMessages`
+    (`prompts/adjust-email-style.ts`) take an optional `regionCtx {region,
+    label, snippet}` that prefaces the model call with the exact region
+    HTML, scoping the find/replace edit. `review-actions.tsx` now uses
+    `EmailPreview` instead of the bare iframe; `DesignChat` remounts (via a
+    `historyRefreshKey`) after a region edit so its history log stays in
+    sync. Verified live: a real generated email carried all 6 regions, and
+    a region-scoped "Make it bolder" edit on the headline landed correctly
+    without touching other regions; the template-fallback path was checked
+    directly (`renderEmailTemplate`) and also carries all 6.
+  - **Phase 3 — Campaign-chat quick-reply chips:** new `suggest_options`
+    tool (`prompts/campaign.ts`, `SuggestedOption {id,label,kind}`) added to
+    `CAMPAIGN_TOOLS`; the interview directive now tells the model to call it
+    with 1-3 fitting topics instead of describing them in prose.
+    `app/api/campaigns/chat/route.ts` handles the tool call in
+    `applyContentBlocks` (validates topic ids against the real TOPICS list,
+    same guard as `select_topic`) and returns `options` on `TurnResponse`.
+    `campaign-chat.tsx` renders them as tappable chips under the thread;
+    tapping one sends its label as the next message, same code path as
+    typing it. (Not live-tested this session — see billing note below.)
+  - **Phase 4 — Review-screen relabel:** `review-actions.tsx` renamed
+    jargon ("QA results" → "Quality check", "Issues to address" → "Things
+    to improve", "Banned terms found" → "Words we avoided", keyword
+    line → "Search phrase: used/not used yet", meta title/description →
+    "Page title"/"Page summary" under a new "Web version details" label
+    with a one-line hint that they're for the blog/web version, not the
+    email). Added a `Tooltip` on "Quality check" explaining what it covers.
+    Deleted the raw-HTML editor (`showHtmlEdit` toggle + textarea) and the
+    template-ID "Layout" `SegmentedControl` from the Reject sheet (incl.
+    `LAYOUT_OPTIONS`); the reject route already treated `templateOverride`
+    as optional so no backend change was needed. No literal "funnel stage"
+    label existed on this screen to tooltip-ify, despite the plan
+    mentioning it as an example — nothing was force-fit there.
+  - **Phase 5 — Hygiene tail (mostly done, incremental by design):** wired
+    the Phase 0 primitives across real call sites: `Checkbox` in
+    `suggest-topics.tsx` and `import-review.tsx`'s `SectionCheckbox`;
+    `Select` in `cluster-card.tsx` (deleted the old `SELECT_CLS`);
+    `ConfirmDialog` replacing `window.confirm` for topic delete in
+    `cluster-card.tsx`; `Skeleton` fallbacks via `app/(dashboard)/loading.tsx`
+    (generic, since it's the Suspense boundary for any nested dashboard
+    route without its own loading.tsx), `app/(dashboard)/emails/loading.tsx`,
+    and an iframe-load skeleton inside `EmailPreview`. Replaced inline
+    `text-danger` error paragraphs with `useToast().error(...)` and added
+    `useToast().success(...)` on save, across: all 6 named settings forms
+    (brand-basics, icp, funnel, positioning, products, visual-identity) plus
+    brand-voice/guidelines (kept guidelines' "draft below" hint inline since
+    it's state, not an error), `suggest-topics`, `import-review`,
+    `quick-generate`, `generate-button`, `import-website-form`,
+    `generate-identity-form`, `login-card`, `create-brand-form`, and
+    draft-approve/draft-archive/topic-archive in `review-actions.tsx` /
+    `cluster-card.tsx`. Left conversational/contextual inline errors alone
+    on purpose (design-chat entries, campaign-chat, assistant, onboarding
+    chat, the region-edit Sheet, `suggest-button`'s in-place placeholder) —
+    those read better as part of their specific bubble/card than as a
+    floating toast. Not done (genuinely low-priority, explicitly
+    incremental per the plan): a handful of smaller pages could still get
+    Skeleton fallbacks (settings tab, create tab) if it comes up later.
+  - **Known gap this session: Anthropic API billing.** The account hit
+    "credit balance too low" partway through Phase 3 verification (after
+    real generations were run live for Phases 1 and 2). Phases 3-5 are
+    typecheck+build clean and carefully code-reviewed but NOT exercised
+    against a real Claude call this session (campaign chat's
+    `suggest_options`, the click-to-edit chip flow end-to-end in a browser,
+    etc.) — top up credits and manually click through before considering
+    this fully verified in production.
 
 ## What's not built yet
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Textarea } from "@/components/ui";
+import { Button, Card, Field, Textarea, useToast } from "@/components/ui";
 import type { BrandGuidelines } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -27,9 +27,8 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
 
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "proposed" | "error">(
-    "idle",
-  );
+  const [proposed, setProposed] = useState(false);
+  const toast = useToast();
 
   const approvedAt = g.approved_at
     ? new Date(g.approved_at).toLocaleDateString()
@@ -37,7 +36,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
 
   async function handleGenerate() {
     setGenerating(true);
-    setStatus("idle");
+    setProposed(false);
     try {
       const res = await fetch("/api/settings/guidelines", { method: "POST" });
       const data = (await res.json()) as {
@@ -53,9 +52,9 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
       if (p.dont_language?.length) setDontLanguage(p.dont_language);
       if (p.visual_direction) setVisualDirection(p.visual_direction);
       if (p.cta_philosophy) setCtaPhilosophy(p.cta_philosophy);
-      setStatus("proposed");
+      setProposed(true);
     } catch {
-      setStatus("error");
+      toast.error("Couldn't generate a draft.");
     } finally {
       setGenerating(false);
     }
@@ -63,7 +62,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
+    setProposed(false);
     try {
       const res = await fetch("/api/settings/guidelines", {
         method: "PATCH",
@@ -82,9 +81,9 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
         }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved and approved.");
     } catch {
-      setStatus("error");
+      toast.error("Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -107,7 +106,7 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
           ✨ {voiceAndTone || messagingPillars.length ? "Regenerate" : "Generate"}
         </Button>
       </div>
-      {status === "proposed" && (
+      {proposed && (
         <p className="text-xs text-muted">
           Draft filled in below. Nothing is saved until you hit Save.
         </p>
@@ -183,12 +182,6 @@ export function GuidelinesForm({ brandId, guidelines }: GuidelinesFormProps) {
         <Button variant="gradient" loading={saving} onClick={handleSave}>
           Save guidelines
         </Button>
-        {status === "saved" && (
-          <span className="text-sm text-success">Saved and approved</span>
-        )}
-        {status === "error" && (
-          <span className="text-sm text-danger">Something went wrong.</span>
-        )}
       </div>
     </Card>
   );

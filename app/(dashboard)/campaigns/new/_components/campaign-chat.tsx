@@ -6,7 +6,7 @@ import { Button, Card, Input, Spinner } from "@/components/ui";
 import { SendIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { CampaignBrief, OnboardingMessage } from "@/lib/db/types";
-import type { VoiceProposals } from "@/prompts/campaign";
+import type { SuggestedOption, VoiceProposals } from "@/prompts/campaign";
 import { CAMPAIGN_GREETING } from "@/prompts/campaign";
 
 type TurnResponse = {
@@ -15,6 +15,7 @@ type TurnResponse = {
   topicId?: string | null;
   brief?: CampaignBrief;
   proposals?: VoiceProposals | null;
+  options?: SuggestedOption[] | null;
   readyToGenerate?: boolean;
   error?: string;
 };
@@ -28,6 +29,7 @@ export function CampaignChat() {
   const [topicId, setTopicId] = useState<string | null>(null);
   const [brief, setBrief] = useState<CampaignBrief>({});
   const [proposals, setProposals] = useState<VoiceProposals | null>(null);
+  const [options, setOptions] = useState<SuggestedOption[] | null>(null);
   const [savingVoice, setSavingVoice] = useState(false);
   const [readyToGenerate, setReadyToGenerate] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -38,12 +40,13 @@ export function CampaignChat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, proposals, readyToGenerate, generating]);
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || loading || generating) return;
     setInput("");
     setLoading(true);
     setError(null);
+    setOptions(null);
     setMessages((m) => [...m, { role: "user", content: text }]);
 
     try {
@@ -61,6 +64,7 @@ export function CampaignChat() {
       if (data.topicId !== undefined) setTopicId(data.topicId);
       if (data.brief) setBrief(data.brief);
       if (data.proposals) setProposals(data.proposals);
+      if (data.options?.length) setOptions(data.options);
       if (data.readyToGenerate) setReadyToGenerate(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -153,6 +157,22 @@ export function CampaignChat() {
           <Bubble key={i} role={m.role} text={m.content} />
         ))}
 
+        {options && options.length > 0 && !loading && (
+          <div className="flex flex-wrap gap-2">
+            {options.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => send(opt.label)}
+                disabled={loading || generating}
+                className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {proposals && (
           <Card className="ml-0 max-w-[92%] p-4">
             <p className="text-[13px] font-semibold text-foreground">
@@ -204,9 +224,7 @@ export function CampaignChat() {
         {generating ? (
           <div className="flex items-center gap-3 px-1 py-1.5">
             <Spinner />
-            <p className="text-[14px] text-muted">
-              Writing and designing your email… this takes about a minute.
-            </p>
+            <p className="text-[14px] text-muted">Opening your draft…</p>
           </div>
         ) : readyToGenerate && topicId ? (
           <div className="flex items-center justify-between gap-3">
@@ -227,7 +245,7 @@ export function CampaignChat() {
             <Button
               variant="gradient"
               className="h-11 w-11 shrink-0 !px-0"
-              onClick={send}
+              onClick={() => send()}
               disabled={loading || !input.trim()}
               aria-label="Send"
             >

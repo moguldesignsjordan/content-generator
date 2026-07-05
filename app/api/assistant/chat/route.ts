@@ -3,13 +3,9 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { DRAFT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandWithIcps, listTopics } from "@/lib/db/queries";
-import { generateEmailForTopic } from "@/lib/pipeline/generate";
+import { createDraftShell, getBrandWithIcps, getTopicContext, listTopics } from "@/lib/db/queries";
 import { GENERATE_EMAIL_TOOL, buildAssistantSystem } from "@/prompts/assistant";
 import { stripEmDashes } from "@/lib/text";
-
-// A generation call with thinking can take 30 to 90s.
-export const maxDuration = 300;
 
 interface ChatMsg {
   role: "user" | "assistant";
@@ -69,11 +65,13 @@ export async function POST(req: NextRequest) {
           "Error: that topic id is not in the list. Ask the user which topic they mean.";
       } else {
         try {
-          const newDraftId = await generateEmailForTopic(topicId as string);
+          const ctx = await getTopicContext(topicId as string);
+          if (!ctx) throw new Error(`Topic ${topicId} not found`);
+          const newDraftId = await createDraftShell({ ctx });
           draftId = newDraftId;
-          resultText = `Success. The new email draft was saved with id ${newDraftId}. Tell the user it is ready to review.`;
+          resultText = `Success. A new draft was created with id ${newDraftId} and is being written now. Tell the user to open it to watch it come together.`;
         } catch (err) {
-          resultText = `Error: generation failed, ${
+          resultText = `Error: could not start generation, ${
             err instanceof Error ? err.message : "unknown error"
           }. Tell the user to try again.`;
         }

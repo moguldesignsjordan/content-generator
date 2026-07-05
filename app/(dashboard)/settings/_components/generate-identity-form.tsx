@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AccentSpinner, Button, Card } from "@/components/ui";
+import { AccentSpinner, Button, Card, useToast } from "@/components/ui";
 import type { Brand, BrandImportProposal, Product } from "@/lib/db/types";
 import { ImportReview } from "../../_components/import-review";
 
@@ -20,16 +20,13 @@ export function GenerateIdentityForm({
   onSaved?: () => void;
 }) {
   const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [reasoning, setReasoning] = useState<string | null>(null);
   const [proposal, setProposal] = useState<BrandImportProposal | null>(null);
-  const [savedNote, setSavedNote] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
 
   async function handleGenerate() {
     setGenerating(true);
-    setError(null);
-    setSavedNote(null);
     try {
       const res = await fetch("/api/settings/brand-identity", { method: "POST" });
       const data = (await res.json()) as {
@@ -43,7 +40,7 @@ export function GenerateIdentityForm({
       setProposal(data.proposal);
       setReasoning(data.reasoning ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Try again.");
+      toast.error(err instanceof Error ? err.message : "Try again.");
     } finally {
       setGenerating(false);
     }
@@ -68,7 +65,6 @@ export function GenerateIdentityForm({
           onDone={(saved) => {
             setProposal(null);
             if (saved.length) {
-              setSavedNote("Saved. Your emails will use this palette and typography.");
               router.refresh();
               onSaved?.();
             }
@@ -91,8 +87,6 @@ export function GenerateIdentityForm({
           Picking a palette…
         </div>
       )}
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {savedNote && <p className="text-sm text-success">{savedNote}</p>}
       <Button variant="gradient" loading={generating} onClick={handleGenerate}>
         Generate brand identity
       </Button>

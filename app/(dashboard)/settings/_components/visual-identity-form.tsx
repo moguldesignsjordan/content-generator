@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Button, Card, Field, Input, Label } from "@/components/ui";
+import { Button, Card, Field, Input, Label, useToast } from "@/components/ui";
 import type { BrandColors, BrandFonts, VisualIdentity } from "@/lib/db/types";
 
 interface VisualIdentityFormProps {
@@ -43,14 +43,12 @@ export function VisualIdentityForm({
   const [social, setSocial] = useState(initialSocial);
 
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleUpload(file: File) {
     setUploading(true);
-    setUploadError(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -64,9 +62,7 @@ export function VisualIdentityForm({
       }
       setLogoUrl(data.url);
     } catch (err) {
-      setUploadError(
-        err instanceof Error ? err.message : "Upload failed.",
-      );
+      toast.error(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
@@ -74,7 +70,6 @@ export function VisualIdentityForm({
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
     try {
       const res = await fetch("/api/settings/visual-identity", {
         method: "PATCH",
@@ -95,9 +90,9 @@ export function VisualIdentityForm({
         }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -156,9 +151,6 @@ export function VisualIdentityForm({
             )}
           </div>
         </div>
-        {uploadError && (
-          <p className="mt-2 text-sm text-danger">{uploadError}</p>
-        )}
       </div>
 
       {/* Colors */}
@@ -261,10 +253,6 @@ export function VisualIdentityForm({
         <Button variant="gradient" loading={saving} onClick={handleSave}>
           Save visual identity
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Failed to save.</span>
-        )}
       </div>
     </Card>
   );

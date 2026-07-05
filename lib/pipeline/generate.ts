@@ -5,7 +5,8 @@ import {
   getDraftWithJobContext,
   getLatestDraftVersion,
   getTopicContext,
-  persistEmailDraft,
+  patchDraftGeneration,
+  populateDraft,
   persistRegeneratedDraft,
   rejectDraftRecord,
   updateCampaign,
@@ -34,51 +35,70 @@ import type {
 import { stripEmDashes } from "@/lib/text";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 
+/** Phase-by-phase events emitted while a draft shell is being filled in. */
+export type GenerationEvent =
+  | { type: "phase"; phase: string; label: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
 /**
- * Generates an on-brand email draft for a topic and saves it as draft v1.
- * Returns the new draft id (the review screen route).
+ * Fills in an already-created draft shell (see `createDraftShell` in
+ * lib/db/queries.ts) with a real generated email, reporting phase progress
+ * via `onEvent` as it goes. Used by the generation SSE route so the draft
+ * page can show honest wait progress instead of a fake rotator.
  *
- * Throws on missing topic, unconfigured key, or a model response that doesn't
- * match the schema, the API route turns these into a visible failure state
- * (Guardrail #5: never swallow errors).
+ * Throws on a model response that doesn't match the schema; the caller
+ * (the SSE route) turns that into a visible error phase (Guardrail #5:
+ * never swallow errors), after recording it on the draft's meta.generation.
  */
-export async function generateEmailForTopic(
-  topicId: string,
-  opts: { campaignId?: string } = {},
-): Promise<string> {
-  const ctx = await getTopicContext(topicId);
-  if (!ctx) throw new Error(`Topic ${topicId} not found`);
+export async function generateEmailForTopicStreamed(
+  draftId: string,
+  ctx: TopicContext,
+  opts: { campaignId?: string },
+  onEvent: (event: GenerationEvent) => void,
+): Promise<void> {
+  try {
+    const writing = { phase: "writing", label: "Writing your email" };
+    await patchDraftGeneration(draftId, writing);
+    onEvent({ type: "phase", ...writing });
 
-  const brief = await loadCampaignBrief(opts.campaignId);
-  const tokens = resolveBrandTokens(ctx.brand);
-  const { system, user } = buildEmailMessages(ctx, tokens, { brief });
+    const brief = await loadCampaignBrief(opts.campaignId);
+    const tokens = resolveBrandTokens(ctx.brand);
+    const { system, user } = buildEmailMessages(ctx, tokens, { brief });
+    const parsed = await generateEmailCopy(system, user);
 
-  const parsed = await generateEmailCopy(system, user);
+    const { content, copy, templateId, designSource } = renderEmailForContext(
+      ctx,
+      parsed,
+    );
 
-  const { content, copy, templateId, designSource } = renderEmailForContext(
-    ctx,
-    parsed,
-  );
+    const checking = { phase: "checking", label: "Running quality checks" };
+    await patchDraftGeneration(draftId, checking);
+    onEvent({ type: "phase", ...checking });
 
-  const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
-  const meta: DraftMeta = {
-    ...qaMeta,
-    email_template_id: templateId,
-    email_copy: copy,
-    email_design_source: designSource,
-  };
-  const draftId = await persistEmailDraft({
-    ctx,
-    content,
-    meta,
-    seoData,
-    campaignId: opts.campaignId,
-  });
+    const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
+    const meta: DraftMeta = {
+      ...qaMeta,
+      email_template_id: templateId,
+      email_copy: copy,
+      email_design_source: designSource,
+    };
 
-  if (opts.campaignId) {
-    await updateCampaign(opts.campaignId, { status: "drafted" });
+    await populateDraft(draftId, { content, meta, seoData });
+
+    if (opts.campaignId) {
+      await updateCampaign(opts.campaignId, { status: "drafted" });
+    }
+
+    onEvent({ type: "done" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Generation failed.";
+    await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
+      (e) => console.error("[generate] failed to record error phase:", e),
+    );
+    onEvent({ type: "error", message });
+    throw err;
   }
-  return draftId;
 }
 
 /** Loads a campaign's brief, or null when no campaign is driving this draft. */

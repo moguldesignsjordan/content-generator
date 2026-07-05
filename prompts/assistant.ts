@@ -10,18 +10,19 @@ export interface AssistantTopic {
 }
 
 /**
- * The one tool the assistant can call: generate a full email draft for a topic.
- * The route executes the real pipeline (generateEmailForTopic); the model never
- * writes directly. The route returns the new draft id so the assistant can tell
- * the user where to review it.
+ * The one tool the assistant can call: kick off a full email draft for a topic.
+ * The route creates a draft shell (createDraftShell) and returns its id
+ * immediately; the model never writes directly. The actual writing happens
+ * in the background once the user opens the draft page, which streams real
+ * progress instead of the assistant waiting on it.
  */
 export const GENERATE_EMAIL_TOOL: Anthropic.Tool = {
   name: "generate_email",
   description:
-    "Generate a full on-brand email draft for one topic. Call this when the user " +
+    "Start a full on-brand email draft for one topic. Call this when the user " +
     "asks you to write, draft, or generate an email. Pass the exact topicId from " +
-    "the TOPICS list. Generation takes about 30 to 90 seconds and returns the new " +
-    "draft id.",
+    "the TOPICS list. Returns a draft id immediately; the email is written in the " +
+    "background as soon as the user opens the draft, which takes about 30 to 90 seconds.",
   input_schema: {
     type: "object",
     properties: {
@@ -68,8 +69,8 @@ export function buildAssistantSystem(
       "ids from the TOPICS list above, never invent one.",
     "- If the user's request is vague, suggest 2 to 3 matching topics by title and ask " +
       "which one to draft.",
-    "- After generation completes you'll be told the new draft id. Tell the user the " +
-      "draft is ready and that they can open it to review and approve.",
+    "- After you call it you'll be told the new draft id right away. Tell the user " +
+      "it's being written and they can open it now to watch it come together.",
     "- Keep replies short and scannable. No long preambles.",
     "- You can also suggest subject lines, critique copy, and answer brand/strategy " +
       "questions using the context above.",

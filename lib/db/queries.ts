@@ -8,6 +8,7 @@ import type {
   CampaignChatState,
   CampaignStatus,
   DraftForReview,
+  DraftGenerationState,
   DraftJobContext,
   DraftMeta,
   DraftSeoData,
@@ -192,15 +193,19 @@ export async function getTopicContext(
  * Persists a generated email as draft v1: creates a content_jobs row, a drafts
  * row (state in_review), and marks the topic in_progress. Returns the draft id.
  */
-export async function persistEmailDraft(args: {
+/**
+ * Inserts an empty draft "shell" fast, so the caller can navigate to the
+ * review screen immediately (Phase 1: honest generation wait). The shell has
+ * empty content and meta.generation = { status: "generating" }; the pipeline
+ * fills it in later via patchDraftGeneration (phase updates) and
+ * populateDraft (the finished content).
+ */
+export async function createDraftShell(args: {
   ctx: TopicContext;
-  content: EmailDraftContent;
-  meta?: DraftMeta;
-  seoData?: DraftSeoData;
   campaignId?: string;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, content, meta, seoData, campaignId } = args;
+  const { ctx, campaignId } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -210,7 +215,7 @@ export async function persistEmailDraft(args: {
       brand_id: ctx.brand.id,
       topic_id: ctx.topic.id,
       type: "email",
-      status: "in_review",
+      status: "generating",
       trigger_source: campaignId ? "campaign" : "manual",
       ...(campaignId ? { campaign_id: campaignId } : {}),
     })
@@ -218,14 +223,20 @@ export async function persistEmailDraft(args: {
     .single();
   if (jobErr) throw jobErr;
 
+  const generation: DraftGenerationState = {
+    status: "generating",
+    phase: "queued",
+    label: "Starting",
+    started_at: new Date().toISOString(),
+  };
+
   const { data: draft, error: draftErr } = await db
     .from("drafts")
     .insert({
       job_id: job.id,
       version: 1,
-      content,
-      meta: meta ?? {},
-      seo_data: seoData ?? {},
+      content: {},
+      meta: { generation },
       state: "in_review",
     })
     .select("id")
@@ -239,6 +250,82 @@ export async function persistEmailDraft(args: {
   if (topicErr) throw topicErr;
 
   return draft.id as string;
+}
+
+/**
+ * Fills in a draft shell with its finished content, merging over
+ * meta.generation so the record reads "ready". Also flips the parent
+ * content_job's status out of "generating".
+ */
+export async function populateDraft(
+  draftId: string,
+  args: { content: EmailDraftContent; meta?: DraftMeta; seoData?: DraftSeoData },
+): Promise<void> {
+  const db = getAdminClient();
+  const { content, meta, seoData } = args;
+
+  const { data: existing, error: fetchErr } = await db
+    .from("drafts")
+    .select("job_id, meta")
+    .eq("id", draftId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const priorMeta = (existing.meta ?? {}) as DraftMeta;
+  const mergedMeta: DraftMeta = {
+    ...priorMeta,
+    ...meta,
+    generation: {
+      started_at: priorMeta.generation?.started_at ?? new Date().toISOString(),
+      ...priorMeta.generation,
+      status: "ready",
+      phase: "ready",
+      label: "Ready",
+    },
+  };
+
+  const { error: updateErr } = await db
+    .from("drafts")
+    .update({ content, meta: mergedMeta, seo_data: seoData ?? {} })
+    .eq("id", draftId);
+  if (updateErr) throw updateErr;
+
+  const { error: jobErr } = await db
+    .from("content_jobs")
+    .update({ status: "in_review" })
+    .eq("id", existing.job_id as string);
+  if (jobErr) throw jobErr;
+}
+
+/** Lightweight phase-only update to meta.generation, for streaming progress. */
+export async function patchDraftGeneration(
+  draftId: string,
+  patch: Partial<DraftGenerationState>,
+): Promise<void> {
+  const db = getAdminClient();
+
+  const { data: existing, error: fetchErr } = await db
+    .from("drafts")
+    .select("meta")
+    .eq("id", draftId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const priorMeta = (existing.meta ?? {}) as DraftMeta;
+  const generation: DraftGenerationState = {
+    status: "generating",
+    phase: "queued",
+    label: "Starting",
+    started_at: new Date().toISOString(),
+    ...priorMeta.generation,
+    ...patch,
+  };
+
+  const { error } = await db
+    .from("drafts")
+    .update({ meta: { ...priorMeta, generation } })
+    .eq("id", draftId);
+  if (error) throw error;
 }
 
 /** Loads the minimal context the regeneration pipeline needs for a draft. */

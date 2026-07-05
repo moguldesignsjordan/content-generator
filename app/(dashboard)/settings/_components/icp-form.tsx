@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Input, Textarea } from "@/components/ui";
+import { Button, Card, Field, Input, Textarea, useToast } from "@/components/ui";
 import type { Icp } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -17,11 +17,10 @@ export function IcpForm({ icp }: { icp: Icp }) {
   const [awarenessStage, setAwarenessStage] = useState(p.awareness_stage ?? "");
 
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
     try {
       const res = await fetch(`/api/settings/icp/${icp.id}`, {
         method: "PATCH",
@@ -41,9 +40,9 @@ export function IcpForm({ icp }: { icp: Icp }) {
         }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -121,10 +120,6 @@ export function IcpForm({ icp }: { icp: Icp }) {
         <Button variant="gradient" loading={saving} onClick={handleSave}>
           Save ICP
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Failed to save.</span>
-        )}
       </div>
     </Card>
   );

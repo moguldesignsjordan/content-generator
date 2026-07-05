@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, Field, Input, useToast } from "@/components/ui";
 import type { MailerliteConfig, SeoDefaults } from "@/lib/db/types";
 
 interface BrandBasicsFormProps {
@@ -23,12 +23,11 @@ export function BrandBasicsForm({
   const [geography, setGeography] = useState(seoDefaults.geography ?? "");
 
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
 
   async function handleSave() {
     if (!brandName.trim()) return;
     setSaving(true);
-    setStatus("idle");
     try {
       const res = await fetch("/api/settings/brand-basics", {
         method: "PATCH",
@@ -49,9 +48,9 @@ export function BrandBasicsForm({
         }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -106,10 +105,6 @@ export function BrandBasicsForm({
         >
           Save basics
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Failed to save.</span>
-        )}
       </div>
     </Card>
   );

@@ -13,7 +13,7 @@ export function escapeHtml(s: string): string {
 
 /** Normalizes plain-text paragraphs from copy into <p> blocks (blank-line separated). */
 export function paragraphs(text: string, color = "inherit"): string {
-  return text
+  const html = text
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
@@ -22,6 +22,7 @@ export function paragraphs(text: string, color = "inherit"): string {
         `<p style="margin:0 0 18px;font-size:16px;line-height:1.65;color:${color};">${escapeHtml(p)}</p>`,
     )
     .join("");
+  return `<div data-region="body">${html}</div>`;
 }
 
 /**
@@ -38,7 +39,7 @@ export function leadParagraph(text: string, tokens: BrandTokens): string {
 /** Uppercase brand-accent kicker that labels the email type (e.g. QUICK TIP). */
 export function renderEyebrow(text: string, tokens: BrandTokens): string {
   return (
-    `<div style="font-family:${tokens.fonts.body};font-size:12px;font-weight:700;` +
+    `<div data-region="eyebrow" style="font-family:${tokens.fonts.body};font-size:12px;font-weight:700;` +
     `letter-spacing:1.6px;text-transform:uppercase;color:${tokens.colors.accent};` +
     `margin:0 0 14px;">${escapeHtml(text)}</div>`
   );
@@ -77,7 +78,7 @@ export function renderHeader(tokens: BrandTokens): string {
       `<span style="color:${tokens.colors.accent};">.</span></span>`;
 
   return (
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-region="header">` +
     `<tr><td style="padding:0 0 24px;border-bottom:1px solid #E6EAF0;">${brand}</td></tr>` +
     `</table>`
   );
@@ -113,7 +114,7 @@ export function renderFooter(tokens: BrandTokens): string {
     : "";
 
   return (
-    `<table role="presentation" width="100%" style="margin-top:40px;padding-top:24px;` +
+    `<table role="presentation" width="100%" data-region="footer" style="margin-top:40px;padding-top:24px;` +
     `border-top:1px solid #E6EAF0;font-family:${tokens.fonts.body};">` +
     `<tr><td style="text-align:center;color:${muted};font-size:12px;line-height:1.6;">` +
     `<div style="margin:0 0 4px;">${website}</div>` +
@@ -136,7 +137,7 @@ export function renderCtaButton(
 ): string {
   const href = url && url.trim() ? url : "#";
   return (
-    `<div style="text-align:center;margin:36px 0 8px;">` +
+    `<div data-region="cta" style="text-align:center;margin:36px 0 8px;">` +
     `<a href="${escapeHtml(href)}" style="display:inline-block;background:${tokens.colors.accent};` +
     `color:#ffffff;font-family:${tokens.fonts.body};font-size:16px;font-weight:600;` +
     `letter-spacing:0.2px;text-decoration:none;padding:15px 36px;border-radius:10px;">` +

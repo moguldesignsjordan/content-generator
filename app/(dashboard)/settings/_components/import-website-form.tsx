@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AccentSpinner, Button, Card, Field, Input } from "@/components/ui";
+import { AccentSpinner, Button, Card, Field, Input, useToast } from "@/components/ui";
 import type { Brand, BrandImportProposal, Product } from "@/lib/db/types";
 import { ImportReview } from "../../_components/import-review";
 
@@ -20,16 +20,13 @@ export function ImportWebsiteForm({
 }) {
   const [url, setUrl] = useState(brand.visual_identity?.footer?.website ?? "");
   const [importing, setImporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<BrandImportProposal | null>(null);
-  const [savedNote, setSavedNote] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
 
   async function handleImport() {
     if (!url.trim()) return;
     setImporting(true);
-    setError(null);
-    setSavedNote(null);
     try {
       const res = await fetch("/api/settings/import-website", {
         method: "POST",
@@ -45,7 +42,7 @@ export function ImportWebsiteForm({
       }
       setProposal(data.proposal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed. Try again.");
+      toast.error(err instanceof Error ? err.message : "Import failed. Try again.");
     } finally {
       setImporting(false);
     }
@@ -64,7 +61,6 @@ export function ImportWebsiteForm({
         onDone={(saved) => {
           setProposal(null);
           if (saved.length) {
-            setSavedNote("Saved. Your brand profile is updated.");
             router.refresh();
             onSaved?.();
           }
@@ -94,8 +90,6 @@ export function ImportWebsiteForm({
           Reading your website, this can take up to a minute…
         </div>
       )}
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {savedNote && <p className="text-sm text-success">{savedNote}</p>}
       <Button
         variant="gradient"
         loading={importing}

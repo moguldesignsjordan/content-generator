@@ -85,13 +85,23 @@ export const ADJUST_STYLE_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface AdjustStyleRegionContext {
+  /** The data-region value, e.g. "headline". */
+  region: string;
+  /** Plain-language label shown in the UI, e.g. "Headline". */
+  label: string;
+  /** The region element's outerHTML, copied verbatim from the live preview. */
+  snippet: string;
+}
+
 /** Builds the (system, user) pair for one style-adjustment call. */
 export function buildAdjustStyleMessages(args: {
   currentHtml: string;
   instruction: string;
   tokens: BrandTokens;
+  regionCtx?: AdjustStyleRegionContext;
 }): { system: string; user: string } {
-  const { currentHtml, instruction, tokens } = args;
+  const { currentHtml, instruction, tokens, regionCtx } = args;
   const c = tokens.colors;
   const f = tokens.fonts;
 
@@ -170,7 +180,20 @@ export function buildAdjustStyleMessages(args: {
     `- Body font: ${f.body}`,
   ].join("\n");
 
+  const regionBlock = regionCtx
+    ? [
+        `The user clicked the "${regionCtx.label}" part of the email (data-region=` +
+          `"${regionCtx.region}") and asked for this change specifically there. Its`,
+        "current HTML is:",
+        regionCtx.snippet,
+        "Prefer a find target inside that exact snippet. Only look elsewhere if the",
+        "instruction clearly can't be satisfied within it.",
+        "",
+      ]
+    : [];
+
   const user = [
+    ...regionBlock,
     `REQUESTED CHANGE: ${instruction}`,
     "",
     "CURRENT HTML:",

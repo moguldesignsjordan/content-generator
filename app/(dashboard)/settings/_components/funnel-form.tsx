@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, Field, Input, useToast } from "@/components/ui";
 
 interface FunnelFormProps {
   strategyId: string;
@@ -20,11 +20,10 @@ export function FunnelForm({ strategyId, funnelDefinition }: FunnelFormProps) {
   );
 
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
     try {
       const res = await fetch("/api/settings/funnel", {
         method: "PATCH",
@@ -39,9 +38,9 @@ export function FunnelForm({ strategyId, funnelDefinition }: FunnelFormProps) {
         }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -87,10 +86,6 @@ export function FunnelForm({ strategyId, funnelDefinition }: FunnelFormProps) {
         >
           Save funnel config
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Failed to save.</span>
-        )}
       </div>
     </Card>
   );

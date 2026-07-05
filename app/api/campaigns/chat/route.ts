@@ -25,6 +25,8 @@ import {
   type CampaignTopicOption,
   type CreateTopicInput,
   type SelectTopicInput,
+  type SuggestedOption,
+  type SuggestOptionsInput,
   type UpdateBriefInput,
   type VoiceProposals,
 } from "@/prompts/campaign";
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
       brief: campaign.brief ?? {},
       topicId: campaign.topic_id,
       proposals: null,
+      options: null,
       readyToGenerate: false,
     };
 
@@ -208,6 +211,7 @@ export async function POST(req: NextRequest) {
       topicId: state.topicId,
       brief: state.brief,
       proposals: state.proposals,
+      options: state.options,
       readyToGenerate: state.readyToGenerate,
     });
   } catch (err) {
@@ -223,6 +227,7 @@ interface TurnState {
   brief: CampaignBrief;
   topicId: string | null;
   proposals: VoiceProposals | null;
+  options: SuggestedOption[] | null;
   readyToGenerate: boolean;
 }
 
@@ -286,6 +291,15 @@ async function applyContentBlocks(
       }
       case "propose_voice_updates": {
         state.proposals = block.input as VoiceProposals;
+        break;
+      }
+      case "suggest_options": {
+        const input = block.input as SuggestOptionsInput;
+        // Drop any hallucinated topic id rather than trust it blindly, same
+        // guard as select_topic; action-kind ids are free-form by design.
+        state.options = (input.options ?? []).filter(
+          (o) => o.kind !== "topic" || ctx.topics.some((t) => t.id === o.id),
+        );
         break;
       }
       case "start_generation": {

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { generateEmailForTopic } from "@/lib/pipeline/generate";
+import { createDraftShell, getTopicContext } from "@/lib/db/queries";
 
-// A full generation (Claude + adaptive thinking) can take 30 to 90s, which exceeds
-// the default serverless timeout. Give the route headroom (Guardrail #6).
-// Vercel allows up to 300s on Pro/Fluid Compute.
-export const maxDuration = 300;
+// Only creates the draft shell here (fast DB writes) and returns immediately.
+// The actual generation runs when the draft page opens the generate-stream
+// SSE connection, so this route no longer needs serverless-timeout headroom.
 
 export async function POST(request: Request) {
   if (!isSupabaseConfigured() || !isAnthropicConfigured()) {
@@ -33,9 +32,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    console.log("[generate] start topicId:", topicId, "campaignId:", campaignId);
-    const draftId = await generateEmailForTopic(topicId, { campaignId });
-    console.log("[generate] success topicId:", topicId, "draftId:", draftId);
+    const ctx = await getTopicContext(topicId);
+    if (!ctx) {
+      return NextResponse.json({ error: `Topic ${topicId} not found.` }, { status: 404 });
+    }
+    const draftId = await createDraftShell({ ctx, campaignId });
+    console.log("[generate] shell created topicId:", topicId, "draftId:", draftId);
     return NextResponse.json({ draftId });
   } catch (err) {
     console.error(

@@ -167,12 +167,69 @@ export const START_GENERATION_TOOL: Anthropic.Tool = {
   input_schema: { type: "object", properties: {} },
 };
 
+export interface SuggestedOption {
+  id: string;
+  label: string;
+  kind: "topic" | "action";
+}
+
+export interface SuggestOptionsInput {
+  options: SuggestedOption[];
+}
+
+export const SUGGEST_OPTIONS_TOOL: Anthropic.Tool = {
+  name: "suggest_options",
+  description:
+    "Offer the user tappable quick-reply options instead of making them retype a " +
+    "title. Call this whenever you have fitting topics to suggest from the TOPICS " +
+    "list, or a clear next-step action to offer. Always pair it with a normal " +
+    "conversational message in the same turn, never a bare tool call.",
+  input_schema: {
+    type: "object",
+    properties: {
+      options: {
+        type: "array",
+        minItems: 1,
+        maxItems: 4,
+        items: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "For kind=\"topic\": the exact topic id from the TOPICS list, never " +
+                "invented. For kind=\"action\": a short slug you make up for this " +
+                "action, e.g. \"new_topic\".",
+            },
+            label: {
+              type: "string",
+              description:
+                "The human-readable text on the chip, e.g. the topic's title, or the " +
+                "action's plain-language name.",
+            },
+            kind: {
+              type: "string",
+              enum: ["topic", "action"],
+              description:
+                "\"topic\" when id is a real topic from the list, \"action\" for " +
+                "anything else tappable (e.g. proposing a brand-new topic).",
+            },
+          },
+          required: ["id", "label", "kind"],
+        },
+      },
+    },
+    required: ["options"],
+  },
+};
+
 export const CAMPAIGN_TOOLS: Anthropic.Tool[] = [
   UPDATE_BRIEF_TOOL,
   SELECT_TOPIC_TOOL,
   CREATE_TOPIC_TOOL,
   PROPOSE_VOICE_TOOL,
   START_GENERATION_TOOL,
+  SUGGEST_OPTIONS_TOOL,
 ];
 
 /**
@@ -258,9 +315,11 @@ export function buildCampaignSystem(args: {
     "- Ask ONE focused question at a time (two only when tightly related). Short turns.",
     "- Acknowledge answers briefly and specifically; never re-ask what's stored or in the brief.",
     "- When an answer gives brief data, call update_brief with exactly those fields.",
-    "- Once you understand the goal, suggest 1 to 3 fitting topics from the list (by title,",
-    "  never show raw ids to the user). When the user picks one, call select_topic.",
-    "  If nothing fits, propose a new title and call create_topic once they agree.",
+    "- Once you understand the goal, call suggest_options with 1 to 3 fitting topics",
+    "  from the list (kind: \"topic\", id = the topic's exact id, label = its title) so",
+    "  the user can tap one instead of typing it out. When the user picks one (by tap",
+    "  or by typing its title), call select_topic. If nothing on the list fits, suggest",
+    "  a new title in your reply and call create_topic once they agree to it.",
     ...(voiceIsThin
       ? [
           "- The stored voice profile is THIN. Weave in one voice question when natural",

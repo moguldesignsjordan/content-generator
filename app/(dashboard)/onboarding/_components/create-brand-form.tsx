@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AccentSpinner, Button, Card, Field, Input } from "@/components/ui";
+import { AccentSpinner, Button, Card, Field, Input, useToast } from "@/components/ui";
 import type { BrandImportProposal } from "@/lib/db/types";
 import { ImportReview } from "../../_components/import-review";
 
@@ -22,18 +22,17 @@ export function CreateBrandForm() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [generatingIdentity, setGeneratingIdentity] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [review, setReview] = useState<{
     brandId: string;
     proposal: BrandImportProposal;
   } | null>(null);
   const router = useRouter();
+  const toast = useToast();
 
   async function handleCreate() {
     if (!name.trim()) return;
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch("/api/brands", {
         method: "POST",
@@ -90,7 +89,7 @@ export function CreateBrandForm() {
       }
       router.refresh();
     } catch {
-      setError("Couldn't create the brand. Try again.");
+      toast.error("Couldn't create the brand. Try again.");
     } finally {
       setSaving(false);
     }
@@ -160,7 +159,6 @@ export function CreateBrandForm() {
           />
         </Field>
       </div>
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       {importNote && <p className="mt-2 text-sm text-muted">{importNote}</p>}
       <Button
         variant="gradient"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Textarea } from "@/components/ui";
+import { Button, Card, Field, Textarea, useToast } from "@/components/ui";
 import type { VoiceProfile } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -26,11 +26,10 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
   });
 
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
     try {
       const updated: VoiceProfile = {
         ...voiceProfile,
@@ -46,9 +45,9 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
         body: JSON.stringify({ brandId, voiceProfile: updated }),
       });
       if (!res.ok) throw new Error();
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Failed to save.");
     } finally {
       setSaving(false);
     }
@@ -121,10 +120,6 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
         <Button variant="gradient" loading={saving} onClick={handleSave}>
           Save brand voice
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Failed to save.</span>
-        )}
       </div>
     </Card>
   );

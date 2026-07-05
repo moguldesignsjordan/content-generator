@@ -9,6 +9,7 @@ import { resolveBrandTokens } from "@/lib/email/templates";
 import {
   ADJUST_STYLE_TOOL,
   buildAdjustStyleMessages,
+  type AdjustStyleRegionContext,
   type AdjustStyleToolInput,
   type StyleEdit,
 } from "@/prompts/adjust-email-style";
@@ -120,6 +121,7 @@ async function attemptEdit(
 export async function adjustEmailStyle(
   draftId: string,
   instruction: string,
+  regionCtx?: AdjustStyleRegionContext,
 ): Promise<AdjustStyleResult> {
   const draftCtx = await getDraftWithJobContext(draftId);
   if (!draftCtx) return { ok: false, error: "Draft not found." };
@@ -132,6 +134,7 @@ export async function adjustEmailStyle(
     currentHtml: draftCtx.content.html,
     instruction,
     tokens,
+    regionCtx,
   });
 
   // FAST_MODEL (Haiku) first: "find the exact snippet and describe a

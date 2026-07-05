@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Input, Textarea } from "@/components/ui";
+import { Button, Card, Field, Input, Textarea, useToast } from "@/components/ui";
 import type { Product } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
@@ -93,11 +93,10 @@ function ProductCard({
 }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+  const toast = useToast();
 
   async function handleSave() {
     setSaving(true);
-    setStatus("idle");
     try {
       const res = await fetch("/api/settings/products", {
         method: "PATCH",
@@ -107,9 +106,9 @@ function ProductCard({
       const data = (await res.json()) as { product?: Product; error?: string };
       if (!res.ok || !data.product) throw new Error(data.error);
       onSaved(data.product);
-      setStatus("saved");
+      toast.success("Saved.");
     } catch {
-      setStatus("error");
+      toast.error("Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -130,7 +129,7 @@ function ProductCard({
       if (!res.ok) throw new Error();
       onDeleted();
     } catch {
-      setStatus("error");
+      toast.error("Something went wrong.");
       setDeleting(false);
     }
   }
@@ -210,10 +209,6 @@ function ProductCard({
         >
           Delete
         </Button>
-        {status === "saved" && <span className="text-sm text-success">Saved</span>}
-        {status === "error" && (
-          <span className="text-sm text-danger">Something went wrong.</span>
-        )}
       </div>
     </Card>
   );

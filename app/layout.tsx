@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk } from "next/font/google";
+import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
 // Hanken Grotesk (body + UI workhorse) via next/font. Clash Grotesk (display,
@@ -40,7 +41,9 @@ export default function RootLayout({
           href="https://api.fontshare.com/v2/css?f[]=clash-grotesk@400,500,600,700&display=swap"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

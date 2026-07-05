@@ -43,7 +43,12 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { instruction } = (await req.json()) as { instruction?: string };
+    const { instruction, region, regionLabel, snippet } = (await req.json()) as {
+      instruction?: string;
+      region?: string;
+      regionLabel?: string;
+      snippet?: string;
+    };
     if (!instruction?.trim()) {
       return NextResponse.json(
         { error: "Describe the change you want." },
@@ -51,7 +56,12 @@ export async function POST(
       );
     }
 
-    const result = await adjustEmailStyle(id, instruction.trim());
+    const regionCtx =
+      region && regionLabel && snippet
+        ? { region, label: regionLabel, snippet }
+        : undefined;
+
+    const result = await adjustEmailStyle(id, instruction.trim(), regionCtx);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 502 });
     }

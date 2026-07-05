@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Input, Label, Textarea } from "@/components/ui";
+import { Button, Card, Checkbox, Field, Input, Label, Textarea, useToast } from "@/components/ui";
 import { ListInput } from "../settings/_components/list-input";
 import type {
   BrandColors,
@@ -51,12 +51,7 @@ function SectionCheckbox({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-2.5">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-[var(--accent)]"
-      />
+      <Checkbox checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="font-display text-[15px] font-semibold text-foreground">
         {label}
       </span>
@@ -116,7 +111,7 @@ export function ImportReview({
   );
 
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const includedProducts = products.filter((prod) => prod.include);
   const nothingSelected =
@@ -124,7 +119,6 @@ export function ImportReview({
 
   async function handleSave() {
     setSaving(true);
-    setError(null);
     const saved: string[] = [];
     try {
       if (useVoice) {
@@ -242,9 +236,10 @@ export function ImportReview({
         saved.push("visual");
       }
 
+      toast.success("Saved.");
       onDone(saved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed. Try again.");
+      toast.error(err instanceof Error ? err.message : "Save failed. Try again.");
     } finally {
       setSaving(false);
     }
@@ -516,8 +511,6 @@ export function ImportReview({
           )}
         </Card>
       )}
-
-      {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex items-center gap-3 pt-1">
         <Button

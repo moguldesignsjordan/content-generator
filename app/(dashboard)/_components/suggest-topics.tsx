@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Checkbox, useToast } from "@/components/ui";
 import { FunnelBadge } from "./topic-badges";
 import type { TopicIdeaInput } from "@/prompts/suggest-topics";
 
@@ -15,12 +15,11 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const toast = useToast();
 
   async function handleSuggest() {
     setLoading(true);
-    setError(null);
     try {
       const res = await fetch("/api/topics/suggest", { method: "POST" });
       const data = (await res.json()) as {
@@ -32,7 +31,7 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
       }
       setProposals(data.proposals.map((p) => ({ ...p, include: true })));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Try again.");
+      toast.error(err instanceof Error ? err.message : "Try again.");
     } finally {
       setLoading(false);
     }
@@ -42,7 +41,6 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
     const picked = proposals?.filter((p) => p.include) ?? [];
     if (!picked.length) return;
     setSaving(true);
-    setError(null);
     try {
       const res = await fetch("/api/topics/suggest", {
         method: "PUT",
@@ -52,10 +50,12 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
         }),
       });
       if (!res.ok) throw new Error();
+      const count = picked.length;
       setProposals(null);
+      toast.success(`Added ${count} topic${count === 1 ? "" : "s"} to your plan.`);
       router.refresh();
     } catch {
-      setError("Couldn't add the topics. Try again.");
+      toast.error("Couldn't add the topics. Try again.");
     } finally {
       setSaving(false);
     }
@@ -72,7 +72,6 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
         >
           {loading ? "Thinking…" : "✨ Suggest topic ideas"}
         </Button>
-        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       </div>
     );
   }
@@ -91,8 +90,7 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
             key={i}
             className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-md)] border border-border p-3 transition-colors hover:bg-surface-2"
           >
-            <input
-              type="checkbox"
+            <Checkbox
               checked={p.include}
               onChange={(e) =>
                 setProposals(
@@ -101,7 +99,7 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
                   ),
                 )
               }
-              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+              className="mt-0.5"
             />
             <span className="flex-1">
               <span className="block text-[14.5px] font-medium text-foreground">
@@ -116,7 +114,6 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
           </label>
         ))}
       </div>
-      {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex items-center gap-3">
         <Button
           variant="gradient"

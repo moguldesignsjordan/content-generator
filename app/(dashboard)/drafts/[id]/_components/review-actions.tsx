@@ -8,18 +8,15 @@ import {
   Card,
   Field,
   Input,
-  SegmentedControl,
   Sheet,
   Textarea,
+  Tooltip,
+  useToast,
 } from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
-import type {
-  DraftMeta,
-  DraftSeoData,
-  EmailDraftContent,
-  EmailTemplateId,
-} from "@/lib/db/types";
+import type { DraftMeta, DraftSeoData, EmailDraftContent } from "@/lib/db/types";
 import { DesignChat } from "./design-chat";
+import { EmailPreview } from "./email-preview";
 
 interface ReviewActionsProps {
   draftId: string;
@@ -29,13 +26,6 @@ interface ReviewActionsProps {
   seoData: DraftSeoData;
   initialArchived: boolean;
 }
-
-const LAYOUT_OPTIONS: { value: EmailTemplateId | "auto"; label: string }[] = [
-  { value: "auto", label: "Keep layout" },
-  { value: "newsletter_tip", label: "Quick tip" },
-  { value: "newsletter_feature", label: "Feature" },
-  { value: "newsletter_howto", label: "Step-by-step" },
-];
 
 export function ReviewActions({
   draftId,
@@ -52,16 +42,16 @@ export function ReviewActions({
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
   const [html, setHtml] = useState(initialContent.html);
-  const [showHtmlEdit, setShowHtmlEdit] = useState(false);
 
   const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
   const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
 
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [layout, setLayout] = useState<EmailTemplateId | "auto">("auto");
   const [loading, setLoading] = useState<"approve" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   // Regeneration runs in the background: the reject sheet closes the instant
   // you submit, so you're never stuck watching a spinner. This page keeps a
@@ -84,7 +74,6 @@ export function ReviewActions({
 
   async function handleApprove() {
     setLoading("approve");
-    setError(null);
     try {
       const body: Record<string, unknown> = {
         meta: { meta_title: metaTitle, meta_description: metaDesc },
@@ -101,10 +90,11 @@ export function ReviewActions({
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Failed to approve.");
       }
+      toast.success("Approved.");
       router.push("/emails");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to approve.");
+      toast.error(e instanceof Error ? e.message : "Failed to approve.");
       setLoading(null);
     }
   }
@@ -116,10 +106,8 @@ export function ReviewActions({
     // The regeneration keeps running server-side; this page just shows a
     // small non-blocking status you can ignore, watch, or navigate away from.
     const sentFeedback = feedback;
-    const sentLayout = layout;
     setShowReject(false);
     setFeedback("");
-    setLayout("auto");
     setRejectedThisDraft(true);
     setRegenerating(true);
     setRegenError(null);
@@ -129,10 +117,7 @@ export function ReviewActions({
         const res = await fetch(`/api/drafts/${draftId}/reject`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            feedback: sentFeedback,
-            templateOverride: sentLayout === "auto" ? undefined : sentLayout,
-          }),
+          body: JSON.stringify({ feedback: sentFeedback }),
         });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -161,16 +146,16 @@ export function ReviewActions({
 
   async function handleToggleArchive() {
     setArchiving(true);
-    setError(null);
     try {
       const res = await fetch(`/api/drafts/${draftId}/archive`, {
         method: archived ? "DELETE" : "POST",
       });
       if (!res.ok) throw new Error();
       setArchived(!archived);
+      toast.success(archived ? "Unarchived." : "Archived.");
       router.refresh();
     } catch {
-      setError(`Failed to ${archived ? "unarchive" : "archive"}.`);
+      toast.error(`Failed to ${archived ? "unarchive" : "archive"}.`);
     } finally {
       setArchiving(false);
     }
@@ -178,11 +163,25 @@ export function ReviewActions({
 
   return (
     <div className="space-y-5">
-      {/* QA results */}
+      {/* Quality check */}
       {hasQa && (
         <Card className="p-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-[15px] font-semibold">QA results</h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-[15px] font-semibold">Quality check</h3>
+              <Tooltip
+                label="Automatic checks for tone, structure, and search visibility, run on every draft."
+                side="right"
+              >
+                <button
+                  type="button"
+                  aria-label="What's this?"
+                  className="flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-muted hover:text-foreground"
+                >
+                  ⓘ
+                </button>
+              </Tooltip>
+            </div>
             <Badge tone={seoData.qa_pass ? "success" : "warning"} dot>
               {seoData.qa_pass ? "Pass" : "Issues found"}
             </Badge>
@@ -191,7 +190,7 @@ export function ReviewActions({
           <div className="mt-4 space-y-3 text-[13px]">
             {(seoData.issues?.length ?? 0) > 0 && (
               <div>
-                <p className="mb-1.5 text-muted">Issues to address</p>
+                <p className="mb-1.5 text-muted">Things to improve</p>
                 <ul className="space-y-1 text-foreground/80">
                   {seoData.issues!.map((issue, i) => (
                     <li key={i} className="flex gap-2">
@@ -205,15 +204,15 @@ export function ReviewActions({
 
             {hasBannedTerms && (
               <p className="text-danger">
-                Banned terms found: {seoData.banned_terms_found!.join(", ")}
+                Words we avoided: {seoData.banned_terms_found!.join(", ")}
               </p>
             )}
 
             {seoData.keyword_used !== undefined && (
               <p className="text-muted">
                 {seoData.keyword_used
-                  ? `Keyword used, ${seoData.keyword_placement}`
-                  : "Target keyword not found in email"}
+                  ? `Search phrase: used, ${seoData.keyword_placement}`
+                  : "Search phrase: not used yet"}
               </p>
             )}
 
@@ -223,11 +222,15 @@ export function ReviewActions({
           </div>
 
           <div className="mt-4 space-y-3 border-t border-border pt-4">
-            <p className="text-[13px] font-medium text-foreground">SEO meta</p>
-            <Field label="Meta title (≤60 chars)">
+            <p className="text-[13px] font-medium text-foreground">Web version details</p>
+            <p className="text-xs text-muted">
+              These show up if this content is also published as a blog post,
+              not in the email itself.
+            </p>
+            <Field label="Page title">
               <Input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} />
             </Field>
-            <Field label="Meta description (≤155 chars)">
+            <Field label="Page summary">
               <Textarea
                 rows={2}
                 value={metaDesc}
@@ -253,35 +256,25 @@ export function ReviewActions({
 
       {/* Live preview */}
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <p className="text-[13px] font-medium text-muted">Rendered email</p>
-          <button
-            type="button"
-            onClick={() => setShowHtmlEdit((v) => !v)}
-            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
-          >
-            {showHtmlEdit ? "Hide HTML" : "Edit HTML"}
-          </button>
+        <div className="border-b border-border px-4 py-2.5">
+          <p className="text-[13px] font-medium text-muted">
+            Rendered email — click any part to tweak it
+          </p>
         </div>
-        <iframe
-          key={html}
-          title="Email preview"
-          srcDoc={html}
-          sandbox=""
-          className="h-[600px] w-full bg-white"
+        <EmailPreview
+          draftId={draftId}
+          html={html}
+          onHtmlChange={setHtml}
+          onEdited={() => setHistoryRefreshKey((k) => k + 1)}
         />
-        {showHtmlEdit && (
-          <textarea
-            value={html}
-            onChange={(e) => setHtml(e.target.value)}
-            rows={18}
-            spellCheck={false}
-            className="w-full resize-y border-t border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:border-accent focus:outline-none"
-          />
-        )}
       </Card>
 
-      <DesignChat draftId={draftId} html={html} onHtmlChange={setHtml} />
+      <DesignChat
+        key={historyRefreshKey}
+        draftId={draftId}
+        html={html}
+        onHtmlChange={setHtml}
+      />
 
       {/* Background regeneration status: never blocks the page, closes the
           moment you submit feedback. Leave, keep reviewing, whatever, it
@@ -352,12 +345,6 @@ export function ReviewActions({
         )}
       </div>
 
-      {error && (
-        <p className="rounded-[var(--radius-md)] bg-danger/10 px-4 py-2.5 text-sm text-danger">
-          {error}
-        </p>
-      )}
-
       {/* Reject sheet: closes instantly on submit, regeneration continues
           in the background (see the status card above). */}
       <Sheet
@@ -365,7 +352,6 @@ export function ReviewActions({
         onClose={() => {
           setShowReject(false);
           setFeedback("");
-          setLayout("auto");
         }}
         title="Reject & regenerate"
         description={
@@ -381,7 +367,6 @@ export function ReviewActions({
               onClick={() => {
                 setShowReject(false);
                 setFeedback("");
-                setLayout("auto");
               }}
             >
               Cancel
@@ -407,14 +392,6 @@ export function ReviewActions({
             onChange={(e) => setFeedback(e.target.value)}
             placeholder="e.g. Lead with the pain point and tighten the CTA. Or: make it feel bolder, bigger headline, more whitespace, less text."
             disabled={atCap}
-          />
-        </Field>
-        <Field label="Layout" hint="Leave on Keep layout unless you want a different shape.">
-          <SegmentedControl
-            value={layout}
-            onChange={setLayout}
-            options={LAYOUT_OPTIONS}
-            className="w-full [&>button]:flex-1"
           />
         </Field>
         {atCap && (
