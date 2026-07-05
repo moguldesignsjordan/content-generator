@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Select, useToast } from "@/components/ui";
+import type { EmailType } from "@/lib/db/types";
+
+// Same override options as CreateAgent's brief card; this surface is
+// email-only so there's no blog_type equivalent here.
+const EMAIL_TYPE_OPTIONS: { value: EmailType; label: string }[] = [
+  { value: "newsletter", label: "Newsletter" },
+  { value: "product", label: "Product" },
+  { value: "service", label: "Service" },
+  { value: "promotional", label: "Promotional" },
+  { value: "announcement", label: "Announcement" },
+];
 
 interface TopicOption {
   id: string;
@@ -13,6 +24,7 @@ interface TopicOption {
 export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState("");
+  const [emailType, setEmailType] = useState<EmailType | "">("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -24,7 +36,10 @@ export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicId: selectedId }),
+        body: JSON.stringify({
+          topicId: selectedId,
+          emailType: emailType || undefined,
+        }),
       });
       const data = (await res.json()) as { draftId?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Generation failed.");
@@ -62,6 +77,20 @@ export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
                 </option>
               ))}
             </optgroup>
+          ))}
+        </Select>
+        <Select
+          value={emailType}
+          onChange={(e) => setEmailType(e.target.value as EmailType | "")}
+          disabled={busy}
+          className="sm:w-40"
+          aria-label="Email type override"
+        >
+          <option value="">Auto type</option>
+          {EMAIL_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
           ))}
         </Select>
         <Button

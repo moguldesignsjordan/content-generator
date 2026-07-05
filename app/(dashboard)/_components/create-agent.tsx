@@ -2,10 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, useToast } from "@/components/ui";
+import { Button, Select, useToast } from "@/components/ui";
 import { SendIcon, SparkleIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-import type { FunnelStage } from "@/lib/db/types";
+import type { BlogType, EmailType, FunnelStage } from "@/lib/db/types";
+
+// Labels for the manual email_type/blog_type override (migration 005). Left
+// unset, generation derives the type from the topic as before; picking one
+// here overrides that derivation for this job.
+const EMAIL_TYPE_OPTIONS: { value: EmailType; label: string }[] = [
+  { value: "newsletter", label: "Newsletter" },
+  { value: "product", label: "Product" },
+  { value: "service", label: "Service" },
+  { value: "promotional", label: "Promotional" },
+  { value: "announcement", label: "Announcement" },
+];
+
+const BLOG_TYPE_OPTIONS: { value: BlogType; label: string }[] = [
+  { value: "pillar", label: "Pillar" },
+  { value: "how_to", label: "How-to" },
+  { value: "listicle", label: "Listicle" },
+  { value: "case_study", label: "Case study" },
+  { value: "thought_leadership", label: "Thought leadership" },
+  { value: "landing", label: "Landing" },
+];
 
 interface Msg {
   role: "user" | "assistant";
@@ -77,6 +97,10 @@ export function CreateAgent({
   // Which pipeline the brief hands off to. Same brief, different renderer:
   // email → the email draft pipeline, blog → the Sanity-bound blog pipeline.
   const [channel, setChannel] = useState<"email" | "blog">("email");
+  // Manual subtype override, sent to /api/generate as-is when set. Left on
+  // "" (Auto), generation derives the type from the topic as before.
+  const [emailType, setEmailType] = useState<EmailType | "">("");
+  const [blogType, setBlogType] = useState<BlogType | "">("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -142,7 +166,13 @@ export function CreateAgent({
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicId, campaignId, channel }),
+        body: JSON.stringify({
+          topicId,
+          campaignId,
+          channel,
+          emailType: emailType || undefined,
+          blogType: blogType || undefined,
+        }),
       });
       const data = (await res.json()) as { draftId?: string; error?: string };
       if (!res.ok || !data.draftId) {
@@ -197,6 +227,10 @@ export function CreateAgent({
                 generating={generating}
                 channel={channel}
                 onChannelChange={setChannel}
+                emailType={emailType}
+                onEmailTypeChange={setEmailType}
+                blogType={blogType}
+                onBlogTypeChange={setBlogType}
                 onEditRow={(label, value) =>
                   send(`Change the ${label.toLowerCase()}: ${value}`)
                 }
@@ -319,6 +353,10 @@ function BriefCardView({
   generating,
   channel,
   onChannelChange,
+  emailType,
+  onEmailTypeChange,
+  blogType,
+  onBlogTypeChange,
   onEditRow,
   onGenerate,
 }: {
@@ -328,6 +366,10 @@ function BriefCardView({
   generating: boolean;
   channel: "email" | "blog";
   onChannelChange: (c: "email" | "blog") => void;
+  emailType: EmailType | "";
+  onEmailTypeChange: (t: EmailType | "") => void;
+  blogType: BlogType | "";
+  onBlogTypeChange: (t: BlogType | "") => void;
   onEditRow: (label: string, value: string) => void;
   onGenerate: () => void;
 }) {
@@ -376,23 +418,58 @@ function BriefCardView({
 
       {ready && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5">
-            {(["email", "blog"] as const).map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => onChannelChange(c)}
-                disabled={disabled}
-                className={cn(
-                  "rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
-                  channel === c
-                    ? "bg-accent text-white"
-                    : "text-muted hover:text-foreground",
-                )}
-              >
-                {c === "email" ? "Email" : "Blog post"}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5">
+              {(["email", "blog"] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onChannelChange(c)}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
+                    channel === c
+                      ? "bg-accent text-white"
+                      : "text-muted hover:text-foreground",
+                  )}
+                >
+                  {c === "email" ? "Email" : "Blog post"}
+                </button>
+              ))}
+            </div>
+            <div className="w-[150px] shrink-0">
+              {channel === "email" ? (
+                <Select
+                  value={emailType}
+                  onChange={(e) => onEmailTypeChange(e.target.value as EmailType | "")}
+                  disabled={disabled}
+                  className="h-8 !px-2.5 text-[12px]"
+                  aria-label="Email type override"
+                >
+                  <option value="">Auto type</option>
+                  {EMAIL_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Select
+                  value={blogType}
+                  onChange={(e) => onBlogTypeChange(e.target.value as BlogType | "")}
+                  disabled={disabled}
+                  className="h-8 !px-2.5 text-[12px]"
+                  aria-label="Blog type override"
+                >
+                  <option value="">Auto format</option>
+                  {BLOG_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
           </div>
           <Button
             variant="gradient"
