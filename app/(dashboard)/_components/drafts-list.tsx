@@ -17,22 +17,25 @@ import {
   TrashIcon,
   UnarchiveIcon,
 } from "@/components/ui/icons";
-import { DraftStateBadge } from "../_components/topic-badges";
+import type { DraftListRow } from "@/lib/db/types";
+import { DraftStateBadge } from "./topic-badges";
 
 type Filter = "all" | "in_review" | "approved" | "archived";
+type Kind = "email" | "blog";
 
-export interface DraftRow {
-  id: string;
-  topic_title: string | null;
-  subject: string;
-  state: string;
-  version: number;
-  archived: boolean;
-  created_at: string;
-  job_type: "email" | "blog";
-}
-
-export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
+/**
+ * The shared Emails/Blogs list. Both tabs are the same flat list of drafts,
+ * scoped by kind at the query layer; this component only varies a little copy
+ * and (for blogs) shows the email a post grew out of. Archive/delete actions
+ * are identical for both kinds.
+ */
+export function DraftsList({
+  drafts,
+  kind,
+}: {
+  drafts: DraftListRow[];
+  kind: Kind;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [filter, setFilter] = useState<Filter>("all");
@@ -103,6 +106,11 @@ export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
     }
   }
 
+  const emptyCopy =
+    kind === "blog"
+      ? "No blog posts yet. Open an email's review page and tap Create blog post, or generate one from a topic in Create."
+      : "No emails yet. Ask the assistant to draft one, or generate from a topic in Create.";
+
   return (
     <div>
       <SegmentedControl
@@ -122,9 +130,7 @@ export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
       {filtered.length === 0 ? (
         <Card className="p-7 text-center">
           <p className="text-sm text-muted">
-            {filter === "all"
-              ? "No emails yet. Ask the assistant to draft one, or generate from a topic in Create."
-              : "Nothing here in this state yet."}
+            {filter === "all" ? emptyCopy : "Nothing here in this state yet."}
           </p>
         </Card>
       ) : (
@@ -137,25 +143,32 @@ export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
                 d.archived && "opacity-60",
               )}
             >
-              {/* The whole text block is the open link. The action buttons are
-                  siblings, not children, of this link so they never navigate. */}
-              <Link
-                href={`/drafts/${d.id}`}
-                className="min-w-0 flex-1"
-              >
+              {/* The whole text block opens the draft. Action buttons and the
+                  source-email link are siblings, not children, so they never
+                  navigate to the draft. */}
+              <Link href={`/drafts/${d.id}`} className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-medium text-foreground">
                   {d.subject || "Untitled draft"}
                 </div>
                 <div className="mt-0.5 truncate text-[13px] text-muted">
-                  {[
-                    d.job_type === "blog" ? "Blog post" : null,
-                    d.topic_title,
-                    `v${d.version}`,
-                  ]
+                  {[d.topic_title, `v${d.version}`]
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
               </Link>
+
+              {/* A blog spun off an email: jump straight to that email. Sibling
+                  link (not nested) and desktop-only, so mobile keeps a clean
+                  row; mobile reaches it from the review screen. */}
+              {d.source_draft_id && (
+                <Link
+                  href={`/drafts/${d.source_draft_id}`}
+                  title={d.source_subject ?? "Open the email this came from"}
+                  className="hidden max-w-[38%] shrink-0 truncate text-[12px] font-medium text-muted transition-colors hover:text-accent sm:block"
+                >
+                  From “{d.source_subject || "email"}”
+                </Link>
+              )}
 
               <DraftStateBadge state={d.state} />
 

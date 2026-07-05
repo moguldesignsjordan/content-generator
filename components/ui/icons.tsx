@@ -38,6 +38,14 @@ export const MailIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const BlogIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+    <path d="M14 3v6h6" />
+    <path d="M16 13H8M16 17H8M10 9H8" />
+  </Svg>
+);
+
 export const PlusIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />

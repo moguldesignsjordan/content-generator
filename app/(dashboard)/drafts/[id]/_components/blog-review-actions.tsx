@@ -191,7 +191,7 @@ export function BlogReviewActions({
         throw new Error(data.error ?? "Failed to delete.");
       }
       toast.success("Draft deleted.");
-      router.push("/emails");
+      router.push("/blogs");
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete.");

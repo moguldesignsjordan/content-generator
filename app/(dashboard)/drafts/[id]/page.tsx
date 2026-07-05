@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDraftForReview, getPublicationForDraft } from "@/lib/db/queries";
+import {
+  getBlogDraftFromEmail,
+  getDraftForReview,
+  getDraftSubject,
+  getPublicationForDraft,
+} from "@/lib/db/queries";
 import { isSanityConfigured } from "@/lib/clients/sanity";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
@@ -28,13 +33,24 @@ export default async function DraftReviewPage({
     ? await getPublicationForDraft(id).catch(() => null)
     : null;
 
+  // Resolve the cross-link between paired drafts: a blog's source email (via
+  // meta.source_draft_id), or — for an email — the blog already spun off it.
+  // Each review screen uses whichever side applies to link to the other.
+  const sourceDraftId = draft.meta.source_draft_id ?? null;
+  const sourceSubject =
+    isBlog && sourceDraftId
+      ? await getDraftSubject(sourceDraftId).catch(() => null)
+      : null;
+  const existingBlog =
+    !isBlog ? await getBlogDraftFromEmail(id).catch(() => null) : null;
+
   return (
     <>
       <Link
-        href="/emails"
+        href={isBlog ? "/blogs" : "/emails"}
         className="mb-3 inline-flex items-center gap-1 text-[13px] font-medium text-muted transition-colors hover:text-foreground"
       >
-        <ArrowLeftIcon size={15} /> Emails
+        <ArrowLeftIcon size={15} /> {isBlog ? "Blogs" : "Emails"}
       </Link>
       <ScreenHeader
         title={
@@ -45,6 +61,20 @@ export default async function DraftReviewPage({
         subtitle={`${isBlog ? "Blog post · " : ""}Version ${draft.version}`}
         actions={<DraftStateBadge state={draft.state} />}
       />
+
+      {/* Blog → source email: a small link back to the email this grew out of. */}
+      {isBlog && sourceDraftId && (
+        <Link
+          href={`/drafts/${sourceDraftId}`}
+          className="mb-4 inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-border bg-surface-2/60 px-3 py-1.5 text-[12.5px] font-medium text-muted transition-colors hover:text-foreground"
+        >
+          <ArrowLeftIcon size={13} className="shrink-0" />
+          <span className="truncate">
+            From email{sourceSubject ? `: “${sourceSubject}”` : ""}
+          </span>
+        </Link>
+      )}
+
       {isGenerating ? (
         <GenerationProgress
           draftId={draft.id}
@@ -72,6 +102,7 @@ export default async function DraftReviewPage({
           initialMeta={draft.meta}
           seoData={draft.seo_data}
           initialArchived={draft.archived}
+          existingBlog={existingBlog}
         />
       )}
     </>

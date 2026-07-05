@@ -11,6 +11,7 @@ import type {
   DraftForReview,
   DraftGenerationState,
   DraftJobContext,
+  DraftListRow,
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
@@ -206,9 +207,12 @@ export async function createDraftShell(args: {
   ctx: TopicContext;
   campaignId?: string;
   type?: ContentJobType;
+  /** For blog drafts spun off an email: the source email draft id, stashed in
+   * meta.source_draft_id so the blog can link back. No-op for emails. */
+  sourceDraftId?: string;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, campaignId, type = "email" } = args;
+  const { ctx, campaignId, type = "email", sourceDraftId } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -233,13 +237,18 @@ export async function createDraftShell(args: {
     started_at: new Date().toISOString(),
   };
 
+  const meta: DraftMeta = {
+    generation,
+    ...(sourceDraftId ? { source_draft_id: sourceDraftId } : {}),
+  };
+
   const { data: draft, error: draftErr } = await db
     .from("drafts")
     .insert({
       job_id: job.id,
       version: 1,
       content: {},
-      meta: { generation },
+      meta,
       state: "in_review",
     })
     .select("id")
@@ -1175,53 +1184,56 @@ export async function updateCampaign(
   if (error) throw error;
 }
 
-// ── Flat list queries (dashboard Emails tab + assistant context) ──────────────
+// ── Flat list queries (dashboard Emails/Blogs tabs + assistant context) ───────
 
-/** A flat list of every email draft, newest first, with its topic title. */
-export async function listDrafts(): Promise<
-  Array<{
-    id: string;
-    topic_title: string | null;
-    subject: string;
-    state: string;
-    version: number;
-    archived: boolean;
-    created_at: string;
-    job_type: ContentJobType;
-  }>
-> {
+/**
+ * A flat list of drafts, newest first, with its topic title. Pass `jobType` to
+ * scope to one kind (the Emails and Blogs tabs each pass theirs); leave it off
+ * for everything (the Home tab and the assistant context do this). Blog rows
+ * spun off an email also carry the source email's id + subject so the Blogs
+ * list can show "From {email}" without an N+1 per row.
+ */
+export async function listDrafts(
+  options?: { jobType?: ContentJobType },
+): Promise<DraftListRow[]> {
   const db = getAdminClient();
-  // Falls back to an archived-less select before migration 003 adds the
-  // column, so the Emails tab doesn't hard-break in the meantime.
+  const { jobType } = options ?? {};
+
   let data: Record<string, unknown>[] | null;
   let error: { message: string } | null;
-  ({ data, error } = await db
-    .from("drafts")
-    .select(
-      `id, version, state, archived, created_at, content,
-       content_jobs!inner ( type, topics ( title ) )`,
-    )
+
+  // Primary select (post-migration-003, includes archived). Scoped to one kind
+  // when jobType is given (the Emails/Blogs tabs each pass theirs).
+  let primary = db.from("drafts").select(
+    `id, version, state, archived, created_at, content, meta,
+     content_jobs!inner ( type, topics ( title ) )`,
+  );
+  if (jobType) primary = primary.eq("content_jobs.type", jobType);
+  ({ data, error } = await primary
     .order("created_at", { ascending: false })
     .limit(100));
+
   if (error) {
-    ({ data, error } = await db
-      .from("drafts")
-      .select(
-        `id, version, state, created_at, content,
-         content_jobs!inner ( type, topics ( title ) )`,
-      )
+    // Fallback: archived-less select for DBs predating migration 003.
+    let fallback = db.from("drafts").select(
+      `id, version, state, created_at, content, meta,
+       content_jobs!inner ( type, topics ( title ) )`,
+    );
+    if (jobType) fallback = fallback.eq("content_jobs.type", jobType);
+    ({ data, error } = await fallback
       .order("created_at", { ascending: false })
       .limit(100));
   }
   if (error) throw error;
 
-  return (data ?? []).map((d) => {
+  const rows: DraftListRow[] = (data ?? []).map((d) => {
     const job = (
       d as {
         content_jobs?: { type?: string; topics?: { title?: string } | null };
       }
     ).content_jobs;
     const content = d.content as EmailDraftContent | null;
+    const meta = (d.meta ?? {}) as DraftMeta;
     return {
       id: d.id as string,
       version: d.version as number,
@@ -1231,8 +1243,71 @@ export async function listDrafts(): Promise<
       topic_title: job?.topics?.title ?? null,
       subject: content?.subject ?? "",
       job_type: (job?.type as ContentJobType) ?? "email",
+      source_draft_id: meta.source_draft_id ?? null,
+      source_subject: null,
     };
   });
+
+  // Stitch the source email subject onto each blog row in one extra round-trip.
+  const sourceIds = [
+    ...new Set(
+      rows.map((r) => r.source_draft_id).filter((x): x is string => !!x),
+    ),
+  ];
+  if (sourceIds.length) {
+    const { data: sources } = await db
+      .from("drafts")
+      .select("id, content")
+      .in("id", sourceIds);
+    const subjectById = new Map(
+      (sources ?? []).map((s) => [
+        s.id as string,
+        (s.content as EmailDraftContent | null)?.subject ?? "",
+      ]),
+    );
+    for (const r of rows) {
+      if (r.source_draft_id) {
+        r.source_subject = subjectById.get(r.source_draft_id) ?? null;
+      }
+    }
+  }
+
+  return rows;
+}
+
+/** Just the subject line of a draft, for cross-links (a blog's source email). */
+export async function getDraftSubject(draftId: string): Promise<string | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("content")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.content as EmailDraftContent | null)?.subject ?? null;
+}
+
+/**
+ * Finds the blog draft spun off the given email draft (if any), via
+ * meta.source_draft_id. Lets the email review screen turn "Create blog post"
+ * into a link to the post that already exists instead of a duplicate.
+ */
+export async function getBlogDraftFromEmail(
+  emailDraftId: string,
+): Promise<{ draftId: string; subject: string } | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("id, content")
+    .eq("meta->>source_draft_id", emailDraftId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    draftId: data.id as string,
+    subject: (data.content as EmailDraftContent | null)?.subject ?? "",
+  };
 }
 
 /**

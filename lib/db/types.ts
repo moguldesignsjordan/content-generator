@@ -422,6 +422,28 @@ export interface DraftMeta {
   hero_image?: ContentImage;
   // Token/image spend rollup for the cost panel on the review screen.
   usage?: DraftUsage;
+  // For a blog draft spun off an email (content_jobs.type='blog' created via
+  // /api/drafts/[id]/create-blog): the id of the source email draft, so the
+  // Blogs list and the blog review screen can link back to the email it grew
+  // out of. Lives in meta (jsonb) on purpose — it survives generation because
+  // populateDraft merges meta rather than replacing it, so this needs no
+  // migration.
+  source_draft_id?: string;
+}
+
+// One row in the Emails / Blogs dashboard lists. source_draft_id and
+// source_subject are only set for blog drafts that were spun off an email.
+export interface DraftListRow {
+  id: string;
+  topic_title: string | null;
+  subject: string;
+  state: string;
+  version: number;
+  archived: boolean;
+  created_at: string;
+  job_type: ContentJobType;
+  source_draft_id: string | null;
+  source_subject: string | null;
 }
 
 // What we store in drafts.seo_data, QA findings from the second Claude pass.

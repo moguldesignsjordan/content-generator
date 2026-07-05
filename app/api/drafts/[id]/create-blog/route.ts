@@ -50,6 +50,9 @@ export async function POST(
       ctx,
       campaignId: source.campaignId ?? undefined,
       type: "blog",
+      // Remember which email this blog grew out of, so the Blogs list and the
+      // blog review screen can link back to it (stored in meta.source_draft_id).
+      sourceDraftId,
     });
     return NextResponse.json({ draftId });
   } catch (err) {

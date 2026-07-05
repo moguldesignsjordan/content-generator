@@ -26,6 +26,9 @@ interface ReviewActionsProps {
   initialMeta: DraftMeta;
   seoData: DraftSeoData;
   initialArchived: boolean;
+  /** A blog already spun off this email, if any. When present, the blog card
+   * links to it instead of offering to create a duplicate. */
+  existingBlog?: { draftId: string; subject: string } | null;
 }
 
 /**
@@ -48,6 +51,7 @@ export function ReviewActions({
   initialMeta,
   seoData,
   initialArchived,
+  existingBlog,
 }: ReviewActionsProps) {
   const router = useRouter();
   const [archived, setArchived] = useState(initialArchived);
@@ -460,27 +464,47 @@ export function ReviewActions({
         </Card>
       )}
 
-      {/* Blog spin-off: one click drafts a long-form, search-optimized post on
-          the same topic as this email, no re-briefing. */}
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">
-            Create a blog post from this topic
-          </p>
-          <p className="text-[13px] text-muted">
-            Drafts a fresh, search-optimized long-form post on the same topic,
-            separate from this email.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          loading={creatingBlog}
-          disabled={busy}
-          onClick={handleCreateBlog}
-        >
-          Create blog post
-        </Button>
-      </Card>
+      {/* Blog spin-off. If a blog already exists for this email, link to it
+          instead of offering to create a duplicate; otherwise one click drafts
+          a fresh, search-optimized post on the same topic, no re-briefing. */}
+      {existingBlog ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Blog post created from this email
+            </p>
+            <p className="truncate text-[13px] text-muted">
+              {existingBlog.subject || "Untitled blog post"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/drafts/${existingBlog.draftId}`)}
+          >
+            Open blog post
+          </Button>
+        </Card>
+      ) : (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Create a blog post from this topic
+            </p>
+            <p className="text-[13px] text-muted">
+              Drafts a fresh, search-optimized long-form post on the same topic,
+              separate from this email.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            loading={creatingBlog}
+            disabled={busy}
+            onClick={handleCreateBlog}
+          >
+            Create blog post
+          </Button>
+        </Card>
+      )}
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">

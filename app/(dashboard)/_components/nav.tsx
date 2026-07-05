@@ -1,4 +1,5 @@
 import {
+  BlogIcon,
   GearIcon,
   HomeIcon,
   MailIcon,
@@ -24,7 +25,16 @@ export const NAV: NavItem[] = [
     href: "/emails",
     label: "Emails",
     Icon: MailIcon,
-    match: (p) => p.startsWith("/emails") || p.startsWith("/drafts"),
+    // Draft review pages (/drafts/[id]) can be either kind, and the pathname
+    // alone can't tell which — so neither Emails nor Blogs claims /drafts. The
+    // review screen's own back-link orients you instead.
+    match: (p) => p.startsWith("/emails"),
+  },
+  {
+    href: "/blogs",
+    label: "Blogs",
+    Icon: BlogIcon,
+    match: (p) => p.startsWith("/blogs"),
   },
   {
     href: "/create",
