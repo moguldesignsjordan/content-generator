@@ -253,14 +253,19 @@ const PROMO_KEYWORDS = [
  *   2. brand-stage topic -> announcement
  *   3. mapped offer -> product (or service, by keyword)
  *   4. otherwise -> newsletter (the recurring default)
- * A future content_jobs.email_type column overrides this the way
+ * An explicit content_jobs.email_type value overrides this the way
  * templateOverride already overrides resolveEmailTemplateId.
  */
 export function resolveEmailType(
   topic: Topic,
-  opts: { brief?: CampaignBrief | null; product?: Product | null } = {},
+  opts: {
+    brief?: CampaignBrief | null;
+    product?: Product | null;
+    override?: EmailType;
+  } = {},
 ): EmailType {
-  const { brief, product } = opts;
+  const { brief, product, override } = opts;
+  if (override) return override;
 
   const promoHaystack =
     `${brief?.goal ?? ""} ${brief?.angle ?? ""} ${brief?.key_message ?? ""}`.toLowerCase();
@@ -326,6 +331,8 @@ export function buildEmailMessages(
     templateOverride?: EmailTemplateId;
     /** Existing hero image to keep in place across a regeneration. */
     heroImage?: ContentImage;
+    /** Honors a job's stored content_jobs.email_type instead of deriving one. */
+    emailTypeOverride?: EmailType;
   } = {},
 ): {
   system: string;
@@ -341,6 +348,7 @@ export function buildEmailMessages(
   const emailType = resolveEmailType(topic, {
     brief: opts.brief ?? null,
     product: ctx.product,
+    override: opts.emailTypeOverride,
   });
   const length = EMAIL_LENGTH_TARGETS[emailType];
   const templateId = opts.templateOverride ?? resolveEmailTemplateId(topic);

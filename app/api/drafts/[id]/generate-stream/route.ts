@@ -75,7 +75,12 @@ export async function GET(
         joinRun(
           draftId,
           ctx,
-          { campaignId: draftCtx.campaignId ?? undefined, jobType: draftCtx.jobType },
+          {
+            campaignId: draftCtx.campaignId ?? undefined,
+            jobType: draftCtx.jobType,
+            emailTypeOverride: draftCtx.emailType ?? undefined,
+            blogTypeOverride: draftCtx.blogType ?? undefined,
+          },
           onEvent,
         );
       } catch (err) {

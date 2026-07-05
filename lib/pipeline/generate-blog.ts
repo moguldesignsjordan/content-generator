@@ -41,7 +41,7 @@ import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
 export async function generateBlogForTopicStreamed(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string },
+  opts: { campaignId?: string; blogTypeOverride?: BlogType },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
   try {
@@ -50,7 +50,10 @@ export async function generateBlogForTopicStreamed(
     onEvent({ type: "phase", ...writing });
 
     const brief = await loadBrief(opts.campaignId);
-    const { system, user, blogType } = buildBlogMessages(ctx, { brief });
+    const { system, user, blogType } = buildBlogMessages(ctx, {
+      brief,
+      blogTypeOverride: opts.blogTypeOverride,
+    });
     const lengthTarget = BLOG_LENGTH_TARGETS[blogType];
     const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
       lengthTarget,
@@ -90,6 +93,7 @@ export async function generateBlogForTopicStreamed(
       content: { subject: copy.title, preheader: copy.meta_description, html },
       meta,
       seoData,
+      blogType,
     });
 
     onEvent({ type: "done" });

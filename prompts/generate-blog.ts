@@ -171,11 +171,12 @@ export const BLOG_LENGTH_TARGETS: Record<BlogType, BlogLengthTarget> = {
  */
 export function resolveBlogType(
   topic: { title: string; intent: string | null; funnel_stage: string | null; maps_to_product: string | null },
-  opts: { brief?: CampaignBrief | null } = {},
+  opts: { brief?: CampaignBrief | null; override?: BlogType } = {},
 ): BlogType {
+  if (opts.override) return opts.override;
+
   const title = topic.title.toLowerCase();
   const intent = (topic.intent ?? "").toLowerCase();
-  void opts; // reserved for a future campaign-driven override
 
   if (
     topic.maps_to_product &&
@@ -229,7 +230,7 @@ export function countBlogWords(copy: {
 /** Builds the (system, user) message pair for blog generation. */
 export function buildBlogMessages(
   ctx: TopicContext,
-  opts: { brief?: CampaignBrief | null } = {},
+  opts: { brief?: CampaignBrief | null; blogTypeOverride?: BlogType } = {},
 ): { system: string; user: string; blogType: BlogType } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
@@ -238,7 +239,10 @@ export function buildBlogMessages(
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const offerBlock = buildOfferBlock(ctx);
   const { ctaText } = resolveCta(ctx);
-  const blogType = resolveBlogType(topic, { brief: opts.brief ?? null });
+  const blogType = resolveBlogType(topic, {
+    brief: opts.brief ?? null,
+    override: opts.blogTypeOverride,
+  });
   const length = BLOG_LENGTH_TARGETS[blogType];
 
   const system = [

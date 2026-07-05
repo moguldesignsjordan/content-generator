@@ -528,6 +528,12 @@ export interface DraftJobContext {
   meta: DraftMeta;
   jobType: ContentJobType;
   state: string;
+  // content_jobs.email_type/blog_type: null unless set explicitly at shell
+  // creation (an override for this job) or backfilled after a prior
+  // generation resolved one. Regeneration honors a non-null value instead of
+  // re-deriving.
+  emailType: EmailType | null;
+  blogType: BlogType | null;
 }
 
 // One row of the publications table: where a job went and its external id.

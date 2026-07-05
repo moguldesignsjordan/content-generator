@@ -1,7 +1,7 @@
 import "server-only";
 import { generateEmailForTopicStreamed, type GenerationEvent } from "./generate";
 import { generateBlogForTopicStreamed } from "./generate-blog";
-import type { ContentJobType, TopicContext } from "@/lib/db/types";
+import type { BlogType, ContentJobType, EmailType, TopicContext } from "@/lib/db/types";
 
 type Listener = (event: GenerationEvent) => void;
 
@@ -29,7 +29,12 @@ const runs = new Map<string, Run>();
 export function joinRun(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string; jobType?: ContentJobType },
+  opts: {
+    campaignId?: string;
+    jobType?: ContentJobType;
+    emailTypeOverride?: EmailType;
+    blogTypeOverride?: BlogType;
+  },
   listener: Listener,
 ): () => void {
   let run = runs.get(draftId);

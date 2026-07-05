@@ -86,9 +86,20 @@ is clean — everything below is committed and pushed, not pending.
   (blocked once a job has a `publications` row — archive instead) for both
   topics and drafts, with inline per-row actions on the Emails/Blogs lists;
   server-enforced banned-terms + WCAG-AA contrast QA gates on approve.
+- **Content subtype (email_type/blog_type):** derived per-type length budgets
+  (`EMAIL_LENGTH_TARGETS`/`BLOG_LENGTH_TARGETS`) plus, as of migration 005
+  (applied), the `content_jobs.email_type`/`blog_type` columns are fully
+  wired: `createDraftShell` can set one explicitly to override derivation,
+  `getDraftWithJobContext` reads it back, `resolveEmailType`/`resolveBlogType`
+  honor a non-null value instead of deriving, and every generation/regen path
+  (`populateDraft`, `persistRegeneratedDraft`) backfills the column with the
+  resolved type either way. `/api/generate` accepts `emailType`/`blogType` in
+  the body so the override is directly testable; no settings-form UI to pick
+  one yet (optional, still open).
 - Env keys present in `.env.local`: Supabase, Anthropic, Gemini, MailerLite,
-  Sanity, DataForSEO, `INTEGRATION_ENCRYPTION_KEY`. Migration 004
-  (`brand_integrations` table) confirmed applied to the live Supabase DB.
+  Sanity, DataForSEO, `INTEGRATION_ENCRYPTION_KEY`. Migrations 004
+  (`brand_integrations`) and 005 (`email_type`/`blog_type`) confirmed applied
+  to the live Supabase DB.
 
 **Known limitations (by design or deferred, not bugs):**
 - The SSE generation-run dedupe registry (`lib/pipeline/generation-runs.ts`)
@@ -115,9 +126,16 @@ is purely "click through it as the logged-in user":
   "Connected via your account" banner, disconnect, confirm fallback to
   ".env default"; one real end-to-end publish on each channel with connected
   credentials.
+- Content subtype override: POST `/api/generate` with an explicit `emailType`
+  (or `blogType`) and confirm the draft honors it instead of deriving one, and
+  that `content_jobs.email_type`/`blog_type` end up populated either way
+  (overridden or plain-derived) after generation.
 
 ## What's not built yet
 
+- Settings-form UI to pick an email_type/blog_type override per topic/job
+  (the backend override path is wired; nothing in the UI sets it yet) or to
+  tune per-type word targets.
 - Blog reject/regenerate + click-to-edit for blog drafts (email has both).
 - Actually sending email campaigns (the adapter creates the MailerLite
   campaign as a draft; scheduling/sending stays a future surface).

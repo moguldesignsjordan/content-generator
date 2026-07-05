@@ -74,7 +74,7 @@ export type GenerationEvent =
 export async function generateEmailForTopicStreamed(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string },
+  opts: { campaignId?: string; emailTypeOverride?: EmailType },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
   try {
@@ -86,6 +86,7 @@ export async function generateEmailForTopicStreamed(
     const tokens = resolveBrandTokens(ctx.brand);
     const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
       brief,
+      emailTypeOverride: opts.emailTypeOverride,
     });
     const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
@@ -130,7 +131,7 @@ export async function generateEmailForTopicStreamed(
     };
     const seoData = qa.seoData;
 
-    await populateDraft(draftId, { content, meta, seoData });
+    await populateDraft(draftId, { content, meta, seoData, emailType });
 
     if (opts.campaignId) {
       await updateCampaign(opts.campaignId, { status: "drafted" });
@@ -555,6 +556,7 @@ export async function regenerateEmailDraft(
     brief,
     templateOverride: opts.templateOverride,
     heroImage,
+    emailTypeOverride: draftCtx.emailType ?? undefined,
     rejection: {
       feedback,
       previousSubject: draftCtx.content.subject,
@@ -597,6 +599,7 @@ export async function regenerateEmailDraft(
     content,
     meta,
     seoData,
+    emailType,
   });
 
   return { newDraftId };

@@ -15,6 +15,8 @@ import type {
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
+  EmailType,
+  BlogType,
   Icp,
   IcpProfile,
   MailerliteConfig,
@@ -211,9 +213,14 @@ export async function createDraftShell(args: {
   /** For blog drafts spun off an email: the source email draft id, stashed in
    * meta.source_draft_id so the blog can link back. No-op for emails. */
   sourceDraftId?: string;
+  /** Sets content_jobs.email_type/blog_type up front, overriding derivation
+   * for this job (see migration 005). Left unset, the column stays null until
+   * generation backfills it with the resolved type. */
+  emailType?: EmailType;
+  blogType?: BlogType;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, campaignId, type = "email", sourceDraftId } = args;
+  const { ctx, campaignId, type = "email", sourceDraftId, emailType, blogType } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -226,6 +233,8 @@ export async function createDraftShell(args: {
       status: "generating",
       trigger_source: campaignId ? "campaign" : "manual",
       ...(campaignId ? { campaign_id: campaignId } : {}),
+      ...(emailType ? { email_type: emailType } : {}),
+      ...(blogType ? { blog_type: blogType } : {}),
     })
     .select("id")
     .single();
@@ -272,10 +281,20 @@ export async function createDraftShell(args: {
  */
 export async function populateDraft(
   draftId: string,
-  args: { content: EmailDraftContent; meta?: DraftMeta; seoData?: DraftSeoData },
+  args: {
+    content: EmailDraftContent;
+    meta?: DraftMeta;
+    seoData?: DraftSeoData;
+    /** Backfills content_jobs.email_type/blog_type with the type this
+     * generation resolved to (derived, or an honored override), so the
+     * column is always populated for filtering even with no explicit
+     * override set at shell creation. */
+    emailType?: EmailType;
+    blogType?: BlogType;
+  },
 ): Promise<void> {
   const db = getAdminClient();
-  const { content, meta, seoData } = args;
+  const { content, meta, seoData, emailType, blogType } = args;
 
   const { data: existing, error: fetchErr } = await db
     .from("drafts")
@@ -305,7 +324,11 @@ export async function populateDraft(
 
   const { error: jobErr } = await db
     .from("content_jobs")
-    .update({ status: "in_review" })
+    .update({
+      status: "in_review",
+      ...(emailType ? { email_type: emailType } : {}),
+      ...(blogType ? { blog_type: blogType } : {}),
+    })
     .eq("id", existing.job_id as string);
   if (jobErr) throw jobErr;
 }
@@ -350,13 +373,17 @@ export async function getDraftWithJobContext(
   // Falls back to a campaign-less select before migration 002 adds the column.
   let { data, error } = await db
     .from("drafts")
-    .select(`id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type)`)
+    .select(
+      `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type, email_type, blog_type)`,
+    )
     .eq("id", draftId)
     .maybeSingle();
   if (error) {
     ({ data, error } = await db
       .from("drafts")
-      .select(`id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type)`)
+      .select(
+        `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type, email_type, blog_type)`,
+      )
       .eq("id", draftId)
       .maybeSingle());
   }
@@ -369,6 +396,8 @@ export async function getDraftWithJobContext(
         topic_id?: string;
         campaign_id?: string | null;
         type?: string;
+        email_type?: string | null;
+        blog_type?: string | null;
       } | null;
     }
   ).content_jobs;
@@ -383,6 +412,8 @@ export async function getDraftWithJobContext(
     meta: (data.meta as DraftMeta) ?? {},
     jobType: (job?.type as ContentJobType) ?? "email",
     state: (data.state as string) ?? "in_review",
+    emailType: (job?.email_type as EmailType | null) ?? null,
+    blogType: (job?.blog_type as BlogType | null) ?? null,
   };
 }
 
@@ -698,9 +729,12 @@ export async function persistRegeneratedDraft(args: {
   content: EmailDraftContent;
   meta?: DraftMeta;
   seoData?: DraftSeoData;
+  /** Backfills content_jobs.email_type in step with the regenerated draft,
+   * same reasoning as populateDraft's version. */
+  emailType?: EmailType;
 }): Promise<string> {
   const db = getAdminClient();
-  const { jobId, version, content, meta, seoData } = args;
+  const { jobId, version, content, meta, seoData, emailType } = args;
 
   const { data, error } = await db
     .from("drafts")
@@ -715,6 +749,15 @@ export async function persistRegeneratedDraft(args: {
     .select("id")
     .single();
   if (error) throw error;
+
+  if (emailType) {
+    const { error: jobErr } = await db
+      .from("content_jobs")
+      .update({ email_type: emailType })
+      .eq("id", jobId);
+    if (jobErr) throw jobErr;
+  }
+
   return data.id as string;
 }
 
