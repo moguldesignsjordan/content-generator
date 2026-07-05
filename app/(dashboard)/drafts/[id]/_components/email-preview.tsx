@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Sheet, Skeleton } from "@/components/ui";
+import { Button, Input, Sheet, Skeleton, Textarea } from "@/components/ui";
 
 // Click-to-edit creative control: overlays the rendered email with invisible
 // hotspot buttons over every [data-region] element the design/templates tag
 // (header, eyebrow, headline, body, cta, footer). Tapping one opens a sheet
-// with quick suggestion chips plus a free-text fallback, both of which call
-// the same cheap Haiku find/replace pipeline as the free-text DesignChat,
-// just scoped to that region's exact HTML so the edit lands precisely.
+// with THREE kinds of edits for just that part:
+//   - WORDING: a textarea pre-filled with the region's current text, an
+//     "Apply text" button (swap in your wording verbatim) and a "Regenerate"
+//     button (AI rewrites that region's text). -> POST /api/drafts/[id]/copy
+//   - COLOR: a color picker defaulting to the region's current color, an
+//     "Apply color" button. -> POST /api/drafts/[id]/color
+//   - STYLE: quick suggestion chips plus a free-text fallback. -> POST
+//     /api/drafts/[id]/adjust-style
+// All three are scoped to the region's exact HTML so the edit lands
+// precisely, and all update this preview live via onHtmlChange.
 //
 // The srcDoc iframe is same-origin content, sandboxed with allow-same-origin
 // (but NOT allow-scripts, so the untrusted model HTML still can't execute
@@ -32,10 +39,22 @@ const SUGGESTION_CHIPS = [
   "Soften the tone",
 ];
 
+/** Best-effort: pulls the first hex color out of a region's inline styles, to pre-fill the color picker. Not authoritative — the model decides the real target property. */
+function guessColor(snippet: string): string {
+  const match = snippet.match(
+    /(?:background-color|background|color)\s*:\s*(#[0-9a-fA-F]{3,8})/,
+  );
+  return match ? match[1].slice(0, 7) : "#000000";
+}
+
 interface Hotspot {
   region: string;
   label: string;
   snippet: string;
+  /** The region's visible text, used to pre-fill the wording textarea. */
+  text: string;
+  /** Best-effort current color, used to pre-fill the color picker. */
+  color: string;
   rect: { top: number; left: number; width: number; height: number };
 }
 
@@ -53,6 +72,8 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [active, setActive] = useState<Hotspot | null>(null);
   const [customInput, setCustomInput] = useState("");
+  const [textValue, setTextValue] = useState("");
+  const [colorValue, setColorValue] = useState("#000000");
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -79,6 +100,8 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
             region,
             label: REGION_LABELS[region] ?? region,
             snippet: el.outerHTML,
+            text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
+            color: guessColor(el.outerHTML),
             rect: {
               top: iframeRect.top - containerRect.top + r.top,
               left: iframeRect.left - containerRect.left + r.left,
@@ -115,7 +138,23 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
     };
   }, [html]);
 
-  async function applyChange(instruction: string) {
+  function openHotspot(h: Hotspot) {
+    setActive(h);
+    setTextValue(h.text);
+    setColorValue(h.color);
+    setCustomInput("");
+    setEditError(null);
+  }
+
+  function closeSheet() {
+    setActive(null);
+    setCustomInput("");
+    setTextValue("");
+    setEditError(null);
+  }
+
+  /** A STYLE change (chips or free text), scoped to the active region. */
+  async function applyStyle(instruction: string) {
     if (!active || applying) return;
     setApplying(true);
     setEditError(null);
@@ -136,14 +175,88 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
       }
       onHtmlChange(data.html);
       onEdited?.();
-      setActive(null);
-      setCustomInput("");
+      closeSheet();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Couldn't apply that change.");
     } finally {
       setApplying(false);
     }
   }
+
+  /**
+   * A WORDING change on the active region. mode "edit" swaps in `newText`
+   * verbatim; mode "regenerate" rewrites the region's text, optionally shaped
+   * by `instruction`.
+   */
+  async function applyCopy(
+    mode: "edit" | "regenerate",
+    newText?: string,
+    instruction?: string,
+  ) {
+    if (!active || applying) return;
+    if (mode === "edit" && !newText?.trim()) return;
+    setApplying(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/copy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region: active.region,
+          regionLabel: active.label,
+          snippet: active.snippet,
+          mode,
+          ...(mode === "edit"
+            ? { newText: newText ?? "" }
+            : { instruction: instruction?.trim() || undefined }),
+        }),
+      });
+      const data = (await res.json()) as { html?: string; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't apply that edit.");
+      }
+      onHtmlChange(data.html);
+      onEdited?.();
+      closeSheet();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't apply that edit.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  /** A COLOR change on the active region: swap it to the exact picked hex. */
+  async function applyColor(hex: string) {
+    if (!active || applying) return;
+    setApplying(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/color`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region: active.region,
+          regionLabel: active.label,
+          snippet: active.snippet,
+          hex,
+        }),
+      });
+      const data = (await res.json()) as { html?: string; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't apply that color.");
+      }
+      onHtmlChange(data.html);
+      onEdited?.();
+      closeSheet();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't apply that color.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const textUnchanged = !active || textValue.trim() === active.text;
+  const colorUnchanged = !active || colorValue.toLowerCase() === active.color.toLowerCase();
 
   return (
     <div ref={containerRef} className="relative overflow-hidden">
@@ -167,10 +280,7 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
         <button
           key={`${h.region}-${i}`}
           type="button"
-          onClick={() => {
-            setActive(h);
-            setEditError(null);
-          }}
+          onClick={() => openHotspot(h)}
           style={{
             top: h.rect.top,
             left: h.rect.left,
@@ -188,48 +298,117 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
 
       <Sheet
         open={!!active}
-        onClose={() => {
-          setActive(null);
-          setCustomInput("");
-          setEditError(null);
-        }}
+        onClose={closeSheet}
         title={active?.label}
-        description="Style only, in plain words. Applies just to this part."
+        description="Edit the wording, color, or look of just this part."
       >
-        <div className="flex flex-wrap gap-2">
-          {SUGGESTION_CHIPS.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              disabled={applying}
-              onClick={() => applyChange(chip)}
-              className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 flex items-end gap-2">
-          <Input
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && customInput.trim()) applyChange(customInput.trim());
-            }}
-            placeholder="Or describe your own change…"
+        {/* WORDING */}
+        <div>
+          <p className="text-xs font-medium text-muted">Wording</p>
+          <Textarea
+            rows={3}
+            value={textValue}
+            onChange={(e) => setTextValue(e.target.value)}
+            placeholder="Edit this text…"
             disabled={applying}
+            className="mt-1.5"
           />
-          <Button
-            variant="gradient"
-            size="sm"
-            loading={applying}
-            disabled={!customInput.trim() || applying}
-            onClick={() => applyChange(customInput.trim())}
-          >
-            Apply
-          </Button>
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="gradient"
+              size="sm"
+              loading={applying}
+              disabled={textUnchanged || applying}
+              onClick={() => applyCopy("edit", textValue)}
+            >
+              Apply text
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={applying}
+              disabled={applying}
+              onClick={() => applyCopy("regenerate")}
+            >
+              Regenerate
+            </Button>
+          </div>
         </div>
-        {editError && <p className="mt-2 text-xs text-danger">{editError}</p>}
+
+        <div className="my-4 border-t border-border" />
+
+        {/* COLOR */}
+        <div>
+          <p className="text-xs font-medium text-muted">Color</p>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="color"
+              value={colorValue}
+              onChange={(e) => setColorValue(e.target.value)}
+              disabled={applying}
+              aria-label="Pick a color"
+              className="h-9 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
+            />
+            <Input
+              value={colorValue}
+              onChange={(e) => setColorValue(e.target.value)}
+              placeholder="#000000"
+              disabled={applying}
+              className="w-28"
+            />
+            <Button
+              variant="solid"
+              size="sm"
+              loading={applying}
+              disabled={colorUnchanged || applying}
+              onClick={() => applyColor(colorValue)}
+            >
+              Apply color
+            </Button>
+          </div>
+        </div>
+
+        <div className="my-4 border-t border-border" />
+
+        {/* STYLE */}
+        <div>
+          <p className="text-xs font-medium text-muted">Style</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {SUGGESTION_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                disabled={applying}
+                onClick={() => applyStyle(chip)}
+                className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex items-end gap-2">
+            <Input
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customInput.trim()) applyStyle(customInput.trim());
+              }}
+              placeholder="Or describe your own change…"
+              disabled={applying}
+            />
+            <Button
+              variant="solid"
+              size="sm"
+              loading={applying}
+              disabled={!customInput.trim() || applying}
+              onClick={() => applyStyle(customInput.trim())}
+            >
+              Apply
+            </Button>
+          </div>
+        </div>
+
+        {editError && <p className="mt-3 text-xs text-danger">{editError}</p>}
       </Sheet>
     </div>
   );

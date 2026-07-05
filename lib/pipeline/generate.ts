@@ -1,5 +1,10 @@
 import "server-only";
-import { DRAFT_MODEL, cacheableSystem, getAnthropic } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  cacheableSystem,
+  getAnthropic,
+  logUsage,
+} from "@/lib/clients/anthropic";
 import {
   getCampaign,
   getDraftWithJobContext,
@@ -166,10 +171,14 @@ async function generateEmailCopy(
   };
 
   try {
-    return extract(await call());
+    const resp = await call();
+    logUsage("email-copy", resp.usage);
+    return extract(resp);
   } catch (err) {
     console.error("[generate] email copy failed, retrying once:", err);
-    return extract(await call());
+    const resp = await call();
+    logUsage("email-copy-retry", resp.usage);
+    return extract(resp);
   }
 }
 
@@ -267,6 +276,7 @@ async function runQaPass(
       tools: [QA_TOOL],
       tool_choice: { type: "tool", name: "qa_review" },
     });
+    logUsage("email-qa", response.usage);
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "qa_review",

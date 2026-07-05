@@ -79,3 +79,33 @@ export function withCacheBreakpoint(
   };
   return { ...message, content: [...content.slice(0, -1), last] };
 }
+
+/**
+ * Logs a one-line breakdown of an Anthropic response's token usage, focused
+ * on whether the prompt cache landed. `cache_write` is tokens we paid 1.25x
+ * to seed (the first call for a given prefix); `cache_read` is tokens we got
+ * at a 0.1x hit. If both stay 0 across calls, the prefix isn't being cached
+ * — almost always because it's under the model's minimum cacheable length
+ * (1,024 tokens for Sonnet 4.6). Pass a short label to tell calls apart in
+ * the server log. Intended for dev-time verification; safe to leave on.
+ */
+export function logUsage(
+  label: string,
+  usage: {
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+  },
+): void {
+  const input = usage.input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const totalInput = input + cacheWrite + cacheRead;
+  const verdict =
+    cacheRead > 0 ? "CACHE HIT" : cacheWrite > 0 ? "cache seed" : "no cache";
+  console.log(
+    `[usage:${label}] input=${input} cache_write=${cacheWrite} cache_read=${cacheRead} output=${output} (${verdict}, ${totalInput} total input)`,
+  );
+}

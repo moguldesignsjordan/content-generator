@@ -310,10 +310,16 @@ export interface EmailCopy {
 // template id + copy that produced this draft's HTML (enables future re-render).
 // email_design_source records whether the HTML came from the model's design
 // (under the email design system prompt) or the code template fallback.
+// Which kind of in-place edit pushed an entry onto the undo stack, so the
+// history log can label itself. The stack itself is shared (one Undo button
+// covers all three); this is purely for display.
+export type EditType = "style" | "copy" | "recolor";
+
 export interface StyleEditHistoryEntry {
   html: string;
   instruction: string;
   at: string; // ISO timestamp
+  type?: EditType;
 }
 
 // Tracks a draft's generation progress so the review page can render a real

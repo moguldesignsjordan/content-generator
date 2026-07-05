@@ -27,6 +27,19 @@ interface ReviewActionsProps {
   initialArchived: boolean;
 }
 
+/**
+ * Swaps the href on the CTA button (the <a> inside the data-region="cta"
+ * wrapper every template and model-designed email tags) so editing the CTA
+ * link field updates the rendered button instantly, no model call needed.
+ */
+function applyCtaHref(html: string, url: string): string {
+  const href = url.trim() || "#";
+  return html.replace(
+    /(data-region="cta"[\s\S]*?<a\s[^>]*\bhref=")[^"]*(")/,
+    `$1${href}$2`,
+  );
+}
+
 export function ReviewActions({
   draftId,
   version,
@@ -42,6 +55,25 @@ export function ReviewActions({
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
   const [html, setHtml] = useState(initialContent.html);
+  const initialCtaUrl = initialMeta.email_copy?.cta_url ?? "";
+  const [ctaUrl, setCtaUrl] = useState(initialCtaUrl);
+
+  function handleCtaChange(value: string) {
+    setCtaUrl(value);
+    setHtml((h) => applyCtaHref(h, value));
+  }
+
+  function handleDownload() {
+    const filename =
+      (subject.trim() || "email").replace(/[^\w.-]+/g, "_").slice(0, 80) + ".html";
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
   const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
@@ -76,7 +108,14 @@ export function ReviewActions({
     setLoading("approve");
     try {
       const body: Record<string, unknown> = {
-        meta: { meta_title: metaTitle, meta_description: metaDesc },
+        meta: {
+          ...initialMeta,
+          meta_title: metaTitle,
+          meta_description: metaDesc,
+          ...(initialMeta.email_copy && {
+            email_copy: { ...initialMeta.email_copy, cta_url: ctaUrl.trim() || undefined },
+          }),
+        },
       };
       if (isEdited) {
         body.editedContent = { subject, preheader, html };
@@ -252,14 +291,29 @@ export function ReviewActions({
             onChange={(e) => setPreheader(e.target.value)}
           />
         </Field>
+        <Field label="CTA link" hint="Where the button in this email points.">
+          <Input
+            type="url"
+            value={ctaUrl}
+            onChange={(e) => handleCtaChange(e.target.value)}
+            placeholder="https://…"
+          />
+        </Field>
       </Card>
 
       {/* Live preview */}
       <Card className="overflow-hidden">
-        <div className="border-b border-border px-4 py-2.5">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <p className="text-[13px] font-medium text-muted">
             Rendered email — click any part to tweak it
           </p>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Download .html
+          </button>
         </div>
         <EmailPreview
           draftId={draftId}

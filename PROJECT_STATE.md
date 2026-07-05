@@ -3,7 +3,7 @@
 Living save/restore doc. Read this first to pick up context; update it
 whenever progress, blockers, or decisions change.
 
-Last updated: 2026-07-05 (Email Creator UX Overhaul, all 6 phases landed).
+Last updated: 2026-07-05 (click-to-edit wording + color, CTA link, download .html).
 
 ## Locked decisions
 
@@ -427,6 +427,74 @@ Last updated: 2026-07-05 (Email Creator UX Overhaul, all 6 phases landed).
     `suggest_options`, the click-to-edit chip flow end-to-end in a browser,
     etc.) — top up credits and manually click through before considering
     this fully verified in production.
+
+- **Click-to-edit wording + color, CTA link, download .html (2026-07-05,
+  uncommitted on `feat/dashboard-create-agent` as of this writing):**
+  extends the click-to-edit region Sheet (`email-preview.tsx`) from
+  style-only to three edit kinds per region:
+  - **Wording:** a textarea pre-filled with the region's visible text.
+    "Apply text" swaps it in verbatim; "Regenerate" rewrites it in the same
+    voice, optionally guided by free text. New `save_copy_patch` tool
+    (`prompts/adjust-copy.ts`) + `adjustCopy()` (`lib/pipeline/adjust-copy.ts`)
+    + `POST /api/drafts/[id]/copy`. After a verbatim edit, best-effort syncs
+    the new text back into `meta.email_copy` (headline/cta_text/body_sections)
+    so a later Redesign (which rebuilds from `email_copy`) doesn't revert the
+    wording; skipped silently if the region doesn't map to a single field.
+  - **Color:** a native color picker (swatch + hex input) pre-filled by
+    best-effort regex-scanning the region's own snippet for its current hex
+    (display only; the model decides the real target property). "Apply
+    color" sends the exact hex, no free text, no ambiguity. New
+    `save_color_patch` tool (`prompts/adjust-color.ts`) +
+    `adjustColor()` (`lib/pipeline/adjust-color.ts`) +
+    `POST /api/drafts/[id]/color`. The prompt teaches the model which CSS
+    property is "the" color per region shape: background-color for a
+    filled/button region (bumping text color too only if the new fill would
+    make it unreadable), text color for plain-text regions, link color if
+    that's the dominant element. **Verified live** against a real draft on
+    both branches: a CTA button's `background-color` swapped to an exact
+    target hex leaving its white text alone, and a headline's plain `color`
+    swapped to a different exact hex, both with the rest of the document
+    byte-identical and the draft restored after the test.
+  - Refactored the shared tail of all three region-edit pipelines
+    (style/copy/color) into `lib/pipeline/html-edit.ts`:
+    `applyEdits()` (the find/replace-with-fail-closed-ambiguity logic,
+    previously duplicated) and `commitHtmlEdit()` (validate, strip
+    em-dashes, guarantee unsubscribe tag, push undo history, persist).
+    `EditType` (`"style" | "copy" | "recolor"`) on
+    `StyleEditHistoryEntry.type` labels which kind of edit each undo entry
+    was, for display; the undo stack itself stays shared (one Undo button
+    covers all three). `adjust-style.ts` now delegates to `html-edit.ts`
+    instead of carrying its own copy of this logic.
+  - **CTA link field:** `review-actions.tsx` gained a "CTA link" input
+    reading/writing `meta.email_copy.cta_url`; typing a URL rewrites the
+    `<a>` href inside the `data-region="cta"` wrapper directly via regex
+    (`applyCtaHref`), no model call, applied instantly to the live preview.
+  - **Download .html button** on the preview card header: client-side blob
+    download of the current rendered HTML, filename derived from the
+    subject.
+  - **Fixed a real meta-clobbering bug found while wiring the CTA field:**
+    `approveDraft()` (`lib/db/queries.ts`) used to flat-replace `meta` with
+    whatever the client had at page-mount, which would have silently
+    reverted any in-place edit pipeline's write (style/copy/color history,
+    a copy-synced `email_copy`) made after the page loaded, the instant you
+    hit Approve. Now merges: re-reads the current stored `meta` server-side
+    and layers only the fields the client actually owns (the two SEO text
+    fields, `email_copy.cta_url`) on top, instead of replacing the whole
+    object.
+  - Added `logUsage()` (`lib/clients/anthropic.ts`): one-line cache-hit/miss
+    token log per Anthropic call, wired into the email-copy and QA calls in
+    `lib/pipeline/generate.ts` (dev-time visibility, not wired into every
+    pipeline).
+  - A `color_overrides` (brand-wide, per-role) meta field was scaffolded
+    earlier in this session, then **removed**: Jordan's actual ask was
+    per-region ("click on a section or text and change the color"), which
+    the region-scoped color pipeline above satisfies directly without
+    needing a persisted brand-level override.
+  - Not yet exercised against a live logged-in browser session this pass
+    (auth middleware blocks a plain curl test); the pipeline itself was
+    verified directly against real Supabase + Anthropic data as described
+    above. Click through all three Sheet sections in the browser before
+    calling this fully done.
 
 ## What's not built yet
 

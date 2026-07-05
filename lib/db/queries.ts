@@ -444,7 +444,32 @@ export async function approveDraft(
 
   const update: Record<string, unknown> = { state: "approved" };
   if (editedContent) update.content = editedContent;
-  if (editedMeta) update.meta = editedMeta;
+  if (editedMeta) {
+    // Merge over the CURRENT stored meta rather than flat-replacing it. The
+    // review client builds its approve payload from meta captured at page
+    // mount, so a flat replace would clobber anything the in-place edit
+    // pipelines wrote after load: email_copy synced after a copy edit, and
+    // new style_edit_history entries. The server stays
+    // authoritative for those; the client only meaningfully owns the two meta
+    // text fields and the CTA url, so we layer just those onto the stored row.
+    const { data: row, error: readErr } = await db
+      .from("drafts")
+      .select("meta")
+      .eq("id", draftId)
+      .single();
+    if (readErr) throw readErr;
+    const currentMeta = (row?.meta ?? {}) as DraftMeta;
+    update.meta = {
+      ...currentMeta,
+      meta_title: editedMeta.meta_title ?? currentMeta.meta_title,
+      meta_description:
+        editedMeta.meta_description ?? currentMeta.meta_description,
+      email_copy: {
+        ...currentMeta.email_copy,
+        cta_url: editedMeta.email_copy?.cta_url ?? currentMeta.email_copy?.cta_url,
+      },
+    };
+  }
 
   const { error: updateErr } = await db
     .from("drafts")

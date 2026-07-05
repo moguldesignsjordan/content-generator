@@ -16,10 +16,8 @@ import {
   buildAdjustStyleMessages,
   type AdjustStyleRegionContext,
   type AdjustStyleToolInput,
-  type StyleEdit,
 } from "@/prompts/adjust-email-style";
-import { stripEmDashes } from "@/lib/text";
-import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
+import { applyEdits, commitHtmlEdit } from "./html-edit";
 import type { StyleEditHistoryEntry } from "@/lib/db/types";
 
 // One cheap, non-thinking call that edits an existing draft's HTML by
@@ -31,17 +29,15 @@ import type { StyleEditHistoryEntry } from "@/lib/db/types";
 // Patch-based (find/replace), not full-document echo: the model only OUTPUTS
 // the small snippet(s) that change, which is what actually drives cost and
 // latency (output tokens, not input). Each find must match the current HTML
-// verbatim exactly once (or replace_all is set), which is also a real safety
-// property: the model is mechanically unable to touch anything outside the
-// span it names, unlike a full rewrite where "preserve everything else" was
-// only ever a request.
+// verbatim exactly once (or replace_all is set) — enforced by applyEdits in
+// html-edit.ts — which is also a real safety property: the model is
+// mechanically unable to touch anything outside the span it names.
 //
-// Every edit pushes the PRE-edit html onto a small undo stack stored in
-// drafts.meta.style_edit_history (jsonb, no migration needed). This is what
-// makes undo survive a page reload, unlike the old client-memory-only undo:
-// an edit you don't want is never unrecoverable again.
-
-const MAX_HISTORY = 10;
+// The validate + sanitize + undo-stack push + persist tail is shared with the
+// copy and recolor pipelines via commitHtmlEdit in html-edit.ts, so one Undo
+// button covers all three edit types. Every edit pushes the PRE-edit html
+// onto drafts.meta.style_edit_history (jsonb, no migration needed), which is
+// what makes undo survive a page reload.
 
 export type AdjustStyleResult =
   | {
@@ -51,31 +47,6 @@ export type AdjustStyleResult =
       caveat?: string;
     }
   | { ok: false; error: string };
-
-/**
- * Applies one find/replace edit to html. Fails closed: find must appear at
- * least once, and if it appears more than once without replace_all, that's
- * ambiguous (which occurrence was meant?) so it's rejected rather than
- * guessed, instead of silently touching only the first match.
- */
-function applyEdit(html: string, edit: StyleEdit): { html: string } | { error: string } {
-  if (!edit.find) return { error: "An edit was missing its find text." };
-  const occurrences = html.split(edit.find).length - 1;
-  if (occurrences === 0) {
-    return {
-      error: `Couldn't locate the exact text to change (starting "${edit.find.slice(0, 60)}"). Try rephrasing.`,
-    };
-  }
-  if (occurrences > 1 && !edit.replace_all) {
-    return {
-      error: `That change matches ${occurrences} places ambiguously. Be more specific.`,
-    };
-  }
-  const next = edit.replace_all
-    ? html.split(edit.find).join(edit.replace)
-    : html.replace(edit.find, edit.replace);
-  return { html: next };
-}
 
 /**
  * One model call + patch-apply attempt. Returns the failure reason (not yet
@@ -111,20 +82,9 @@ async function attemptEdit(
     return { error: "The model didn't describe any change." };
   }
 
-  let patched = currentHtml;
-  for (const edit of raw.edits) {
-    const result = applyEdit(patched, edit);
-    if ("error" in result) return { error: result.error };
-    patched = result.html;
-  }
-
-  const validated = validateModelEmailHtml(patched);
-  if (!validated) return { error: "That edit produced invalid HTML." };
-
-  return {
-    html: ensureUnsubscribeTag(stripEmDashes(validated)),
-    caveat: raw.client_support_caveat,
-  };
+  const result = applyEdits(currentHtml, raw.edits);
+  if ("error" in result) return { error: result.error };
+  return { html: result.html, caveat: raw.client_support_caveat };
 }
 
 export async function adjustEmailStyle(
@@ -166,24 +126,19 @@ export async function adjustEmailStyle(
     return { ok: false, error: `${attempt.error} Try rephrasing the request.` };
   }
 
-  const { html, caveat } = attempt;
-
-  const history = [
-    ...(draftCtx.meta.style_edit_history ?? []),
-    {
-      html: draftCtx.content.html,
-      instruction,
-      at: new Date().toISOString(),
-    },
-  ].slice(-MAX_HISTORY);
-
-  await updateDraftContent(
-    draftId,
-    { subject: draftCtx.content.subject, preheader: draftCtx.content.preheader, html },
-    { ...draftCtx.meta, style_edit_history: history },
-  );
-
-  return { ok: true, html, history, caveat };
+  const result = await commitHtmlEdit({
+    draftCtx,
+    html: attempt.html,
+    label: instruction,
+    type: "style",
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    html: result.html,
+    history: result.history,
+    caveat: attempt.caveat,
+  };
 }
 
 /** Current undo stack for a draft, oldest first, without touching content. */
@@ -202,6 +157,8 @@ export async function getStyleEditHistory(
  * Pops the most recent entry off the undo stack and restores it as the
  * draft's current html. Server-authoritative (unlike the old client-only
  * undo), so it survives reloads and works no matter when you come back.
+ * Restores the snapshot verbatim (it was already validated when first
+ * committed), so this does not re-run the validation gate.
  */
 export async function undoLastStyleEdit(
   draftId: string,
