@@ -11,6 +11,7 @@ export function LoginCard() {
   const router = useRouter();
   const params = useSearchParams();
   const redirectTo = params.get("redirect") || "/";
+  const authError = params.get("error");
 
   const supabase = createClient();
   const [mode, setMode] = useState<Mode>("signin");
@@ -109,6 +110,11 @@ export function LoginCard() {
 
   return (
     <div>
+      {authError && (
+        <div className="mb-5 rounded-lg border border-border bg-surface-2 px-3.5 py-2.5 text-[13px] text-muted">
+          {authError}
+        </div>
+      )}
       <SegmentedControl
         className="mb-6 w-full [&>button]:flex-1"
         value={mode}

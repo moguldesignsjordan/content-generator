@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button, Field, Input, useToast } from "@/components/ui";
@@ -11,7 +11,18 @@ export function ResetPasswordCard() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
+  const [linkState, setLinkState] = useState<"checking" | "valid" | "invalid">("checking");
   const toast = useToast();
+
+  // A reset link only works if the callback established a recovery session.
+  // If it didn't (expired link, opened in a different browser), say so
+  // instead of failing with a cryptic error on submit.
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setLinkState(data.user ? "valid" : "invalid");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +45,24 @@ export function ResetPasswordCard() {
       toast.error(err instanceof Error ? err.message : "Couldn't update your password.");
       setLoading(false);
     }
+  }
+
+  if (linkState === "invalid") {
+    return (
+      <div className="text-center">
+        <h2 className="font-display text-lg font-semibold">This link didn't work</h2>
+        <p className="mt-1.5 text-sm text-muted">
+          The reset link is invalid or has expired. Request a fresh one and open it in this browser.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/forgot-password")}
+          className="mt-5 text-sm font-medium text-accent hover:text-accent-press"
+        >
+          Send a new reset link
+        </button>
+      </div>
+    );
   }
 
   return (
