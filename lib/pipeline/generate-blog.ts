@@ -9,14 +9,18 @@ import { getCampaign, patchDraftGeneration, populateDraft } from "@/lib/db/queri
 import {
   BLOG_TOOL,
   BlogDraftSchema,
+  BLOG_LENGTH_TARGETS,
   buildBlogMessages,
+  countBlogWords,
   type BlogDraftOutput,
+  type BlogLengthTarget,
 } from "@/prompts/generate-blog";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { findBannedTerms, visibleEmailText } from "@/lib/email/quality";
 import { stripEmDashes } from "@/lib/text";
 import type {
   BlogCopy,
+  BlogType,
   CampaignBrief,
   DraftMeta,
   DraftSeoData,
@@ -46,8 +50,12 @@ export async function generateBlogForTopicStreamed(
     onEvent({ type: "phase", ...writing });
 
     const brief = await loadBrief(opts.campaignId);
-    const { system, user } = buildBlogMessages(ctx, { brief });
-    const { parsed, usageDeltas } = await generateBlogCopy(system, user);
+    const { system, user, blogType } = buildBlogMessages(ctx, { brief });
+    const lengthTarget = BLOG_LENGTH_TARGETS[blogType];
+    const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
+      lengthTarget,
+      blogType,
+    });
 
     const copy = cleanBlogCopy(parsed);
 
@@ -64,7 +72,7 @@ export async function generateBlogForTopicStreamed(
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const seoData = runBlogChecks(ctx, copy, html);
+    const seoData = runBlogChecks(ctx, copy, html, lengthTarget, blogType);
 
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -72,6 +80,7 @@ export async function generateBlogForTopicStreamed(
     const meta: DraftMeta = {
       meta_title: copy.meta_title,
       meta_description: copy.meta_description,
+      blog_type: blogType,
       blog_copy: copy,
       ...(heroImage ? { hero_image: heroImage } : {}),
       usage,
@@ -110,17 +119,18 @@ async function loadBrief(
 async function generateBlogCopy(
   system: string,
   user: string,
+  opts: { lengthTarget?: BlogLengthTarget; blogType?: BlogType } = {},
 ): Promise<{ parsed: BlogDraftOutput; usageDeltas: UsageDelta[] }> {
   const cachedSystem = cacheableSystem(system);
 
-  const call = () =>
+  const call = (u: string) =>
     getAnthropic()
       .messages.stream({
         model: DRAFT_MODEL,
         max_tokens: 32000,
         thinking: { type: "adaptive" },
         system: cachedSystem,
-        messages: [{ role: "user", content: user }],
+        messages: [{ role: "user", content: u }],
         tools: [BLOG_TOOL],
         tool_choice: { type: "tool", name: "save_blog_draft" },
       })
@@ -147,19 +157,60 @@ async function generateBlogCopy(
     return parsed.data;
   };
 
-  const usageDeltas: UsageDelta[] = [];
-  try {
-    const resp = await call();
-    logUsage("blog-copy", resp.usage);
+  const runOnce = async (label: string, u: string): Promise<BlogDraftOutput> => {
+    const resp = await call(u);
+    logUsage(label, resp.usage);
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
-    return { parsed: extract(resp), usageDeltas };
+    return extract(resp);
+  };
+
+  const usageDeltas: UsageDelta[] = [];
+  let parsed: BlogDraftOutput;
+  try {
+    parsed = await runOnce("blog-copy", user);
   } catch (err) {
     console.error("[generate-blog] copy failed, retrying once:", err);
-    const resp = await call();
-    logUsage("blog-copy-retry", resp.usage);
-    usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
-    return { parsed: extract(resp), usageDeltas };
+    parsed = await runOnce("blog-copy-retry", user);
   }
+
+  // Length enforcement: if the post came in under this format's minimum word
+  // count, hand the model its actual count and the target and try once more
+  // (reusing the cached system prompt). One retry only; a still-short result is
+  // still surfaced as a QA issue by runBlogChecks. Mirrors the email path.
+  const { lengthTarget, blogType } = opts;
+  if (lengthTarget) {
+    const words = countBlogWords(parsed);
+    if (words < lengthTarget.words[0]) {
+      console.warn(
+        `[generate-blog] post too short (${words} < ${lengthTarget.words[0]} for ${blogType ?? "this type"}); retrying once`,
+      );
+      const nudge = [
+        "",
+        "LENGTH CHECK: the previous draft was only " + words + " words.",
+        "This post must be " +
+          lengthTarget.words[0] +
+          " to " +
+          lengthTarget.words[1] +
+          " words across " +
+          lengthTarget.sections[0] +
+          " to " +
+          lengthTarget.sections[1] +
+          " sections.",
+        "Rewrite with more depth: add concrete examples, named specifics, step-by-step detail, and the reasoning behind each point. Keep it tight and on-brand; do not pad with filler or repeat yourself.",
+        "Reach at least " + lengthTarget.words[0] + " words this time.",
+      ].join("\n");
+      try {
+        parsed = await runOnce("blog-copy-length-retry", user + nudge);
+      } catch (err) {
+        console.error(
+          "[generate-blog] length retry failed, keeping first draft:",
+          err,
+        );
+      }
+    }
+  }
+
+  return { parsed, usageDeltas };
 }
 
 /** Em-dash stripping + trimming across every text field, mirroring the email path. */
@@ -190,6 +241,8 @@ function runBlogChecks(
   ctx: TopicContext,
   copy: BlogCopy,
   html: string,
+  lengthTarget?: BlogLengthTarget,
+  blogType?: BlogType,
 ): DraftSeoData {
   const issues: string[] = [];
 
@@ -229,6 +282,25 @@ function runBlogChecks(
     issues.push(
       `Page summary is ${copy.meta_description.length} characters; keep it under 160.`,
     );
+  }
+
+  // Length check: the prompt asks for a type-specific word range and
+  // generateBlogCopy retries once if the first draft is short, but the model
+  // can still miss. Surface the actual count vs. target so the reviewer sees it
+  // before approving (and before publishing a thin post to Sanity/SEO).
+  if (lengthTarget) {
+    const words = countBlogWords(copy);
+    const [min, max] = lengthTarget.words;
+    const typeLabel = blogType ? `${blogType.replace(/_/g, " ")} post` : "this post type";
+    if (words < min) {
+      issues.push(
+        `Length: ${words} of ${min} to ${max} words for a ${typeLabel}. Too short; add depth, examples, and step-by-step detail.`,
+      );
+    } else if (words > max) {
+      issues.push(
+        `Length: ${words} words, over the ${max}-word target for a ${typeLabel}.`,
+      );
+    }
   }
 
   return {

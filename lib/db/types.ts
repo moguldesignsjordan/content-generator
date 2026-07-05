@@ -318,6 +318,18 @@ export type EmailType =
   | "promotional"
   | "announcement";
 
+// The FORMAT of a blog post, which sets its length and depth budget. Derived
+// from the topic's title and search intent (see resolveBlogType in
+// prompts/generate-blog.ts), so every existing topic gets a type with no
+// migration. Orthogonal to funnel stage and to the email-side EmailType.
+export type BlogType =
+  | "pillar"
+  | "how_to"
+  | "listicle"
+  | "case_study"
+  | "thought_leadership"
+  | "landing";
+
 export interface EmailCopySection {
   heading?: string;
   body: string;
@@ -437,6 +449,8 @@ export interface DraftMeta {
   // generation time from resolveEmailType so the review surface and future
   // logic know which length target the draft was shaped against.
   email_type?: EmailType;
+  // The blog format that drove this post's length budget (blog jobs only).
+  blog_type?: BlogType;
   email_copy?: EmailCopy;
   // Structured blog post for content_jobs.type='blog' drafts; the source of
   // truth the Sanity publish converts to Portable Text.

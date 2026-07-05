@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { CampaignBrief, TopicContext } from "@/lib/db/types";
+import type { BlogType, CampaignBrief, TopicContext } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
   buildCampaignBriefBlock,
@@ -66,7 +66,7 @@ export const BLOG_TOOL: Anthropic.Tool = {
       },
       sections: {
         type: "array",
-        description: "3 to 6 body sections. Each heading is an H2 (plain text, no # marks).",
+        description: "Body sections; use the count from LENGTH FOR THIS POST. Each heading is an H2 (plain text, no # marks).",
         items: {
           type: "object",
           properties: {
@@ -109,11 +109,128 @@ export const BLOG_TOOL: Anthropic.Tool = {
   },
 };
 
+// Per-type length budgets for blogs. blog_type is the axis that decides how
+// long and deep a post should be. These ranges are injected into the prompt as
+// a hard constraint and enforced after generation (see countBlogWords + the
+// retry in generate-blog.ts). The companion to EMAIL_LENGTH_TARGETS.
+export interface BlogLengthTarget {
+  words: [number, number];
+  sections: [number, number];
+  directive: string;
+}
+
+export const BLOG_LENGTH_TARGETS: Record<BlogType, BlogLengthTarget> = {
+  pillar: {
+    words: [2500, 4000],
+    sections: [5, 8],
+    directive:
+      "a comprehensive pillar resource. Cover the topic end to end with real depth: what it is, why it matters, a structured walkthrough of every major facet, concrete examples, common mistakes, and the questions a reader will have next. This should be the definitive piece someone bookmarks.",
+  },
+  how_to: {
+    words: [1500, 2500],
+    sections: [4, 7],
+    directive:
+      "an actionable tutorial. Lay out the process as clear numbered steps, each with what to do, why it matters, and a concrete example or pitfall. A reader should be able to follow it start to finish and get a result.",
+  },
+  listicle: {
+    words: [1500, 2500],
+    sections: [5, 10],
+    directive:
+      "a listicle with one section per item. Give each item a bold heading and a substantive paragraph or two of real explanation with an example, not a one-liner. Depth per item is the point.",
+  },
+  case_study: {
+    words: [1500, 2500],
+    sections: [4, 6],
+    directive:
+      "a case study. Structure it as the client and their problem, the approach, what was actually done, the results with numbers, and the takeaways. Specific and concrete throughout, never generic.",
+  },
+  thought_leadership: {
+    words: [1000, 1800],
+    sections: [3, 5],
+    directive:
+      "a point-of-view piece. Take a clear stance, argue it with reasoning and examples, acknowledge the counterpoint, and land a memorable takeaway. Voice-forward, not SEO-mechanical.",
+  },
+  landing: {
+    words: [800, 1500],
+    sections: [3, 5],
+    directive:
+      "an SEO landing page for the offer. Lead with the outcome, then what it is, who it is for, how it works, proof, and the CTA. Persuasive and scannable, shorter than a pillar.",
+  },
+};
+
+/**
+ * Derives the blog format from the topic's title and search intent. The title
+ * usually announces the format ("How to...", "7 Signs...", "Case Study:..."),
+ * so this is stable and free. Priority:
+ *   1. commercial/transactional intent with a mapped offer -> landing
+ *   2. case study in title or intent -> case_study
+ *   3. how-to / tutorial signals -> how_to
+ *   4. listicle title ("N <things>") -> listicle
+ *   5. brand stage / opinion intent -> thought_leadership
+ *   6. otherwise -> pillar (the comprehensive default)
+ */
+export function resolveBlogType(
+  topic: { title: string; intent: string | null; funnel_stage: string | null; maps_to_product: string | null },
+  opts: { brief?: CampaignBrief | null } = {},
+): BlogType {
+  const title = topic.title.toLowerCase();
+  const intent = (topic.intent ?? "").toLowerCase();
+  void opts; // reserved for a future campaign-driven override
+
+  if (
+    topic.maps_to_product &&
+    (intent.includes("commercial") ||
+      intent.includes("transactional") ||
+      intent.includes("buy"))
+  ) {
+    return "landing";
+  }
+
+  if (title.includes("case study") || intent.includes("case study")) {
+    return "case_study";
+  }
+
+  if (
+    /^(how to|how do i|guide to|tutorial|step|steps to)/.test(title) ||
+    intent.includes("how to") ||
+    intent.includes("tutorial")
+  ) {
+    return "how_to";
+  }
+
+  if (
+    /^\d+\s+(best|top|ways|tips|signs|reasons|tools|ideas|strategies|steps|questions|things)/.test(
+      title,
+    )
+  ) {
+    return "listicle";
+  }
+
+  if (topic.funnel_stage === "brand" || intent.includes("opinion")) {
+    return "thought_leadership";
+  }
+
+  return "pillar";
+}
+
+/** Total word count of a blog post: intro + every section body + conclusion. */
+export function countBlogWords(copy: {
+  intro: string;
+  sections: { body: string }[];
+  conclusion: string;
+}): number {
+  const parts = [copy.intro, ...copy.sections.map((s) => s.body), copy.conclusion];
+  return parts.reduce(
+    (sum, p) => sum + p.trim().split(/\s+/).filter(Boolean).length,
+    0,
+  );
+}
+
 /** Builds the (system, user) message pair for blog generation. */
 export function buildBlogMessages(
   ctx: TopicContext,
   opts: { brief?: CampaignBrief | null } = {},
-): { system: string; user: string } {
+): { system: string; user: string; blogType: BlogType } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
   const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "blog");
@@ -121,6 +238,8 @@ export function buildBlogMessages(
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const offerBlock = buildOfferBlock(ctx);
   const { ctaText } = resolveCta(ctx);
+  const blogType = resolveBlogType(topic, { brief: opts.brief ?? null });
+  const length = BLOG_LENGTH_TARGETS[blogType];
 
   const system = [
     `You are the blog writer for ${brand.name}. You produce one complete,`,
@@ -162,6 +281,8 @@ export function buildBlogMessages(
     "Write one blog post.",
     "",
     briefBlock,
+    `BLOG TYPE: ${blogType}`,
+    `LENGTH FOR THIS POST (required, not optional): ${length.words[0]} to ${length.words[1]} words total across ${length.sections[0]} to ${length.sections[1]} sections. This is ${blogType === "landing" ? `an ${blogType}` : `a ${blogType.replace(/_/g, " ")}`} post: ${length.directive} The intro plus section bodies plus conclusion together must reach ${length.words[0]} words.`,
     `TITLE / TOPIC: ${topic.title}`,
     topic.target_keyword ? `TARGET KEYWORD: ${topic.target_keyword}` : "",
     topic.intent ? `SEARCH INTENT: ${topic.intent}` : "",
@@ -180,5 +301,5 @@ export function buildBlogMessages(
     .filter(Boolean)
     .join("\n");
 
-  return { system, user };
+  return { system, user, blogType };
 }
