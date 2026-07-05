@@ -8,8 +8,8 @@ import {
   ListRow,
   StatCard,
 } from "@/components/ui";
-import { ChevronRightIcon, SparkleIcon } from "@/components/ui/icons";
-import { Assistant } from "./_components/assistant";
+import { ChevronRightIcon } from "@/components/ui/icons";
+import { CreateAgent } from "./_components/create-agent";
 import { ScreenHeader } from "./_components/screen-header";
 import { DraftStateBadge } from "./_components/topic-badges";
 
@@ -92,23 +92,15 @@ export default async function DashboardPage() {
         subtitle={`${brand.name} · content engine`}
       />
 
+      {/* Create — leads the page */}
+      <CreateAgent suggestions={suggestions} />
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2.5">
         <StatCard label="In review" value={inReview} sub="drafts" />
         <StatCard label="Approved" value={approved} sub="ready to ship" />
         <StatCard label="Topics" value={allTopics.length} sub={`${queued} queued`} />
       </div>
-
-      {/* Assistant — the main tool */}
-      <section>
-        <div className="mb-3 flex items-center gap-2">
-          <SparkleIcon size={16} className="text-accent" />
-          <h2 className="text-[15px] font-semibold text-foreground">
-            Content assistant
-          </h2>
-        </div>
-        <Assistant suggestions={suggestions} />
-      </section>
 
       {/* Recent emails */}
       <section>
@@ -129,7 +121,7 @@ export default async function DashboardPage() {
 
         {drafts.length === 0 ? (
           <Card className="p-6 text-center text-sm text-muted">
-            No emails yet. Ask the assistant to draft one.
+            No emails yet. Use the create agent up top to draft one.
           </Card>
         ) : (
           <ListGroup>
