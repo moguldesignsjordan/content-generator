@@ -37,6 +37,7 @@ import {
   type SuggestOptionsInput,
   type UpdateBriefInput,
 } from "@/prompts/create-agent";
+import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { stripEmDashes } from "@/lib/text";
 
 // A turn is short, but give the model headroom to think + write a follow-up.
@@ -115,6 +116,9 @@ export async function POST(req: NextRequest) {
       listTopics(),
     ]);
 
+    // The system prompt holds only the STABLE brand context so it caches
+    // across turns; the mutating brief-so-far rides in the latest user turn
+    // instead (it's never persisted to history, so it can't go stale there).
     const system = cacheableSystem(
       buildCreateAgentSystem({
         brand,
@@ -122,8 +126,6 @@ export async function POST(req: NextRequest) {
         primaryIcp,
         products,
         topics,
-        brief: campaign.brief ?? {},
-        topicId: campaign.topic_id,
       }),
     );
 
@@ -137,9 +139,16 @@ export async function POST(req: NextRequest) {
         priorTurns[priorTurns.length - 1],
       );
     }
+    const briefState = buildBriefStateBlock(
+      campaign.brief ?? {},
+      campaign.topic_id,
+    );
     const messages: Anthropic.MessageParam[] = [
       ...priorTurns,
-      { role: "user", content: message.trim() },
+      {
+        role: "user",
+        content: `${briefState}\n\nUSER MESSAGE:\n${message.trim()}`,
+      },
     ];
 
     // One retry on a transient failure. Reusing the same `system` array (not

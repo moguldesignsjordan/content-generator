@@ -40,6 +40,9 @@ export function VisualIdentityForm({
     initialFooter.contact_email ?? "",
   );
   const [website, setWebsite] = useState(initialFooter.website ?? "");
+  const [postalAddress, setPostalAddress] = useState(
+    initialFooter.postal_address ?? "",
+  );
   const [social, setSocial] = useState(initialSocial);
 
   const [uploading, setUploading] = useState(false);
@@ -84,6 +87,7 @@ export function VisualIdentityForm({
             footer: {
               contact_email: contactEmail.trim() || undefined,
               website: website.trim() || undefined,
+              postal_address: postalAddress.trim() || undefined,
               social,
             },
           },
@@ -230,6 +234,18 @@ export function VisualIdentityForm({
             placeholder="https://yourbrand.com"
           />
         </Field>
+        <div className="sm:col-span-2">
+          <Field
+            label="Mailing address"
+            hint="Marketing-email law (CAN-SPAM/GDPR) requires a physical address in the footer of every email."
+          >
+            <Input
+              value={postalAddress}
+              onChange={(e) => setPostalAddress(e.target.value)}
+              placeholder="123 Main St, Suite 200, Austin, TX 78701"
+            />
+          </Field>
+        </div>
       </div>
 
       {/* Social */}

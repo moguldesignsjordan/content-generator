@@ -72,7 +72,12 @@ export async function GET(
         // A retry after a prior error re-enters here too: joinRun finds no
         // active run for this draftId (regardless of DB status) and starts
         // a fresh one, overwriting the errored meta.generation as it goes.
-        joinRun(draftId, ctx, { campaignId: draftCtx.campaignId ?? undefined }, onEvent);
+        joinRun(
+          draftId,
+          ctx,
+          { campaignId: draftCtx.campaignId ?? undefined, jobType: draftCtx.jobType },
+          onEvent,
+        );
       } catch (err) {
         send("error", { message: err instanceof Error ? err.message : "Generation failed." });
         close();

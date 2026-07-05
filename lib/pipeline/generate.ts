@@ -1,6 +1,7 @@
 import "server-only";
 import {
   DRAFT_MODEL,
+  FAST_MODEL,
   cacheableSystem,
   getAnthropic,
   logUsage,
@@ -30,14 +31,19 @@ import {
 } from "@/lib/email/templates";
 import type {
   CampaignBrief,
+  ContentImage,
   EmailCopy,
   EmailDraftContent,
   EmailTemplateId,
   DraftMeta,
   DraftSeoData,
+  DraftUsage,
   TopicContext,
 } from "@/lib/db/types";
 import { stripEmDashes } from "@/lib/text";
+import { contrastIssues, findBannedTerms } from "@/lib/email/quality";
+import { spliceHeroImage } from "./generate-image";
+import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 
 /** Phase-by-phase events emitted while a draft shell is being filled in. */
@@ -70,7 +76,7 @@ export async function generateEmailForTopicStreamed(
     const brief = await loadCampaignBrief(opts.campaignId);
     const tokens = resolveBrandTokens(ctx.brand);
     const { system, user } = buildEmailMessages(ctx, tokens, { brief });
-    const parsed = await generateEmailCopy(system, user);
+    const { parsed, usageDeltas } = await generateEmailCopy(system, user);
 
     const { content, copy, templateId, designSource } = renderEmailForContext(
       ctx,
@@ -81,13 +87,19 @@ export async function generateEmailForTopicStreamed(
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
+    const qa = await runQaPass(ctx, copy, content.html);
+    usageDeltas.push(...qa.usageDeltas);
+    let usage: DraftUsage | undefined;
+    for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
+
     const meta: DraftMeta = {
-      ...qaMeta,
+      ...qa.meta,
       email_template_id: templateId,
       email_copy: copy,
       email_design_source: designSource,
+      usage,
     };
+    const seoData = qa.seoData;
 
     await populateDraft(draftId, { content, meta, seoData });
 
@@ -125,7 +137,7 @@ async function loadCampaignBrief(
 async function generateEmailCopy(
   system: string,
   user: string,
-): Promise<EmailDraftOutput> {
+): Promise<{ parsed: EmailDraftOutput; usageDeltas: UsageDelta[] }> {
   // The system prompt (brand guidelines/voice/positioning + the email design
   // system) only varies by template, of which there are three, so it's
   // identical across every topic generated with the same layout. Caching it
@@ -170,15 +182,18 @@ async function generateEmailCopy(
     return parsed.data;
   };
 
+  const usageDeltas: UsageDelta[] = [];
   try {
     const resp = await call();
     logUsage("email-copy", resp.usage);
-    return extract(resp);
+    usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
+    return { parsed: extract(resp), usageDeltas };
   } catch (err) {
     console.error("[generate] email copy failed, retrying once:", err);
     const resp = await call();
     logUsage("email-copy-retry", resp.usage);
-    return extract(resp);
+    usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
+    return { parsed: extract(resp), usageDeltas };
   }
 }
 
@@ -193,6 +208,7 @@ function renderEmailForContext(
   ctx: TopicContext,
   parsed: EmailDraftOutput,
   templateOverride?: EmailTemplateId,
+  heroImage?: ContentImage,
 ): {
   content: EmailDraftContent;
   copy: EmailCopy;
@@ -201,6 +217,10 @@ function renderEmailForContext(
 } {
   const copy: EmailCopy = {
     subject: stripEmDashes(parsed.subject.trim()),
+    subject_variants: (parsed.subject_variants ?? [])
+      .map((v) => stripEmDashes(v.trim()))
+      .filter((v) => v.length > 0)
+      .slice(0, 3),
     preheader: stripEmDashes(parsed.preheader.trim()),
     headline: stripEmDashes(parsed.headline.trim()),
     body_sections: parsed.body_sections.map((s) => ({
@@ -229,6 +249,13 @@ function renderEmailForContext(
     html = renderEmailTemplate(templateId, { copy, tokens });
   }
   html = ensureUnsubscribeTag(stripEmDashes(html));
+
+  // A regeneration keeps the prior hero image: the prompt asks the model to
+  // place it, but the code path guarantees it regardless of compliance (and
+  // covers the template fallback, which knows nothing about images).
+  if (heroImage && !html.includes('data-region="image"')) {
+    html = spliceHeroImage(html, heroImage) ?? html;
+  }
 
   return {
     content: { subject: copy.subject, preheader: copy.preheader, html },
@@ -259,54 +286,77 @@ export function validateModelEmailHtml(html: string | undefined): string | null 
 export { MAX_DRAFT_VERSIONS } from "./constants";
 
 /**
- * Runs a QA pass on a generated email draft. Non-fatal, returns empty
- * objects if the call fails so a QA error never blocks the draft from saving.
+ * Runs a QA pass on a generated email draft. The model half audits the
+ * STRUCTURED copy on FAST_MODEL (mechanical classification, a textbook Haiku
+ * task at a fraction of the old full-HTML-on-Sonnet cost); the code half then
+ * enforces what code can enforce for free: banned-term detection over the
+ * actual rendered HTML (mirroring how stripEmDashes guarantees the em-dash
+ * rule) and a WCAG-AA contrast spot check on the model-designed markup.
+ * Non-fatal: returns empty objects if the model call fails, so a QA error
+ * never blocks the draft from saving, but the code-level checks still run.
  */
 async function runQaPass(
   ctx: TopicContext,
-  content: EmailDraftContent,
-): Promise<{ meta: DraftMeta; seoData: DraftSeoData }> {
+  copy: EmailCopy,
+  html: string,
+): Promise<{ meta: DraftMeta; seoData: DraftSeoData; usageDeltas: UsageDelta[] }> {
+  const usageDeltas: UsageDelta[] = [];
+  let meta: DraftMeta = {};
+  let seoData: DraftSeoData = {};
+
   try {
-    const { system, user } = buildQaMessages(ctx, content);
+    const { system, user } = buildQaMessages(ctx, copy);
     const response = await getAnthropic().messages.create({
-      model: DRAFT_MODEL,
+      model: FAST_MODEL,
       max_tokens: 1024,
-      system,
+      system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],
       tools: [QA_TOOL],
       tool_choice: { type: "tool", name: "qa_review" },
     });
     logUsage("email-qa", response.usage);
+    usageDeltas.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "qa_review",
     );
-    if (!tu || tu.type !== "tool_use") return { meta: {}, seoData: {} };
-    const parsed = QaSchema.safeParse(tu.input);
-    if (!parsed.success) {
-      console.error("[generate] QA tool input invalid:", parsed.error.issues);
-      return { meta: {}, seoData: {} };
+    if (tu && tu.type === "tool_use") {
+      const parsed = QaSchema.safeParse(tu.input);
+      if (parsed.success) {
+        const qa = parsed.data;
+        meta = { meta_title: qa.meta_title, meta_description: qa.meta_description };
+        seoData = {
+          keyword_used: qa.keyword_used,
+          keyword_placement: qa.keyword_placement,
+          banned_terms_found: qa.banned_terms_found,
+          readability_note: qa.readability_note,
+          qa_pass: qa.qa_pass,
+          issues: qa.issues,
+        };
+      } else {
+        console.error("[generate] QA tool input invalid:", parsed.error.issues);
+      }
     }
-    const qa = parsed.data;
-
-    return {
-      meta: {
-        meta_title: qa.meta_title,
-        meta_description: qa.meta_description,
-      },
-      seoData: {
-        keyword_used: qa.keyword_used,
-        keyword_placement: qa.keyword_placement,
-        banned_terms_found: qa.banned_terms_found,
-        readability_note: qa.readability_note,
-        qa_pass: qa.qa_pass,
-        issues: qa.issues,
-      },
-    };
   } catch (err) {
     console.error("QA pass failed (non-fatal):", err);
-    return { meta: {}, seoData: {} };
   }
+
+  // Code-level checks: authoritative regardless of what the model reported.
+  const bannedTerms = ctx.brand.voice_profile?.banned_terms ?? [];
+  const codeFound = findBannedTerms(html, bannedTerms);
+  if (codeFound.length) {
+    const merged = Array.from(
+      new Set([...(seoData.banned_terms_found ?? []), ...codeFound]),
+    );
+    seoData = { ...seoData, banned_terms_found: merged, qa_pass: false };
+  }
+
+  const contrast = contrastIssues(html);
+  if (contrast.length) {
+    seoData = { ...seoData, issues: [...(seoData.issues ?? []), ...contrast] };
+  }
+
+  return { meta, seoData, usageDeltas };
 }
 
 /**
@@ -333,9 +383,11 @@ export async function regenerateEmailDraft(
 
   const brief = await loadCampaignBrief(draftCtx.campaignId);
   const tokens = resolveBrandTokens(ctx.brand);
+  const heroImage = draftCtx.meta.hero_image;
   const { system, user } = buildEmailMessages(ctx, tokens, {
     brief,
     templateOverride: opts.templateOverride,
+    heroImage,
     rejection: {
       feedback,
       previousSubject: draftCtx.content.subject,
@@ -343,21 +395,29 @@ export async function regenerateEmailDraft(
     },
   });
 
-  const parsed = await generateEmailCopy(system, user);
+  const { parsed, usageDeltas } = await generateEmailCopy(system, user);
 
   const { content, copy, templateId, designSource } = renderEmailForContext(
     ctx,
     parsed,
     opts.templateOverride,
+    heroImage,
   );
 
-  const { meta: qaMeta, seoData } = await runQaPass(ctx, content);
+  const qa = await runQaPass(ctx, copy, content.html);
+  usageDeltas.push(...qa.usageDeltas);
+  let usage: DraftUsage | undefined;
+  for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
+
   const meta: DraftMeta = {
-    ...qaMeta,
+    ...qa.meta,
     email_template_id: templateId,
     email_copy: copy,
     email_design_source: designSource,
+    ...(heroImage ? { hero_image: heroImage } : {}),
+    usage,
   };
+  const seoData = qa.seoData;
 
   const newDraftId = await persistRegeneratedDraft({
     jobId: draftCtx.jobId,

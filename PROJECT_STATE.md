@@ -3,7 +3,9 @@
 Living save/restore doc. Read this first to pick up context; update it
 whenever progress, blockers, or decisions change.
 
-Last updated: 2026-07-05 (click-to-edit wording + color, CTA link, download .html).
+Last updated: 2026-07-05 (AI hero images, blog path to Sanity, publishing
+provider abstraction, prompt caching split, quality gates — the
+distributed-booping-possum plan, implemented end to end).
 
 ## Locked decisions
 
@@ -496,32 +498,123 @@ Last updated: 2026-07-05 (click-to-edit wording + color, CTA link, download .htm
     above. Click through all three Sheet sections in the browser before
     calling this fully done.
 
+## 2026-07-05 session — images, blog, publishing abstraction, prompt hardening
+
+Implemented the plan `~/.claude/plans/distributed-booping-possum.md` end to
+end (this section absorbs and replaces the deleted IMPLEMENTATION-HANDOFF.md).
+All uncommitted on `feat/dashboard-create-agent` on top of `bc842a0`.
+`npm run typecheck`, `npm run build`, and `npm test` all green.
+
+**Feature A — AI hero images (Gemini):**
+- `lib/clients/gemini-image.ts` (Interactions API, default model
+  `gemini-3.1-flash-image`, `GEMINI_IMAGE_MODEL` overridable),
+  `prompts/generate-image.ts` (3 deterministic style scaffolds seeded with the
+  brand palette; Haiku crafts only the scene), `lib/images/optimize.ts`
+  (sharp → ≤1200px JPEG under ~150KB), `lib/pipeline/generate-image.ts`
+  (generate → optimize → Supabase `content-images` bucket, self-creating),
+  `app/api/drafts/[id]/image/route.ts` (POST/DELETE through `commitHtmlEdit`,
+  shared undo stack). Click-to-edit "image" region + floating "+ Add image"
+  pill in `email-preview.tsx`. Images are opt-in per draft, never automatic;
+  persistence across regenerate/redesign is guaranteed in CODE via
+  `spliceHeroImage`, prompts are advisory. **Blocked on `GEMINI_API_KEY` in
+  `.env.local` (Jordan to add) — everything degrades gracefully until then.**
+
+**Feature B — Blog path (Sanity):**
+- `lib/clients/sanity.ts` (lazy singleton, `isSanityConfigured`, env
+  `SANITY_PROJECT_ID/DATASET/WRITE_TOKEN`, optional `SANITY_POST_TYPE`).
+- `prompts/generate-blog.ts` — forced `save_blog_draft` tool, SEO rules
+  (keyword in title + first 100 words + a heading, slug/meta constraints,
+  weaves `topic.internal_link_targets`), reuses the shared brand blocks.
+- `lib/blog/to-portable-text.ts` — hand-rolled markdown → Portable Text
+  (no DOM dep), **unit-tested** (`npm test`, vitest, 10 tests);
+  `lib/blog/render-preview.ts` renders the SAME Portable Text to the review
+  preview via `@portabletext/to-html`, so what you review is what ships.
+- `lib/pipeline/generate-blog.ts` mirrors the email SSE shell→writing→
+  checking→done flow; blog drafts reuse the `drafts` table with content
+  `{subject: title, preheader: meta_description, html: preview}` and the
+  structured post in `meta.blog_copy`. Code-level QA (banned terms, keyword
+  placement, meta lengths), no model QA call.
+- Wiring: `createDraftShell` takes `type`, `/api/generate` takes
+  `channel: "email"|"blog"`, `joinRun` picks the runner by job type, the
+  draft review page branches to `blog-review-actions.tsx` (approve gates +
+  publish-to-Sanity card), the create agent's brief card has an
+  Email/Blog-post toggle, the Emails list labels blog drafts.
+- **Blog reject/regenerate is deliberately not built yet** (email-only);
+  approve/archive/publish are.
+
+**Part 6 — Publishing provider abstraction:**
+- `lib/publishing/provider.ts` (PublishProvider interface) +
+  `registry.ts` (adding a platform = one adapter file + one registry line) +
+  adapters `providers/sanity.ts` (creates a Sanity DRAFT doc,
+  `drafts.content-engine-<jobId>` via createIfNotExists → doubly idempotent)
+  and `providers/mailerlite.ts` (verified against live MailerLite docs:
+  `POST connect.mailerlite.com/api/campaigns`, Bearer auth; creates the
+  campaign WITHOUT scheduling, the send stays a human act in MailerLite).
+- `lib/pipeline/publish.ts` — provider-agnostic `publishDraft`: approved-only
+  gate, publications-row check BEFORE any external call, races tolerated in
+  `recordPublication` (23505 → read back), then `markJobPublished`.
+- `app/api/drafts/[id]/publish/route.ts`; Connections group in Settings
+  driven by the registry (env-status v1).
+- **Migration 004** (`db/migrations/004_publishing_providers.sql`, mirrored
+  in `schema.sql`): `publications.target` check relaxed to plain text +
+  `brand_integrations` table. **Not yet applied to live Supabase.**
+- This supersedes the "publishing deferred" lock above: the LAYER is built;
+  actually sending still requires keys + explicit clicks, so the
+  approval-gate contract is intact.
+
+**Tier 1 / Part 4 / Part 5 product hardening:**
+- Review screen: subject-variant picker chips, "this draft cost ~$X" line
+  (from `meta.usage`, rolled up via `lib/pipeline/cost.ts`), QA-issues nudge
+  on approve, and a server-enforced banned-terms approve gate
+  (`/api/drafts/[id]/approve` re-runs `findBannedTerms`, 409 + terms unless
+  `force: true`; ConfirmDialog override in the client). Detection only,
+  never auto-delete.
+- QA pass runs on FAST_MODEL over structured copy (not HTML); code-level
+  banned-term + WCAG-AA contrast checks in `lib/email/quality.ts` run even
+  if the model call fails.
+- Brand-readiness checklist (`lib/brand-readiness.ts` +
+  `BrandReadinessCard` on Home): scores 10 brand-brain inputs, hides when
+  complete.
+- Prompt cache split: `buildCampaignSystem`/`buildCreateAgentSystem` are now
+  byte-stable across turns (no brief inside); the volatile BRIEF SO FAR rides
+  at the top of the LATEST user message (`buildBriefStateBlock`) and is never
+  persisted to history. Shared `buildProductLines`/`buildTopicLines`/
+  `buildFunnelBlock` live in `prompts/brand-voice.ts` (campaign, create-agent,
+  suggest-topics all use them).
+- `postal_address` (CAN-SPAM/GDPR): settings input + code-template footer +
+  model design brief.
+- `subject_variants` + COPY PRINCIPLES block in `prompts/generate-email.ts`;
+  preheader "extends, never restates"; `<html lang="en">` required in the
+  design brief.
+
 ## What's not built yet
 
-- **Slice 3 — Publish email to MailerLite:** no MailerLite client exists
-  under `lib/clients/`, no `lib/pipeline/publish.ts`, `MAILERLITE_API_KEY`
-  unset. This is the next slice per the original roadmap.
-- **Slice 4 — Keyword research (DataForSEO):** not started.
-- **Slice 5 — Blog path (Sanity, Portable Text):** not started; no Sanity
-  client exists yet.
-- **Slice 6 — SEO/QA pass:** `prompts/qa-email.ts` exists but there's no
-  second-pass QA route/pipeline wired to it yet — verify before assuming
-  it's live.
+- **Live verification of this session's work** — nothing above has run
+  against real keys yet: needs `GEMINI_API_KEY` (images), `SANITY_*` (blog
+  publish), `MAILERLITE_API_KEY` + verified sender (email publish), and
+  **migration 004 applied in the Supabase SQL editor**. Then: generate a
+  blog draft end-to-end in the browser, publish twice and confirm the second
+  call is a no-op, and generate each image style on a draft.
+- **Blog reject/regenerate + click-to-edit for blog drafts** (email has both).
+- **Actually sending email campaigns** (adapter creates the MailerLite
+  campaign as a draft; the schedule/send call is a future surface).
+- **Slice 4 — Keyword research (DataForSEO):** not started; still the
+  natural upstream unlock for topic quality.
 - **Slice 7 — Distribution/repurposing checklist:** not started.
-- Logo: `Mogul Assets/mdalogo.jpeg` was to be copied into `public/` and
-  optionally uploaded to a Supabase `logos` bucket so generated emails use
-  the real mark (`visual_identity.logo_url`) — bucket creation was pending
-  as of the redesign plan; verify current state before assuming it's done.
+- **Analytics loop** (`performance` table) — after publishing goes live.
+- **Multi-tenancy + RLS (Tier 3)** — deliberately out of scope, the one true
+  blocker to selling it as SaaS.
+- Topic remap: seeded topics still map to placeholder product slugs
+  (see memory `project-pending-product-save`).
 
 ## Next step
 
-Slice 3: build the MailerLite client (`lib/clients/mailerlite.ts`) and
-publish pipeline (`lib/pipeline/publish.ts`) that takes an approved draft
-and creates a MailerLite draft campaign, storing the external id on
-`publications` (the `unique(job_id, target)` constraint backs idempotency —
-a retry must never double-post). Needs `MAILERLITE_API_KEY` in `.env.local`
-and its request/response shape verified against live MailerLite docs before
-integrating (per `CLAUDE.md` — don't assume API shapes from memory).
+1. Jordan adds keys to `.env.local` (`GEMINI_API_KEY`; later `SANITY_*` and
+   `MAILERLITE_API_KEY`) and applies migration 004 in the Supabase SQL editor.
+2. Live-verify per the plan's Verification section: image styles on a real
+   draft; blog generate → approve → publish → re-publish no-op; campaign
+   chat turn-2 `CACHE HIT` in the `[usage:*]` logs.
+3. Commit this branch (it's all uncommitted work on top of `bc842a0`).
 
 ## How to verify this doc against reality
 

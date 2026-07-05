@@ -1,6 +1,7 @@
 import "server-only";
 import { generateEmailForTopicStreamed, type GenerationEvent } from "./generate";
-import type { TopicContext } from "@/lib/db/types";
+import { generateBlogForTopicStreamed } from "./generate-blog";
+import type { ContentJobType, TopicContext } from "@/lib/db/types";
 
 type Listener = (event: GenerationEvent) => void;
 
@@ -28,7 +29,7 @@ const runs = new Map<string, Run>();
 export function joinRun(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string },
+  opts: { campaignId?: string; jobType?: ContentJobType },
   listener: Listener,
 ): () => void {
   let run = runs.get(draftId);
@@ -42,7 +43,11 @@ export function joinRun(
       for (const l of listeners) l(event);
     };
 
-    state.promise = generateEmailForTopicStreamed(draftId, ctx, opts, emit)
+    const runner =
+      opts.jobType === "blog"
+        ? generateBlogForTopicStreamed
+        : generateEmailForTopicStreamed;
+    state.promise = runner(draftId, ctx, opts, emit)
       .catch(() => {
         // Errors are already surfaced to listeners via the "error" event;
         // swallow here so the run's own promise doesn't produce an

@@ -14,6 +14,7 @@ export interface DraftRow {
   version: number;
   archived: boolean;
   created_at: string;
+  job_type: "email" | "blog";
 }
 
 export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
@@ -66,9 +67,13 @@ export function EmailsList({ drafts }: { drafts: DraftRow[] }) {
               key={d.id}
               href={`/drafts/${d.id}`}
               title={d.subject || "Untitled draft"}
-              subtitle={
-                d.topic_title ? `${d.topic_title} · v${d.version}` : `v${d.version}`
-              }
+              subtitle={[
+                d.job_type === "blog" ? "Blog post" : null,
+                d.topic_title,
+                `v${d.version}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
               trailing={<DraftStateBadge state={d.state} />}
             />
           ))}

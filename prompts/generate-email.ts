@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   CampaignBrief,
+  ContentImage,
   EmailTemplateId,
   TopicContext,
   Topic,
@@ -21,9 +22,17 @@ import { buildEmailDesignBrief } from "./email-design";
 // through a code template if the model's HTML fails validation.
 export const EmailDraftSchema = z.object({
   subject: z.string().describe("Email subject line, under 60 characters."),
+  subject_variants: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "2 alternative subject lines taking a different angle, so the reviewer can pick. Under 60 characters each.",
+    ),
   preheader: z
     .string()
-    .describe("Preview text shown after the subject, under 150 characters."),
+    .describe(
+      "Preview text shown after the subject, under 150 characters. Extends the subject with new information, never restates it.",
+    ),
   headline: z
     .string()
     .describe("The email's H1: one sharp, benefit-driven line."),
@@ -75,7 +84,17 @@ export const EMAIL_TOOL: Anthropic.Tool = {
     type: "object",
     properties: {
       subject: { type: "string", description: "Subject line, under 60 characters." },
-      preheader: { type: "string", description: "Preview text, under 150 characters." },
+      subject_variants: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "2 alternative subject lines with a different angle (curiosity vs specificity), under 60 characters each.",
+      },
+      preheader: {
+        type: "string",
+        description:
+          "Preview text, under 150 characters. Extends the subject with NEW information; never restates it.",
+      },
       headline: { type: "string", description: "The email's H1: one sharp line." },
       body_sections: {
         type: "array",
@@ -170,6 +189,8 @@ export function buildEmailMessages(
     rejection?: { feedback: string; previousSubject: string; previousPreheader: string };
     /** Overrides the topic's auto-resolved layout, e.g. from reject & regenerate. */
     templateOverride?: EmailTemplateId;
+    /** Existing hero image to keep in place across a regeneration. */
+    heroImage?: ContentImage;
   } = {},
 ): {
   system: string;
@@ -182,7 +203,9 @@ export function buildEmailMessages(
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const { ctaText } = resolveCta(ctx);
   const templateId = opts.templateOverride ?? resolveEmailTemplateId(topic);
-  const designBrief = buildEmailDesignBrief(tokens, templateId);
+  const designBrief = buildEmailDesignBrief(tokens, templateId, {
+    heroImage: opts.heroImage,
+  });
 
   const system = [
     `You are the email copywriter AND designer for ${brand.name}. You produce one`,
@@ -195,13 +218,32 @@ export function buildEmailMessages(
     "",
     designBrief,
     "",
+    "COPY PRINCIPLES:",
+    "- Lead with the reader, not the brand: open on their problem or outcome; the",
+    "  offer earns its place after. Second person, active voice; cut hedging",
+    "  words like 'just', 'we think', 'maybe'.",
+    "- One email, one job: a single core idea and a single desired action. Nothing",
+    "  competes with the CTA.",
+    "- Specificity beats adjectives: concrete numbers, timeframes, and named",
+    "  outcomes over 'powerful', 'seamless', 'amazing'.",
+    "- Subject lines: front-load the hook in the first 30 to 40 characters (mobile",
+    "  truncates), curiosity or specificity over hype. No ALL CAPS, no 'FREE!!!',",
+    "  no stacked punctuation or emoji, no misleading claims (spam triggers).",
+    "  Include the keyword in the subject or opening paragraph where it fits naturally.",
+    "- The preheader complements the subject with new information; restating the",
+    "  subject wastes the inbox preview line.",
+    "- CTA copy is action plus value ('Get my content plan'), never 'Submit' or",
+    "  'Click here' (also required for screen-reader users). Descriptive text on",
+    "  every link. No link shorteners; keep total link count modest.",
+    "",
     "RULES:",
     "- Write in the brand voice above. Sound human, never like generic AI marketing copy.",
     "- Use the target keyword and the audience's own vocabulary naturally; never keyword-stuff.",
     "- Match the email's call-to-action to the funnel stage (provided below).",
     "- Fill the plain-text copy fields (no markup in them) AND the html field with the",
     "  complete designed document. The copy fields must match the copy inside the HTML.",
-    "- Subject under 60 characters; preheader under 150 characters.",
+    "- Subject under 60 characters (plus 2 subject_variants with different angles);",
+    "  preheader under 150 characters.",
     "- NEVER use em dashes or double-hyphens as punctuation. Use a comma, colon, or period.",
     "- Call the save_email_draft tool with every field filled. Do not write prose, labels,",
     "  or preambles like Subject:. Fill the tool fields directly.",

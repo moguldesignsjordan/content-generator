@@ -1,5 +1,6 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getBrandWithIcps, listProducts } from "@/lib/db/queries";
+import { listProviders } from "@/lib/publishing/registry";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { SettingsClient } from "./_components/settings-client";
@@ -63,6 +64,13 @@ export default async function SettingsPage() {
         strategy={strategy}
         primaryIcp={primaryIcp}
         products={products}
+        connections={listProviders().map((p) => ({
+          id: p.id,
+          label: p.label,
+          kind: p.kind,
+          configured: p.isConfigured(),
+          configHint: p.configHint,
+        }))}
       />
     </>
   );

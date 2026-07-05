@@ -1,5 +1,10 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { EmailCopy, EmailTemplateId, TopicContext } from "@/lib/db/types";
+import type {
+  ContentImage,
+  EmailCopy,
+  EmailTemplateId,
+  TopicContext,
+} from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import { buildEmailDesignBrief } from "./email-design";
 import { buildOfferBlock } from "./generate-email";
@@ -51,9 +56,11 @@ export function buildRedesignMessages(args: {
    * below for whatever it specifies; the tokens remain the default for
    * anything it doesn't mention. */
   direction?: string;
+  /** The draft's existing hero image; the redesign keeps it in place. */
+  heroImage?: ContentImage;
 }): { system: string; user: string } {
-  const { copy, tokens, templateId, ctx, direction } = args;
-  const designBrief = buildEmailDesignBrief(tokens, templateId);
+  const { copy, tokens, templateId, ctx, direction, heroImage } = args;
+  const designBrief = buildEmailDesignBrief(tokens, templateId, { heroImage });
   const offerBlock = buildOfferBlock(ctx);
 
   const system = [

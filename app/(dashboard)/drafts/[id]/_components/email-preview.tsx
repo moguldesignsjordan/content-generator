@@ -29,7 +29,14 @@ const REGION_LABELS: Record<string, string> = {
   body: "Body text",
   cta: "Call to action",
   footer: "Footer",
+  image: "Image",
 };
+
+const IMAGE_STYLES = [
+  { id: "illustration", label: "Illustration" },
+  { id: "photo", label: "Photo" },
+  { id: "texture", label: "Brand texture" },
+] as const;
 
 const SUGGESTION_CHIPS = [
   "Make it bolder",
@@ -74,9 +81,13 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
   const [customInput, setCustomInput] = useState("");
   const [textValue, setTextValue] = useState("");
   const [colorValue, setColorValue] = useState("#000000");
+  const [imageStyle, setImageStyle] = useState<string>("illustration");
+  const [imageSubject, setImageSubject] = useState("");
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  const hasImage = html.includes('data-region="image"');
 
   useEffect(() => {
     setLoaded(false);
@@ -143,6 +154,21 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
     setTextValue(h.text);
     setColorValue(h.color);
     setCustomInput("");
+    setImageSubject("");
+    setEditError(null);
+  }
+
+  /** Opens the sheet in image mode when the email has no image yet. */
+  function openAddImage() {
+    setActive({
+      region: "image",
+      label: "Image",
+      snippet: "",
+      text: "",
+      color: "#000000",
+      rect: { top: 0, left: 0, width: 0, height: 0 },
+    });
+    setImageSubject("");
     setEditError(null);
   }
 
@@ -255,6 +281,39 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
     }
   }
 
+  /** Generates (or regenerates) the hero image, or removes it. */
+  async function applyImage(action: "generate" | "remove") {
+    if (applying) return;
+    setApplying(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/image`, {
+        method: action === "remove" ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        ...(action === "generate"
+          ? {
+              body: JSON.stringify({
+                style: imageStyle,
+                subject: imageSubject.trim() || undefined,
+              }),
+            }
+          : {}),
+      });
+      const data = (await res.json()) as { html?: string; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't update the image.");
+      }
+      onHtmlChange(data.html);
+      onEdited?.();
+      closeSheet();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't update the image.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const isImageRegion = active?.region === "image";
   const textUnchanged = !active || textValue.trim() === active.text;
   const colorUnchanged = !active || colorValue.toLowerCase() === active.color.toLowerCase();
 
@@ -276,6 +335,15 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
         sandbox="allow-same-origin"
         className="h-[600px] w-full bg-white"
       />
+      {loaded && !hasImage && (
+        <button
+          type="button"
+          onClick={openAddImage}
+          className="absolute right-3 top-3 z-20 rounded-full border border-border bg-surface-2/90 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-surface-3"
+        >
+          + Add image
+        </button>
+      )}
       {hotspots.map((h, i) => (
         <button
           key={`${h.region}-${i}`}
@@ -300,9 +368,74 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
         open={!!active}
         onClose={closeSheet}
         title={active?.label}
-        description="Edit the wording, color, or look of just this part."
+        description={
+          isImageRegion
+            ? "Generate an on-brand image for this email."
+            : "Edit the wording, color, or look of just this part."
+        }
       >
+        {/* IMAGE (its own mode; wording/color/style don't apply) */}
+        {isImageRegion && (
+          <div>
+            <p className="text-xs font-medium text-muted">Style</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {IMAGE_STYLES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={applying}
+                  onClick={() => setImageStyle(s.id)}
+                  className={`rounded-full border px-3 py-1.5 text-[12.5px] transition-colors disabled:opacity-50 ${
+                    imageStyle === s.id
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3">
+              <p className="text-xs font-medium text-muted">
+                What should it show? (optional)
+              </p>
+              <Input
+                value={imageSubject}
+                onChange={(e) => setImageSubject(e.target.value)}
+                placeholder="e.g. a desk with a laptop and coffee"
+                disabled={applying}
+                className="mt-1.5"
+              />
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="gradient"
+                size="sm"
+                loading={applying}
+                disabled={applying}
+                onClick={() => applyImage("generate")}
+              >
+                {hasImage ? "Regenerate image" : "Generate image"}
+              </Button>
+              {hasImage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={applying}
+                  onClick={() => applyImage("remove")}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-muted">
+              Takes about 20 seconds. Only runs when you ask, never automatically.
+            </p>
+          </div>
+        )}
+
         {/* WORDING */}
+        {!isImageRegion && (
         <div>
           <p className="text-xs font-medium text-muted">Wording</p>
           <Textarea
@@ -334,7 +467,10 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
             </Button>
           </div>
         </div>
+        )}
 
+        {!isImageRegion && (
+        <>
         <div className="my-4 border-t border-border" />
 
         {/* COLOR */}
@@ -407,6 +543,8 @@ export function EmailPreview({ draftId, html, onHtmlChange, onEdited }: EmailPre
             </Button>
           </div>
         </div>
+        </>
+        )}
 
         {editError && <p className="mt-3 text-xs text-danger">{editError}</p>}
       </Sheet>

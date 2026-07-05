@@ -74,6 +74,9 @@ export function CreateAgent({
   const [options, setOptions] = useState<Option[] | null>(null);
   const [ready, setReady] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // Which pipeline the brief hands off to. Same brief, different renderer:
+  // email → the email draft pipeline, blog → the Sanity-bound blog pipeline.
+  const [channel, setChannel] = useState<"email" | "blog">("email");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -139,7 +142,7 @@ export function CreateAgent({
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicId, campaignId }),
+        body: JSON.stringify({ topicId, campaignId, channel }),
       });
       const data = (await res.json()) as { draftId?: string; error?: string };
       if (!res.ok || !data.draftId) {
@@ -176,7 +179,8 @@ export function CreateAgent({
               What are we creating today?
             </p>
             <p className="mt-1 text-[13px] text-muted">
-              Describe the email you want and I&rsquo;ll draft a brief you can confirm.
+              Describe the email or blog post you want and I&rsquo;ll draft a
+              brief you can confirm.
             </p>
           </div>
         ) : (
@@ -191,6 +195,8 @@ export function CreateAgent({
                 disabled={loading || generating}
                 ready={ready && Boolean(topicId)}
                 generating={generating}
+                channel={channel}
+                onChannelChange={setChannel}
                 onEditRow={(label, value) =>
                   send(`Change the ${label.toLowerCase()}: ${value}`)
                 }
@@ -311,6 +317,8 @@ function BriefCardView({
   disabled,
   ready,
   generating,
+  channel,
+  onChannelChange,
   onEditRow,
   onGenerate,
 }: {
@@ -318,6 +326,8 @@ function BriefCardView({
   disabled: boolean;
   ready: boolean;
   generating: boolean;
+  channel: "email" | "blog";
+  onChannelChange: (c: "email" | "blog") => void;
   onEditRow: (label: string, value: string) => void;
   onGenerate: () => void;
 }) {
@@ -365,10 +375,25 @@ function BriefCardView({
       )}
 
       {ready && (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="px-1 text-[12px] text-muted">
-            Tap any row to edit, or generate now.
-          </span>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5">
+            {(["email", "blog"] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => onChannelChange(c)}
+                disabled={disabled}
+                className={cn(
+                  "rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
+                  channel === c
+                    ? "bg-accent text-white"
+                    : "text-muted hover:text-foreground",
+                )}
+              >
+                {c === "email" ? "Email" : "Blog post"}
+              </button>
+            ))}
+          </div>
           <Button
             variant="gradient"
             size="sm"
@@ -377,7 +402,11 @@ function BriefCardView({
             disabled={disabled}
           >
             <SparkleIcon size={14} />
-            {generating ? "Generating…" : "Generate"}
+            {generating
+              ? "Generating…"
+              : channel === "blog"
+                ? "Generate blog post"
+                : "Generate email"}
           </Button>
         </div>
       )}

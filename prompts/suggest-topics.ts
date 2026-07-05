@@ -2,8 +2,10 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
+  buildFunnelBlock,
   buildGuidelinesBlock,
   buildPositioningBlock,
+  buildProductLines,
 } from "./brand-voice";
 
 // Starter-topic suggestions: turns the brand brain into 5-8 concrete email
@@ -96,27 +98,14 @@ export function buildSuggestTopicsMessages(args: {
     .filter(Boolean)
     .join("\n");
 
-  const productLines = products.length
-    ? products.map(
-        (p) =>
-          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}`,
-      )
-    : ["  (none on file)"];
-
-  const funnel = strategy?.funnel_definition
-    ? Object.entries(strategy.funnel_definition)
-        .map(([stage, def]) => `  ${stage} → ${def.cta_type}`)
-        .join("\n")
-    : "  (default)";
-
   const user = [
     "Propose email topic ideas for the brand.",
     "",
     "PRODUCTS (for maps_to_product, by slug):",
-    ...productLines,
+    ...buildProductLines(products),
     "",
     "FUNNEL → CTA MAPPING:",
-    funnel,
+    buildFunnelBlock(strategy),
     "",
     existingTitles.length
       ? [

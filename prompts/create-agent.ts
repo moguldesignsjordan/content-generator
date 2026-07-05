@@ -1,15 +1,12 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type {
-  Brand,
-  CampaignBrief,
-  Icp,
-  Product,
-  Strategy,
-} from "@/lib/db/types";
+import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
+  buildFunnelBlock,
   buildGuidelinesBlock,
   buildPositioningBlock,
+  buildProductLines,
+  buildTopicLines,
 } from "./brand-voice";
 // The create agent reuses the campaign interview's tool surface verbatim. The
 // only difference is curation: the streamlined create flow deliberately drops
@@ -53,7 +50,9 @@ export const CREATE_TOOLS: Anthropic.Tool[] = [
  * stored brand brain and turns the user's freeform "what are we creating
  * today?" into a tight email brief, then hands off. Brief-then-confirm: it
  * infers what it can and asks at most one clarifying question, never runs a
- * long serial interview.
+ * long serial interview. Deliberately EXCLUDES the mutating brief-so-far:
+ * that arrives at the top of the latest user message (buildBriefStateBlock)
+ * so this prefix stays byte-stable across turns and the prompt cache lands.
  */
 export function buildCreateAgentSystem(args: {
   brand: Brand;
@@ -61,46 +60,12 @@ export function buildCreateAgentSystem(args: {
   primaryIcp: Icp | null;
   products: Product[];
   topics: CampaignTopicOption[];
-  brief: CampaignBrief;
-  topicId: string | null;
 }): string {
-  const { brand, strategy, primaryIcp, products, topics, brief, topicId } = args;
+  const { brand, strategy, primaryIcp, products, topics } = args;
 
   const guidelinesBlock = buildGuidelinesBlock(brand);
   const voiceBlock = buildBrandVoiceBlock(brand, primaryIcp, "email");
   const positioningBlock = buildPositioningBlock(brand);
-
-  const productLines = products.length
-    ? products.map(
-        (p) =>
-          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}${p.description ? `, ${p.description}` : ""}`,
-      )
-    : ["  (none on file)"];
-
-  const topicLines = topics.length
-    ? topics
-        .slice(0, 40)
-        .map(
-          (t) =>
-            `  - id=${t.id} | ${t.title} | pillar: ${t.pillar}${t.funnel_stage ? ` | ${t.funnel_stage}` : ""} | ${t.status}`,
-        )
-    : ["  (none yet, you will need create_topic)"];
-
-  const briefLines = [
-    `  Goal: ${brief.goal ?? "(not set)"}`,
-    `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
-    `  Key message: ${brief.key_message ?? "(not set)"}`,
-    `  Angle: ${brief.angle ?? "(not set)"}`,
-    `  Offer: ${brief.offer_slug ?? "(not set)"}`,
-    `  Constraints: ${brief.constraints ?? "(none)"}`,
-    `  Topic attached: ${topicId ? "yes" : "no"}`,
-  ];
-
-  const funnel = strategy?.funnel_definition
-    ? Object.entries(strategy.funnel_definition)
-        .map(([stage, def]) => `  ${stage} → ${def.cta_type}`)
-        .join("\n")
-    : "  (default)";
 
   return [
     `You are the content creation agent for ${brand.name}. The user opened with`,
@@ -117,16 +82,17 @@ export function buildCreateAgentSystem(args: {
     positioningBlock,
     "",
     "FUNNEL STAGES AND THEIR CTAs (pick the funnel_stage that matches the goal):",
-    funnel,
+    buildFunnelBlock(strategy),
     "",
     "PRODUCTS (reference by slug in update_brief.offer_slug):",
-    ...productLines,
+    ...buildProductLines(products),
     "",
     "TOPICS ON THE CONTENT PLAN (select by exact id when one fits):",
-    ...topicLines,
+    ...buildTopicLines(topics),
     "",
-    "BRIEF SO FAR:",
-    ...briefLines,
+    "The latest user message starts with a BRIEF SO FAR block: the current saved",
+    "state of the brief, refreshed automatically every turn. Trust it over your",
+    "own memory of the conversation.",
     "",
     "HOW TO RUN THE FLOW:",
     "- On the FIRST turn, capture everything you can from what the user said:",

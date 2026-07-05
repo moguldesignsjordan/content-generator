@@ -1,5 +1,5 @@
 import type { BrandTokens } from "@/lib/email/templates/types";
-import type { EmailTemplateId } from "@/lib/db/types";
+import type { ContentImage, EmailTemplateId } from "@/lib/db/types";
 
 // The codified email design system: every generated email is designed under
 // this brief. It encodes the constraints email clients actually impose (email
@@ -32,17 +32,19 @@ const LAYOUT_SHAPES: Record<EmailTemplateId, string> = {
 export function buildEmailDesignBrief(
   tokens: BrandTokens,
   templateId: EmailTemplateId,
+  opts: { heroImage?: ContentImage } = {},
 ): string {
   const c = tokens.colors;
   const f = tokens.fonts;
   const footer = tokens.footer;
+  const hero = opts.heroImage;
 
   return [
     "EMAIL DESIGN SYSTEM (follow exactly; email HTML is not browser HTML):",
     "",
     "Structure:",
-    "- Produce ONE complete HTML document: <!DOCTYPE html>, <html>, <head> with",
-    "  <meta charset> + viewport meta + <title>, and <body>.",
+    "- Produce ONE complete HTML document: <!DOCTYPE html>, <html lang=\"en\">,",
+    "  <head> with <meta charset> + viewport meta + <title>, and <body>.",
     "- Immediately inside <body>, a hidden preheader div (display:none;max-height:0;",
     "  overflow:hidden) containing the preheader text, padded with repeated",
     "  '&#847;&zwnj;&nbsp;' so body copy never leaks into the inbox preview line.",
@@ -58,16 +60,33 @@ export function buildEmailDesignBrief(
     "  kicker (if this layout has one), \"headline\" on the <h1>, \"body\" on the wrapper",
     "  around the main body copy (wrap each distinct section's copy in its own",
     "  data-region=\"body\" element if there are several), \"cta\" on the button's",
-    "  wrapping element, and \"footer\" on the footer block. data-* attributes are",
-    "  invisible and never affect rendering, so add them freely.",
+    "  wrapping element, and \"footer\" on the footer block. When the IMAGE block",
+    "  below provides a hero image, its wrapper carries data-region=\"image\".",
+    "  data-* attributes are invisible and never affect rendering, so add them freely.",
     "",
     "CSS rules:",
     "- ALL styles inline on elements. No external stylesheets, no <link>, no JavaScript,",
     "  no web-font imports (brand font stacks below are already email-safe).",
     "- An optional single <style> block in <head> may ONLY hold @media tweaks for mobile;",
     "  the email must look correct even if that block is stripped.",
-    "- Images: only the brand logo if a URL is provided; always with alt text. Never",
-    "  reference other external images.",
+    hero
+      ? "- Images: ONLY the brand logo (if provided) and the hero image specified in" +
+        " the IMAGE block below. Never invent or reference any other image."
+      : "- Images: only the brand logo if a URL is provided; always with alt text. Never" +
+        " reference other external images.",
+    ...(hero
+      ? [
+          "",
+          "IMAGE (this email has a generated hero image; place it):",
+          `- Insert <div data-region="image" style="margin:0 0 28px;"><img src="${hero.url}"`,
+          `  alt="${hero.alt.replace(/"/g, "&quot;")}" width="552" style="display:block;width:100%;`,
+          `  max-width:100%;height:auto;border:0;border-radius:12px;" /></div>`,
+          "  directly ABOVE the headline (below the header/eyebrow), full column width.",
+          "- Keep it a real <img>, never a CSS background-image (Outlook drops those).",
+          "- Keep the copy prominent: one hero image plus real body text, never an",
+          "  image-heavy layout (spam filters penalize low text-to-image ratios).",
+        ]
+      : []),
     "",
     "Readability (non-negotiable):",
     "- Body copy 16px, line-height 1.6 to 1.7, never wider than the 600px column with",
@@ -87,6 +106,9 @@ export function buildEmailDesignBrief(
     "- Footer, centered, small muted text above a hairline top border: the sender name" +
       (footer.website ? ` linked to ${footer.website}` : "") +
       (footer.contact_email ? `, the contact email ${footer.contact_email}` : "") +
+      (footer.postal_address
+        ? `, the postal address "${footer.postal_address}" (marketing-email law requires it)`
+        : "") +
       ", and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
     "",
     "BRAND TOKENS (the default palette; use these exact values UNLESS the",

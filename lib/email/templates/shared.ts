@@ -122,6 +122,10 @@ export function renderFooter(tokens: BrandTokens): string {
       ? `<div style="margin:0 0 4px;"><a href="mailto:${escapeHtml(f.contact_email)}" style="color:${muted};text-decoration:none;">${escapeHtml(f.contact_email)}</a></div>`
       : "") +
     socialRow +
+    // CAN-SPAM/GDPR: marketing email must carry the sender's physical address.
+    (f.postal_address
+      ? `<div style="margin:10px 0 0;">${escapeHtml(f.postal_address)}</div>`
+      : "") +
     `<div style="margin:16px 0 0;">` +
     `<a href="{$unsubscribe}" style="color:${muted};text-decoration:underline;">Unsubscribe</a>` +
     `</div>` +

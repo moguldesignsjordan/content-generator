@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   Field,
   Input,
   Sheet,
@@ -104,10 +105,30 @@ export function ReviewActions({
   const hasQa = seoData.qa_pass !== undefined;
   const hasBannedTerms = (seoData.banned_terms_found?.length ?? 0) > 0;
 
-  async function handleApprove() {
+  const subjectVariants = initialMeta.email_copy?.subject_variants ?? [];
+  const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
+
+  // Approve runs through two soft gates: a nudge when the quality check found
+  // issues, and a server-enforced banned-terms block (409) that needs an
+  // explicit override to pass. Neither ever auto-edits the copy.
+  const [showQaNudge, setShowQaNudge] = useState(false);
+  const [bannedBlock, setBannedBlock] = useState<string[] | null>(null);
+
+  function handleApproveClick() {
+    if (seoData.qa_pass === false) {
+      setShowQaNudge(true);
+      return;
+    }
+    void handleApprove();
+  }
+
+  async function handleApprove(force = false) {
+    setShowQaNudge(false);
+    setBannedBlock(null);
     setLoading("approve");
     try {
       const body: Record<string, unknown> = {
+        force,
         meta: {
           ...initialMeta,
           meta_title: metaTitle,
@@ -125,6 +146,12 @@ export function ReviewActions({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (res.status === 409) {
+        const data = (await res.json().catch(() => ({}))) as { bannedTerms?: string[] };
+        setBannedBlock(data.bannedTerms ?? []);
+        setLoading(null);
+        return;
+      }
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Failed to approve.");
@@ -285,6 +312,27 @@ export function ReviewActions({
         <Field label="Subject">
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
         </Field>
+        {subjectVariants.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs text-muted">Other subject line ideas, click one to use it:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {subjectVariants.map((variant) => (
+                <button
+                  key={variant}
+                  type="button"
+                  onClick={() => setSubject(variant)}
+                  className={`rounded-full border px-3 py-1 text-left text-[12px] transition-colors ${
+                    variant === subject
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border text-muted hover:border-accent/50 hover:text-foreground"
+                  }`}
+                >
+                  {variant}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <Field label="Preheader">
           <Input
             value={preheader}
@@ -367,7 +415,7 @@ export function ReviewActions({
           size="lg"
           loading={loading === "approve"}
           disabled={busy || rejectedThisDraft}
-          onClick={handleApprove}
+          onClick={handleApproveClick}
         >
           {loading === "approve"
             ? "Approving…"
@@ -397,7 +445,44 @@ export function ReviewActions({
             Hidden from the Emails list.
           </span>
         )}
+        {draftCostUsd > 0 && (
+          <span className="ml-auto text-[12px] text-muted">
+            This draft cost about ${draftCostUsd < 0.01 ? "0.01" : draftCostUsd.toFixed(2)} to generate.
+          </span>
+        )}
       </div>
+
+      {/* Soft nudge: the quality check found issues; approving is still allowed. */}
+      <ConfirmDialog
+        open={showQaNudge}
+        onClose={() => setShowQaNudge(false)}
+        onConfirm={() => void handleApprove()}
+        title="Approve with open issues?"
+        description={
+          (seoData.issues?.length ?? 0) > 0
+            ? `The quality check flagged ${seoData.issues!.length} thing${seoData.issues!.length === 1 ? "" : "s"} to improve (listed in the Quality check card). You can approve anyway.`
+            : "The quality check didn't pass this draft. You can approve anyway."
+        }
+        confirmLabel="Approve anyway"
+        cancelLabel="Keep editing"
+      />
+
+      {/* Hard gate: the server refused because banned words are still in the
+          email. Overriding is explicit and deliberate. */}
+      <ConfirmDialog
+        open={bannedBlock !== null}
+        onClose={() => setBannedBlock(null)}
+        onConfirm={() => void handleApprove(true)}
+        tone="danger"
+        title="This email uses words your brand avoids"
+        description={
+          bannedBlock?.length
+            ? `Still in the email: ${bannedBlock.join(", ")}. Edit them out (click the text in the preview), or approve anyway.`
+            : "Edit them out (click the text in the preview), or approve anyway."
+        }
+        confirmLabel="Approve anyway"
+        cancelLabel="Keep editing"
+      />
 
       {/* Reject sheet: closes instantly on submit, regeneration continues
           in the background (see the status card above). */}

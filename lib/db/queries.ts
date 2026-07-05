@@ -7,6 +7,7 @@ import type {
   CampaignBrief,
   CampaignChatState,
   CampaignStatus,
+  ContentJobType,
   DraftForReview,
   DraftGenerationState,
   DraftJobContext,
@@ -20,6 +21,7 @@ import type {
   PillarWithClusters,
   Positioning,
   Product,
+  PublicationRecord,
   SeoDefaults,
   Strategy,
   Topic,
@@ -203,9 +205,10 @@ export async function getTopicContext(
 export async function createDraftShell(args: {
   ctx: TopicContext;
   campaignId?: string;
+  type?: ContentJobType;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, campaignId } = args;
+  const { ctx, campaignId, type = "email" } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -214,7 +217,7 @@ export async function createDraftShell(args: {
     .insert({
       brand_id: ctx.brand.id,
       topic_id: ctx.topic.id,
-      type: "email",
+      type,
       status: "generating",
       trigger_source: campaignId ? "campaign" : "manual",
       ...(campaignId ? { campaign_id: campaignId } : {}),
@@ -337,13 +340,13 @@ export async function getDraftWithJobContext(
   // Falls back to a campaign-less select before migration 002 adds the column.
   let { data, error } = await db
     .from("drafts")
-    .select(`id, job_id, version, content, meta, content_jobs!inner(topic_id, campaign_id)`)
+    .select(`id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type)`)
     .eq("id", draftId)
     .maybeSingle();
   if (error) {
     ({ data, error } = await db
       .from("drafts")
-      .select(`id, job_id, version, content, meta, content_jobs!inner(topic_id)`)
+      .select(`id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type)`)
       .eq("id", draftId)
       .maybeSingle());
   }
@@ -352,7 +355,11 @@ export async function getDraftWithJobContext(
 
   const job = (
     data as {
-      content_jobs?: { topic_id?: string; campaign_id?: string | null } | null;
+      content_jobs?: {
+        topic_id?: string;
+        campaign_id?: string | null;
+        type?: string;
+      } | null;
     }
   ).content_jobs;
 
@@ -364,7 +371,109 @@ export async function getDraftWithJobContext(
     version: data.version as number,
     content: data.content as EmailDraftContent,
     meta: (data.meta as DraftMeta) ?? {},
+    jobType: (job?.type as ContentJobType) ?? "email",
+    state: (data.state as string) ?? "in_review",
   };
+}
+
+// ── Publications (idempotent publishing, backed by unique(job_id, target)) ──
+
+/** The publication row for a job + target, or null if it never published. */
+export async function getPublication(
+  jobId: string,
+  target: string,
+): Promise<PublicationRecord | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("publications")
+    .select("*")
+    .eq("job_id", jobId)
+    .eq("target", target)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as PublicationRecord) ?? null;
+}
+
+/** The most recent publication for the job a draft belongs to (review screen). */
+export async function getPublicationForDraft(
+  draftId: string,
+): Promise<PublicationRecord | null> {
+  const db = getAdminClient();
+  const { data: draft, error: draftErr } = await db
+    .from("drafts")
+    .select("job_id")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (draftErr) throw draftErr;
+  if (!draft) return null;
+
+  const { data, error } = await db
+    .from("publications")
+    .select("*")
+    .eq("job_id", draft.job_id as string)
+    .order("published_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as PublicationRecord) ?? null;
+}
+
+/**
+ * Records a publication. If a raced retry already inserted the row, the
+ * unique(job_id, target) violation is swallowed and the existing row returned:
+ * a retry must never double-post OR crash after the external write succeeded.
+ */
+export async function recordPublication(args: {
+  jobId: string;
+  target: string;
+  externalId: string;
+  url?: string;
+}): Promise<PublicationRecord> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("publications")
+    .insert({
+      job_id: args.jobId,
+      target: args.target,
+      external_id: args.externalId,
+      url: args.url ?? null,
+    })
+    .select("*")
+    .single();
+  if (!error) return data as PublicationRecord;
+
+  // 23505 = unique_violation: someone else won the race; read theirs back.
+  if ((error as { code?: string }).code === "23505") {
+    const existing = await getPublication(args.jobId, args.target);
+    if (existing) return existing;
+  }
+  throw error;
+}
+
+/** Flips a job to published and stamps the topic's published_url when given. */
+export async function markJobPublished(
+  jobId: string,
+  publishedUrl?: string,
+): Promise<void> {
+  const db = getAdminClient();
+  const { data: job, error: jobErr } = await db
+    .from("content_jobs")
+    .update({ status: "published" })
+    .eq("id", jobId)
+    .select("topic_id")
+    .single();
+  if (jobErr) throw jobErr;
+
+  if (job?.topic_id) {
+    const { error } = await db
+      .from("topics")
+      .update({
+        status: "published",
+        ...(publishedUrl ? { published_url: publishedUrl } : {}),
+      })
+      .eq("id", job.topic_id as string);
+    if (error) throw error;
+  }
 }
 
 /** Returns the highest draft version number for a content job. */
@@ -522,7 +631,7 @@ export async function getDraftForReview(
     .from("drafts")
     .select(
       `id, version, state, content, meta, seo_data, archived, created_at,
-       content_jobs!inner ( topics ( title ) )`,
+       content_jobs!inner ( type, topics ( title ) )`,
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -531,7 +640,7 @@ export async function getDraftForReview(
       .from("drafts")
       .select(
         `id, version, state, content, meta, seo_data, created_at,
-         content_jobs!inner ( topics ( title ) )`,
+         content_jobs!inner ( type, topics ( title ) )`,
       )
       .eq("id", draftId)
       .maybeSingle());
@@ -540,8 +649,11 @@ export async function getDraftForReview(
   if (!data) return null;
 
   // Supabase types the embedded relations loosely; narrow defensively.
-  const job = (data as { content_jobs?: { topics?: { title?: string } | null } })
-    .content_jobs;
+  const job = (
+    data as {
+      content_jobs?: { type?: string; topics?: { title?: string } | null };
+    }
+  ).content_jobs;
   const topicTitle = job?.topics?.title ?? null;
 
   return {
@@ -554,6 +666,7 @@ export async function getDraftForReview(
     topic_title: topicTitle,
     archived: (data.archived as boolean) ?? false,
     created_at: data.created_at,
+    job_type: (job?.type as ContentJobType) ?? "email",
   };
 }
 
@@ -1063,6 +1176,7 @@ export async function listDrafts(): Promise<
     version: number;
     archived: boolean;
     created_at: string;
+    job_type: ContentJobType;
   }>
 > {
   const db = getAdminClient();
@@ -1074,7 +1188,7 @@ export async function listDrafts(): Promise<
     .from("drafts")
     .select(
       `id, version, state, archived, created_at, content,
-       content_jobs!inner ( topics ( title ) )`,
+       content_jobs!inner ( type, topics ( title ) )`,
     )
     .order("created_at", { ascending: false })
     .limit(100));
@@ -1083,7 +1197,7 @@ export async function listDrafts(): Promise<
       .from("drafts")
       .select(
         `id, version, state, created_at, content,
-         content_jobs!inner ( topics ( title ) )`,
+         content_jobs!inner ( type, topics ( title ) )`,
       )
       .order("created_at", { ascending: false })
       .limit(100));
@@ -1092,7 +1206,9 @@ export async function listDrafts(): Promise<
 
   return (data ?? []).map((d) => {
     const job = (
-      d as { content_jobs?: { topics?: { title?: string } | null } }
+      d as {
+        content_jobs?: { type?: string; topics?: { title?: string } | null };
+      }
     ).content_jobs;
     const content = d.content as EmailDraftContent | null;
     return {
@@ -1103,6 +1219,7 @@ export async function listDrafts(): Promise<
       created_at: d.created_at as string,
       topic_title: job?.topics?.title ?? null,
       subject: content?.subject ?? "",
+      job_type: (job?.type as ContentJobType) ?? "email",
     };
   });
 }

@@ -16,8 +16,9 @@
   create extension if not exists "pgcrypto";  -- gen_random_uuid()
 
   -- Drop in dependency order so the file is idempotent during early development.
-  drop table if exists performance     cascade;
-  drop table if exists publications    cascade;
+  drop table if exists performance        cascade;
+  drop table if exists brand_integrations cascade;
+  drop table if exists publications       cascade;
   drop table if exists approvals       cascade;
   drop table if exists drafts          cascade;
   drop table if exists content_jobs    cascade;
@@ -179,15 +180,29 @@
   );
 
   -- external_id makes publishing idempotent: on retry we find the existing row
-  -- and never create a second MailerLite campaign / Sanity doc.
+  -- and never create a second MailerLite campaign / Sanity doc. target is
+  -- plain text (migration 004): providers are registry entries in
+  -- lib/publishing/registry.ts, not schema values.
   create table publications (
     id           uuid primary key default gen_random_uuid(),
     job_id       uuid not null references content_jobs(id) on delete cascade,
-    target       text not null check (target in ('mailerlite', 'sanity')),
+    target       text not null,
     external_id  text,
     url          text,
     published_at timestamptz not null default now(),
     unique (job_id, target)
+  );
+
+  -- Per-brand publishing connections (migration 004). v1 reads credentials
+  -- from env; config is shaped to hold an encrypted credential reference when
+  -- multi-tenancy lands.
+  create table brand_integrations (
+    id           uuid primary key default gen_random_uuid(),
+    brand_id     uuid not null references brands(id) on delete cascade,
+    provider_id  text not null,
+    config       jsonb not null default '{}'::jsonb,
+    connected_at timestamptz not null default now(),
+    unique (brand_id, provider_id)
   );
 
   create table performance (

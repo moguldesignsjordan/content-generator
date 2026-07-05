@@ -28,16 +28,26 @@ type SectionKey =
   | "funnel"
   | "icp";
 
+export interface ConnectionStatus {
+  id: string;
+  label: string;
+  kind: "email" | "blog";
+  configured: boolean;
+  configHint: string;
+}
+
 export function SettingsClient({
   brand,
   strategy,
   primaryIcp,
   products,
+  connections = [],
 }: {
   brand: Brand;
   strategy: Strategy | null;
   primaryIcp: Icp | null;
   products: Product[];
+  connections?: ConnectionStatus[];
 }) {
   const [open, setOpen] = useState<SectionKey | null>(null);
   const close = () => setOpen(null);
@@ -115,6 +125,23 @@ export function SettingsClient({
           />
         )}
       </ListGroup>
+
+      {connections.length > 0 && (
+        <ListGroup label="Connections">
+          {connections.map((c) => (
+            <ListRow
+              key={c.id}
+              title={c.label}
+              subtitle={
+                c.configured
+                  ? `Connected · publishes ${c.kind === "blog" ? "blog posts" : "emails"}`
+                  : `Not connected · set ${c.configHint} in .env.local`
+              }
+              chevron={false}
+            />
+          ))}
+        </ListGroup>
+      )}
 
       <ListGroup label="Account">
         <form action={signOut}>

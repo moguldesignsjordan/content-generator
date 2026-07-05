@@ -19,6 +19,7 @@ import {
 } from "@/prompts/redesign-email";
 import { stripEmDashes } from "@/lib/text";
 import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
+import { spliceHeroImage } from "./generate-image";
 import type { StyleEditHistoryEntry } from "@/lib/db/types";
 
 // Instant full redesign: same copy, fresh HTML, current brand tokens applied
@@ -82,7 +83,15 @@ export async function redesignEmail(
 
   const tokens = resolveBrandTokens(ctx.brand);
   const templateId = draftCtx.meta.email_template_id ?? resolveEmailTemplateId(ctx.topic);
-  const { system, user } = buildRedesignMessages({ copy, tokens, templateId, ctx, direction });
+  const heroImage = draftCtx.meta.hero_image;
+  const { system, user } = buildRedesignMessages({
+    copy,
+    tokens,
+    templateId,
+    ctx,
+    direction,
+    heroImage,
+  });
 
   // FAST_MODEL first (no copywriting judgment needed, just following the
   // design brief), retry once, then escalate to DRAFT_MODEL, mirroring the
@@ -94,7 +103,11 @@ export async function redesignEmail(
     return { ok: false, error: `${attempt.error} Try again.` };
   }
 
-  const html = attempt.html;
+  let html = attempt.html;
+  // The prompt asks the model to keep the hero image, but code guarantees it.
+  if (heroImage && !html.includes('data-region="image"')) {
+    html = spliceHeroImage(html, heroImage) ?? html;
+  }
   const history = [
     ...(draftCtx.meta.style_edit_history ?? []),
     {

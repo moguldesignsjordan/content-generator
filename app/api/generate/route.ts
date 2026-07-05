@@ -20,10 +20,12 @@ export async function POST(request: Request) {
 
   let topicId: string | undefined;
   let campaignId: string | undefined;
+  let channel: "email" | "blog" = "email";
   try {
     const body = await request.json();
     topicId = body?.topicId;
     campaignId = body?.campaignId || undefined;
+    if (body?.channel === "blog") channel = "blog";
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
     if (!ctx) {
       return NextResponse.json({ error: `Topic ${topicId} not found.` }, { status: 404 });
     }
-    const draftId = await createDraftShell({ ctx, campaignId });
+    const draftId = await createDraftShell({ ctx, campaignId, type: channel });
     console.log("[generate] shell created topicId:", topicId, "draftId:", draftId);
     return NextResponse.json({ draftId });
   } catch (err) {

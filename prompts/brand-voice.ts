@@ -2,6 +2,8 @@ import type {
   Brand,
   CampaignBrief,
   Icp,
+  Product,
+  Strategy,
   VoiceExampleChannel,
 } from "@/lib/db/types";
 
@@ -119,6 +121,73 @@ export function buildGuidelinesBlock(brand: Brand): string {
   }
   if (g.cta_philosophy) lines.push(`  Calls to action: ${g.cta_philosophy}`);
   return lines.join("\n");
+}
+
+// ── Shared catalog/state blocks ─────────────────────────────────────────────
+// One implementation for the product/topic/funnel/brief formatting that the
+// campaign interview, the create agent, and topic suggestions all inject.
+// Besides killing drift, byte-identical blocks let the cached prompt prefix be
+// reused across surfaces.
+
+/** The topic rows a chat surface can suggest from (id + display context). */
+export interface TopicOptionLine {
+  id: string;
+  title: string;
+  pillar: string;
+  funnel_stage: string | null;
+  status: string;
+}
+
+/** Product catalog lines, referenced by slug in tool inputs. */
+export function buildProductLines(products: Product[]): string[] {
+  return products.length
+    ? products.map(
+        (p) =>
+          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}${p.description ? `, ${p.description}` : ""}`,
+      )
+    : ["  (none on file)"];
+}
+
+/** Content-plan topic lines, selectable by exact id. */
+export function buildTopicLines(topics: TopicOptionLine[]): string[] {
+  return topics.length
+    ? topics
+        .slice(0, 40)
+        .map(
+          (t) =>
+            `  - id=${t.id} | ${t.title} | pillar: ${t.pillar}${t.funnel_stage ? ` | ${t.funnel_stage}` : ""} | ${t.status}`,
+        )
+    : ["  (none yet, you will need create_topic)"];
+}
+
+/** The strategy's funnel stage → CTA type mapping, one line per stage. */
+export function buildFunnelBlock(strategy: Strategy | null): string {
+  return strategy?.funnel_definition
+    ? Object.entries(strategy.funnel_definition)
+        .map(([stage, def]) => `  ${stage} → ${def.cta_type}`)
+        .join("\n")
+    : "  (default)";
+}
+
+/**
+ * The mutating brief-so-far state for a chat turn. Injected at the top of the
+ * LATEST user message, never the system prompt: the system prompt stays
+ * byte-stable across turns so the big brand prefix actually caches.
+ */
+export function buildBriefStateBlock(
+  brief: CampaignBrief,
+  topicId: string | null,
+): string {
+  return [
+    "BRIEF SO FAR (current saved state, refreshed automatically each turn):",
+    `  Goal: ${brief.goal ?? "(not set)"}`,
+    `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
+    `  Key message: ${brief.key_message ?? "(not set)"}`,
+    `  Angle: ${brief.angle ?? "(not set)"}`,
+    `  Offer: ${brief.offer_slug ?? "(not set)"}`,
+    `  Constraints: ${brief.constraints ?? "(none)"}`,
+    `  Topic attached: ${topicId ? "yes" : "no"}`,
+  ].join("\n");
 }
 
 // Builds the campaign brief block from the strategic interview. This is what

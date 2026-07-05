@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandStrategy, listDrafts } from "@/lib/db/queries";
+import {
+  getBrandStrategy,
+  getBrandWithIcps,
+  listDrafts,
+  listProducts,
+} from "@/lib/db/queries";
+import { brandReadiness } from "@/lib/brand-readiness";
 import {
   Card,
   LinkButton,
@@ -9,6 +15,7 @@ import {
   StatCard,
 } from "@/components/ui";
 import { ChevronRightIcon } from "@/components/ui/icons";
+import { BrandReadinessCard } from "./_components/brand-readiness-card";
 import { CreateAgent } from "./_components/create-agent";
 import { ScreenHeader } from "./_components/screen-header";
 import { DraftStateBadge } from "./_components/topic-badges";
@@ -63,7 +70,12 @@ export default async function DashboardPage() {
   }
 
   const { brand, pillars } = data;
-  const drafts = await listDrafts().catch(() => []);
+  const [drafts, withIcps, products] = await Promise.all([
+    listDrafts().catch(() => []),
+    getBrandWithIcps().catch(() => null),
+    listProducts(brand.id).catch(() => []),
+  ]);
+  const readiness = brandReadiness(brand, withIcps?.icps ?? [], products);
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
       c.topics.map((t) => ({ id: t.id, title: t.title, status: t.status })),
@@ -94,6 +106,9 @@ export default async function DashboardPage() {
 
       {/* Create — leads the page */}
       <CreateAgent suggestions={suggestions} />
+
+      {/* What's still missing from the brand brain (hides itself when full) */}
+      <BrandReadinessCard {...readiness} />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2.5">

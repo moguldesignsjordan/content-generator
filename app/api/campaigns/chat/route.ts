@@ -35,6 +35,7 @@ import {
   type UpdateBriefInput,
   type VoiceProposals,
 } from "@/prompts/campaign";
+import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { stripEmDashes } from "@/lib/text";
 
 // A chat turn is short, but give the strategist headroom for thinking.
@@ -86,9 +87,19 @@ export async function POST(req: NextRequest) {
         priorTurns[priorTurns.length - 1],
       );
     }
+    // The mutating brief-so-far rides in the latest user turn, never the
+    // system prompt (which stays byte-stable so the brand prefix caches) and
+    // never persisted history (nextMessages below stores the raw message).
+    const briefState = buildBriefStateBlock(
+      campaign.brief ?? {},
+      campaign.topic_id,
+    );
     const messages = [
       ...priorTurns,
-      { role: "user" as const, content: message.trim() },
+      {
+        role: "user" as const,
+        content: `${briefState}\n\nUSER MESSAGE:\n${message.trim()}`,
+      },
     ];
 
     const system = cacheableSystem(
@@ -98,8 +109,6 @@ export async function POST(req: NextRequest) {
         primaryIcp: icps.find((i) => i.is_primary) ?? icps[0] ?? null,
         products,
         topics,
-        brief: campaign.brief ?? {},
-        topicId: campaign.topic_id,
       }),
     );
 

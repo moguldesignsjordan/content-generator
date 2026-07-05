@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { EmailDraftContent, TopicContext } from "@/lib/db/types";
+import type { EmailCopy, TopicContext } from "@/lib/db/types";
 
 export const QaSchema = z.object({
   meta_title: z
@@ -11,10 +11,14 @@ export const QaSchema = z.object({
     .describe("SEO meta description, under 155 characters. Compelling summary for search results."),
   keyword_used: z
     .boolean()
-    .describe("True if the target keyword appears naturally in the email body or subject."),
+    .describe(
+      "True only if the target keyword (or a close natural variant) appears where it counts: the subject line, the headline, or the first paragraph.",
+    ),
   keyword_placement: z
     .string()
-    .describe("Where the keyword appears, e.g. 'subject line and opening paragraph'. Empty string if not found."),
+    .describe(
+      "Where the keyword lands, from: 'subject', 'headline', 'first paragraph', 'later body only', or empty string if not found.",
+    ),
   banned_terms_found: z
     .array(z.string())
     .describe("Any banned terms found verbatim in the subject, preheader, or body. Empty array if none."),
@@ -40,8 +44,16 @@ export const QA_TOOL: Anthropic.Tool = {
     properties: {
       meta_title: { type: "string", description: "SEO meta title, under 60 characters." },
       meta_description: { type: "string", description: "SEO meta description, under 155 characters." },
-      keyword_used: { type: "boolean", description: "True if the target keyword appears naturally." },
-      keyword_placement: { type: "string", description: "Where the keyword appears, or empty string." },
+      keyword_used: {
+        type: "boolean",
+        description:
+          "True only if the keyword (or close variant) appears in the subject, headline, or first paragraph.",
+      },
+      keyword_placement: {
+        type: "string",
+        description:
+          "One of: 'subject', 'headline', 'first paragraph', 'later body only', or empty string.",
+      },
       banned_terms_found: { type: "array", items: { type: "string" }, description: "Banned terms found, or empty." },
       readability_note: { type: "string", description: "One sentence on readability." },
       qa_pass: { type: "boolean", description: "True only if no banned terms and keyword is used." },
@@ -60,21 +72,35 @@ export const QA_TOOL: Anthropic.Tool = {
   },
 };
 
-/** Builds the QA review prompt for a generated email draft. */
+/**
+ * Builds the QA review prompt from the STRUCTURED copy, not the rendered
+ * HTML. QA is mechanical extraction/classification (keyword placement, banned
+ * terms, meta fields), so it neither needs nor benefits from the markup, and
+ * dropping it cuts the input to a fraction on every single generation. Runs
+ * on FAST_MODEL for the same reason.
+ */
 export function buildQaMessages(
   ctx: TopicContext,
-  draft: EmailDraftContent,
+  copy: EmailCopy,
 ): { system: string; user: string } {
   const bannedTerms = ctx.brand.voice_profile?.banned_terms ?? [];
 
   const system = [
-    "You are a QA reviewer for marketing emails. Audit the draft against the criteria",
+    "You are a QA reviewer for marketing emails. Audit the copy against the criteria",
     "provided and generate SEO meta fields. Be direct and specific, flag only real",
     "problems, not stylistic preferences.",
   ].join("\n");
 
+  const bodyLines = copy.body_sections
+    .map((s, i) =>
+      s.heading
+        ? `SECTION ${i + 1} HEADING: ${s.heading}\nSECTION ${i + 1} BODY: ${s.body}`
+        : `SECTION ${i + 1} BODY: ${s.body}`,
+    )
+    .join("\n\n");
+
   const user = [
-    "Audit this email draft:",
+    "Audit this email copy:",
     "",
     `TOPIC: ${ctx.topic.title}`,
     ctx.topic.target_keyword ? `TARGET KEYWORD: ${ctx.topic.target_keyword}` : "",
@@ -82,11 +108,13 @@ export function buildQaMessages(
       ? `BANNED TERMS (must not appear anywhere): ${bannedTerms.join(", ")}`
       : "",
     "",
-    `SUBJECT: ${draft.subject}`,
-    `PREHEADER: ${draft.preheader}`,
+    `SUBJECT: ${copy.subject}`,
+    `PREHEADER: ${copy.preheader}`,
+    `HEADLINE: ${copy.headline}`,
     "",
-    "BODY (HTML, evaluate the readable text, not the markup):",
-    draft.html,
+    bodyLines,
+    "",
+    `CTA TEXT: ${copy.cta_text}`,
     "",
     "Call the qa_review tool with the audit result.",
   ]

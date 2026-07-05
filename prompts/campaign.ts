@@ -8,8 +8,12 @@ import type {
 } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
+  buildFunnelBlock,
   buildGuidelinesBlock,
   buildPositioningBlock,
+  buildProductLines,
+  buildTopicLines,
+  type TopicOptionLine,
 } from "./brand-voice";
 
 // The campaign interview: a strategist chat that gathers a brief for one piece
@@ -46,13 +50,7 @@ export interface VoiceProposals {
 }
 
 /** The topic rows the interview can suggest from (id + display context). */
-export interface CampaignTopicOption {
-  id: string;
-  title: string;
-  pillar: string;
-  funnel_stage: string | null;
-  status: string;
-}
+export type CampaignTopicOption = TopicOptionLine;
 
 export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
   name: "update_brief",
@@ -234,8 +232,11 @@ export const CAMPAIGN_TOOLS: Anthropic.Tool[] = [
 
 /**
  * Builds the system prompt for one campaign-interview turn: strategist persona,
- * the full stored brand context (so it only asks about what's missing), the
- * catalog of products and topics it can reference, and the brief so far.
+ * the full stored brand context (so it only asks about what's missing), and the
+ * catalog of products and topics it can reference. Deliberately EXCLUDES the
+ * mutating brief-so-far: that arrives at the top of the latest user message
+ * (buildBriefStateBlock) so this prefix stays byte-stable across turns and the
+ * prompt cache lands on turns 2+.
  */
 export function buildCampaignSystem(args: {
   brand: Brand;
@@ -243,10 +244,8 @@ export function buildCampaignSystem(args: {
   primaryIcp: Icp | null;
   products: Product[];
   topics: CampaignTopicOption[];
-  brief: CampaignBrief;
-  topicId: string | null;
 }): string {
-  const { brand, strategy, primaryIcp, products, topics, brief, topicId } = args;
+  const { brand, strategy, primaryIcp, products, topics } = args;
 
   const guidelinesBlock = buildGuidelinesBlock(brand);
   const voiceBlock = buildBrandVoiceBlock(brand, primaryIcp, "email");
@@ -255,38 +254,6 @@ export function buildCampaignSystem(args: {
   const v = brand.voice_profile ?? {};
   const voiceIsThin =
     !v.voice || !(v.examples?.length || v.example_posts?.length);
-
-  const productLines = products.length
-    ? products.map(
-        (p) =>
-          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}${p.description ? `, ${p.description}` : ""}`,
-      )
-    : ["  (none on file)"];
-
-  const topicLines = topics.length
-    ? topics
-        .slice(0, 40)
-        .map(
-          (t) =>
-            `  - id=${t.id} | ${t.title} | pillar: ${t.pillar}${t.funnel_stage ? ` | ${t.funnel_stage}` : ""} | ${t.status}`,
-        )
-    : ["  (none yet, you will need create_topic)"];
-
-  const briefLines = [
-    `  Goal: ${brief.goal ?? "(not set)"}`,
-    `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
-    `  Key message: ${brief.key_message ?? "(not set)"}`,
-    `  Angle: ${brief.angle ?? "(not set)"}`,
-    `  Offer: ${brief.offer_slug ?? "(not set)"}`,
-    `  Constraints: ${brief.constraints ?? "(none)"}`,
-    `  Topic attached: ${topicId ? "yes" : "no"}`,
-  ];
-
-  const funnel = strategy?.funnel_definition
-    ? Object.entries(strategy.funnel_definition)
-        .map(([stage, def]) => `  ${stage} → ${def.cta_type}`)
-        .join("\n")
-    : "  (default)";
 
   return [
     `You are the campaign strategist for ${brand.name}. The user is starting a new`,
@@ -299,16 +266,17 @@ export function buildCampaignSystem(args: {
     positioningBlock,
     "",
     "FUNNEL → CTA MAPPING:",
-    funnel,
+    buildFunnelBlock(strategy),
     "",
     "PRODUCTS (reference by slug in update_brief.offer_slug):",
-    ...productLines,
+    ...buildProductLines(products),
     "",
     "TOPICS ON THE CONTENT PLAN (suggest the best fits; select by id):",
-    ...topicLines,
+    ...buildTopicLines(topics),
     "",
-    "BRIEF SO FAR:",
-    ...briefLines,
+    "The latest user message starts with a BRIEF SO FAR block: the current saved",
+    "state of the brief, refreshed automatically every turn. Trust it over your",
+    "own memory of the conversation.",
     "",
     "HOW TO RUN THE INTERVIEW:",
     "- Work toward: goal → audience/segment → key message and angle → offer → topic.",
