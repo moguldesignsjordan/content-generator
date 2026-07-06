@@ -1,5 +1,10 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandIntegrations, getBrandWithIcps, listProducts } from "@/lib/db/queries";
+import {
+  getBrandIntegrations,
+  getBrandWithIcps,
+  listContentSchedules,
+  listProducts,
+} from "@/lib/db/queries";
 import { listProviders } from "@/lib/publishing/registry";
 import { describeConnection } from "@/lib/publishing/connections";
 import { Card, LinkButton } from "@/components/ui";
@@ -54,6 +59,7 @@ export default async function SettingsPage() {
   const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
   const products = await listProducts(brand.id);
   const integrations = await getBrandIntegrations(brand.id);
+  const schedules = await listContentSchedules(brand.id);
 
   return (
     <>
@@ -66,6 +72,7 @@ export default async function SettingsPage() {
         strategy={strategy}
         primaryIcp={primaryIcp}
         products={products}
+        schedules={schedules}
         connections={listProviders().map((p) => {
           const integration =
             integrations.find((i) => i.provider_id === p.id) ?? null;

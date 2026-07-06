@@ -613,3 +613,24 @@ export interface BrandIntegration {
   config: Record<string, unknown>;
   connected_at: string;
 }
+
+// A recurring auto-generation series (migration 010, improvement plan 6). A
+// daily cron picks up rows where active && next_run_at <= now, generates a
+// draft for the oldest un-started topic, and leaves it in_review, same
+// approval gate as a manually triggered draft. next_run_at only advances
+// after an attempt, so a missed tick or a transient failure just retries.
+export type Cadence = "daily" | "weekly" | "biweekly" | "monthly";
+
+export interface ContentSchedule {
+  id: string;
+  brand_id: string;
+  channel: ContentJobType;
+  cadence: Cadence;
+  email_type: EmailType | null;
+  blog_type: BlogType | null;
+  active: boolean;
+  next_run_at: string;
+  last_run_at: string | null;
+  last_result: string | null;
+  created_at: string;
+}

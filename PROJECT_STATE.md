@@ -443,28 +443,120 @@ as-is since both are real, usable draft content, not garbage.
   blocker to selling this as SaaS.
 - Topic remap: seeded topics still map to placeholder product slugs.
 
-## Next step
+## Plan 6 — Recurring automation (code complete, uncommitted; migration not applied)
 
-1. Plan 5 Phase A (blog reject/regenerate) is implemented, live-verified,
-   code-reviewed, and committed, including the `source_draft_id` fix (see
-   above). Local branch is 5 commits ahead of
-   `origin/feat/dashboard-create-agent` (Plans 1, 2, 4, bugfix commit, Plan 5
-   Phase A) — none pushed yet.
-2. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
+Started 2026-07-06, right after Plan 5 Phase A + the blog-copy-editing commit
+(`b6f427d`) landed on `main`. Full plan lives at
+`~/.claude/plans/noble-finding-duckling.md`.
+
+Jordan's call locked in: dashboard badge only for notification, no new
+Resend integration this cut.
+
+**Everything in the plan is now implemented (uncommitted in the working
+tree):**
+- `db/migrations/010_content_schedules.sql` + mirrored into `db/schema.sql`.
+- `lib/db/types.ts`: `Cadence`, `ContentSchedule`.
+- `lib/scheduling/cadence.ts` + test: `computeNextRunAt`.
+- `lib/db/queries.ts`: `createDraftShell`'s `triggerSource` param, plus the
+  full schedule CRUD (`listContentSchedules`, `getContentSchedule`,
+  `createContentSchedule`, `updateContentSchedule`, `deleteContentSchedule`,
+  `getDueSchedules`, `markScheduleRun`, `getNextIdeaTopicId` — walks
+  strategies→pillars→clusters→topics rather than a deep nested filter,
+  `countScheduledAwaitingReview`).
+- `lib/pipeline/run-schedule.ts`: `runDueSchedule` — picks the oldest idea
+  topic, `createDraftShell` with `trigger_source: 'schedule'`, drives
+  generation headlessly by wrapping `joinRun` in a promise (resolves on
+  `done`, rejects on `error`), advances `next_run_at` via `computeNextRunAt`
+  on success/skip, leaves it due on error so the next cron tick retries.
+- `app/api/cron/run-schedules/route.ts`: `CRON_SECRET` bearer auth, 503 if
+  unset, 401 if wrong, else runs all due schedules sequentially and returns
+  `{processed, generated, skipped, failed}`.
+- `app/api/schedules/route.ts` (GET/POST), `[id]/route.ts` (PATCH/DELETE),
+  `[id]/run-now/route.ts` (POST) — behind the normal app session gate.
+- `vercel.json` (daily cron, 13:00 UTC) + `CRON_SECRET` in `.env.example`
+  and (a real generated value) in `.env.local`.
+- Settings UI: new "Automation" `ListGroup` → "Recurring schedules" row →
+  `SchedulesForm` (`app/(dashboard)/settings/_components/schedules-form.tsx`)
+  in a `Sheet`, mirrors the Connections/Products pattern — list with
+  Run now/Pause-Resume/Delete per row, plus a create form (channel, cadence,
+  optional email/blog type override).
+- Dashboard badge: `app/(dashboard)/page.tsx` shows "N scheduled drafts
+  awaiting review → View" linking to `/emails` when
+  `countScheduledAwaitingReview > 0`.
+
+**Bug found and fixed during this work: the global auth middleware
+(`lib/supabase/middleware.ts`) redirected every unauthenticated request to
+`/login`, including `/api/cron/run-schedules`.** Vercel Cron hits that route
+with a `CRON_SECRET` bearer token, not a browser session cookie — the
+redirect would have fired before the route's own auth check ever ran, so the
+real cron tick would silently never work in production (Vercel Cron sees a
+307, not the intended 401/503/200). Fixed by adding `/api/cron` to
+`PUBLIC_PATHS`; the route still fails closed on its own (503 unset, 401
+wrong secret) so this doesn't weaken auth, it just lets the route's own gate
+run at all. Live-verified via curl: wrong secret → 401, correct secret → 200
+with a clean summary, `/api/schedules` (the human-facing CRUD) correctly
+still redirects to `/login` without a session, confirming only the cron path
+was exempted.
+
+**Verified so far:** `npm run typecheck`, `npm run build` (all new routes
+appear), `npx vitest run` (86 tests, unchanged — no new tests added, cadence
+tests already existed from the earlier checkpoint) all pass. Live via
+Playwright + curl: Settings → Automation → Recurring schedules sheet opens
+and renders correctly (degrades to an empty list, matching the missing-table
+guard); "Add schedule" against the not-yet-migrated DB fails with a toast,
+not a crash; dashboard loads with no badge (count is genuinely 0); the cron
+route's auth gate (503/401/200) confirmed live.
+
+**Migration 010 applied 2026-07-06** (Jordan ran it in the Supabase SQL
+editor); confirmed live via a direct REST query.
+
+**Also found and fixed the same session: migration 003
+(`archive_topics_drafts`) had silently never been applied to this live DB
+either** (`topics.archived`/`drafts.archived` both 42703'd on a real query,
+discovered because `getNextIdeaTopicId` filters on `topics.archived`, unlike
+`listDrafts`'s read path which degrades gracefully). This meant the
+already-shipped Archive/Unarchive buttons on the Emails/Blogs lists would
+have 500'd if actually clicked, silently, this whole time. Jordan applied
+migration 003 too; confirmed live.
+
+**Full end-to-end live verification completed 2026-07-06** (real Claude
+spend, not mocked): created a real schedule via Settings → Schedules, "Run
+now" against a genuinely empty topic backlog correctly returned `skipped: no
+topics available` and advanced `next_run_at` by one cadence interval; then
+against a throwaway `idea`-status test topic, a real ~62s Claude generation
+produced a draft with `content_jobs.trigger_source = 'schedule'` and
+`state: in_review`, exactly as designed. Dashboard badge appeared while
+in_review and disappeared immediately after Approve. All test artifacts
+(the draft, the schedule, the test topic) were cleaned up afterward via the
+app's own delete/archive flows, not raw DB deletes.
+
+**Still open (not code, needs Jordan before shipping):**
+1. Set `CRON_SECRET` (a real value is already in `.env.local`) as a Vercel
+   project env var at/before deploy time, so the real daily cron tick
+   authenticates in production.
+2. Nothing committed yet — this entire Plan 6 section plus the blog-preview
+   click-to-edit finish (see the earlier "blog copy editing" note) are all
+   working-tree changes on top of `b6f427d`. Ready to commit whenever Jordan
+   wants.
+3. Minor, non-blocking UX gap noticed during verification:
+   `SchedulesForm`'s "Run now" doesn't update its row's last-run text until
+   the page is reloaded (Pause/Resume and Delete do update immediately). Not
+   fixed this session, cheap to pick up later.
+
+## Next step (pre-Plan-6 backlog, still open)
+
+1. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
    app.dataforseo.com (account email + a separate API password from their
    dashboard) and add them to `.env.local` — the only remaining blocker on
    Slice 4 keyword research now that migration 008 is confirmed applied.
-3. Decide on Plan 5 Phase B (section-level copy editing for blogs) — check
-   with Jordan before starting, it's a distinct UI paradigm (markdown-source
-   editing, not HTML find/replace) from Phase A.
-4. Remaining "Not yet verified" items: the from-scratch brand-guidelines
+2. Decide on Plan 5 Phase B (AI-assisted section-level copy editing for
+   blogs, vs. the direct manual field editor already shipped in `b6f427d`)
+   — check with Jordan before starting.
+3. Remaining "Not yet verified" items: the from-scratch brand-guidelines
    generate path (no colors set), onboarding auto-images toggle, an actual
    MailerLite "Send now"/"Schedule" click-through (Jordan's call, not done
    yet — still testing), and Plan 4's actual cross-instance lock race test
    now that migration 009 is confirmed applied.
-5. After Plan 5, pick up Plan 6 (recurring automation, now unblocked by
-   Plan 4) from the 7-plan improvement doc
-   (`~/.claude/plans/refactored-snacking-lightning.md`).
 
 ## How to verify this doc against reality
 

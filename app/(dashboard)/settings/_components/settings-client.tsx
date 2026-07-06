@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ListGroup, ListRow, Sheet } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
-import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
+import type { Brand, ContentSchedule, Icp, Product, Strategy } from "@/lib/db/types";
 import type { ProviderField } from "@/lib/publishing/provider";
 import type { ConnectionState } from "@/lib/publishing/connections";
 import { BrandBasicsForm } from "./brand-basics-form";
@@ -17,6 +17,7 @@ import { ProductsForm } from "./products-form";
 import { FunnelForm } from "./funnel-form";
 import { IcpForm } from "./icp-form";
 import { ConnectionForm } from "./connection-form";
+import { SchedulesForm } from "./schedules-form";
 
 type SectionKey =
   | "import"
@@ -27,7 +28,8 @@ type SectionKey =
   | "guidelines"
   | "products"
   | "funnel"
-  | "icp";
+  | "icp"
+  | "schedules";
 
 export interface ConnectionStatus {
   id: string;
@@ -46,12 +48,14 @@ export function SettingsClient({
   primaryIcp,
   products,
   connections = [],
+  schedules = [],
 }: {
   brand: Brand;
   strategy: Strategy | null;
   primaryIcp: Icp | null;
   products: Product[];
   connections?: ConnectionStatus[];
+  schedules?: ContentSchedule[];
 }) {
   const [open, setOpen] = useState<SectionKey | null>(null);
   // Open connection sheet keyed by provider id (separate from SectionKey so
@@ -131,6 +135,18 @@ export function SettingsClient({
             chevron={false}
           />
         )}
+      </ListGroup>
+
+      <ListGroup label="Automation">
+        <ListRow
+          title="Recurring schedules"
+          subtitle={
+            schedules.length > 0
+              ? `${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`
+              : "Auto-generate drafts on a cadence, still human-approved"
+          }
+          onClick={() => setOpen("schedules")}
+        />
       </ListGroup>
 
       {connections.length > 0 && (
@@ -232,6 +248,16 @@ export function SettingsClient({
         size="xl"
       >
         <ProductsForm brandId={brand.id} products={products} />
+      </Sheet>
+
+      <Sheet
+        open={open === "schedules"}
+        onClose={close}
+        title="Recurring schedules"
+        description="Auto-generates a draft on a cadence and leaves it awaiting review. It never auto-publishes."
+        size="lg"
+      >
+        <SchedulesForm brandId={brand.id} schedules={schedules} />
       </Sheet>
 
       <Sheet

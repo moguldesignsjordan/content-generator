@@ -3,7 +3,16 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { isSupabaseAuthConfigured, supabaseAnonKey, supabaseUrl } from "./config";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/forgot-password", "/reset-password"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth",
+  "/forgot-password",
+  "/reset-password",
+  // Vercel Cron hits this with a CRON_SECRET bearer token, not a browser
+  // session cookie — the route itself checks that secret (fails closed with
+  // 503/401), so it must not be redirected to /login first.
+  "/api/cron",
+];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));

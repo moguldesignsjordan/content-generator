@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import {
+  countScheduledAwaitingReview,
   getBrandStrategy,
   getBrandWithIcps,
   getLatestActiveCampaign,
@@ -72,12 +73,14 @@ export default async function DashboardPage() {
   }
 
   const { brand, pillars } = data;
-  const [drafts, withIcps, products, activeCampaign] = await Promise.all([
-    listDrafts().catch(() => []),
-    getBrandWithIcps().catch(() => null),
-    listProducts(brand.id).catch(() => []),
-    getLatestActiveCampaign(brand.id).catch(() => null),
-  ]);
+  const [drafts, withIcps, products, activeCampaign, scheduledAwaitingReview] =
+    await Promise.all([
+      listDrafts().catch(() => []),
+      getBrandWithIcps().catch(() => null),
+      listProducts(brand.id).catch(() => []),
+      getLatestActiveCampaign(brand.id).catch(() => null),
+      countScheduledAwaitingReview(brand.id).catch(() => 0),
+    ]);
   const readiness = brandReadiness(brand, withIcps?.icps ?? [], products);
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
@@ -151,6 +154,24 @@ export default async function DashboardPage() {
         <StatCard label="Approved" value={approved} sub="ready to ship" />
         <StatCard label="Topics" value={allTopics.length} sub={`${queued} queued`} />
       </div>
+
+      {/* Scheduled drafts awaiting review (Settings → Schedules). Never
+          auto-publishes; this is just a nudge to go approve/reject. */}
+      {scheduledAwaitingReview > 0 && (
+        <Link
+          href="/emails"
+          className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-accent/25 bg-accent/[0.07] px-4 py-3 transition-colors hover:bg-accent/[0.12]"
+        >
+          <span className="text-[14px]">
+            <span className="font-medium text-foreground">
+              {scheduledAwaitingReview} scheduled draft
+              {scheduledAwaitingReview === 1 ? "" : "s"} awaiting review.
+            </span>{" "}
+            <span className="text-muted">Auto-generated, still needs your approval.</span>
+          </span>
+          <span className="shrink-0 text-[13px] font-medium text-accent">View →</span>
+        </Link>
+      )}
 
       {/* Recent emails */}
       <section>

@@ -4,11 +4,13 @@ import type {
   Brand,
   BrandGuidelines,
   BrandMemory,
+  Cadence,
   Campaign,
   CampaignBrief,
   CampaignChatState,
   CampaignStatus,
   ContentJobType,
+  ContentSchedule,
   DraftForReview,
   DraftGenerationState,
   DraftJobContext,
@@ -221,9 +223,14 @@ export async function createDraftShell(args: {
    * generation backfills it with the resolved type. */
   emailType?: EmailType;
   blogType?: BlogType;
+  /** Overrides the derived campaign/manual trigger_source. Set by the cron
+   * path (lib/pipeline/run-schedule.ts) so scheduled drafts are attributable
+   * and countable (see countScheduledAwaitingReview) without a schema enum. */
+  triggerSource?: "schedule";
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, campaignId, type = "email", sourceDraftId, emailType, blogType } = args;
+  const { ctx, campaignId, type = "email", sourceDraftId, emailType, blogType, triggerSource } =
+    args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -234,7 +241,7 @@ export async function createDraftShell(args: {
       topic_id: ctx.topic.id,
       type,
       status: "generating",
-      trigger_source: campaignId ? "campaign" : "manual",
+      trigger_source: triggerSource ?? (campaignId ? "campaign" : "manual"),
       ...(campaignId ? { campaign_id: campaignId } : {}),
       ...(emailType ? { email_type: emailType } : {}),
       ...(blogType ? { blog_type: blogType } : {}),
@@ -1702,4 +1709,169 @@ export async function listTopics(): Promise<
       status: t.status as string,
     };
   });
+}
+
+// ── Content schedules (recurring auto-generation, migration 010, plan 6) ────
+
+/** All schedules for a brand, newest first. Degrades to [] pre-migration-010. */
+export async function listContentSchedules(brandId: string): Promise<ContentSchedule[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("content_schedules")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as ContentSchedule[];
+}
+
+export async function getContentSchedule(id: string): Promise<ContentSchedule | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("content_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as ContentSchedule) ?? null;
+}
+
+export async function createContentSchedule(args: {
+  brandId: string;
+  channel: ContentJobType;
+  cadence: Cadence;
+  emailType?: EmailType;
+  blogType?: BlogType;
+}): Promise<ContentSchedule> {
+  const db = getAdminClient();
+  const { brandId, channel, cadence, emailType, blogType } = args;
+  const { data, error } = await db
+    .from("content_schedules")
+    .insert({
+      brand_id: brandId,
+      channel,
+      cadence,
+      email_type: emailType ?? null,
+      blog_type: blogType ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as ContentSchedule;
+}
+
+export async function updateContentSchedule(
+  id: string,
+  patch: Partial<Pick<ContentSchedule, "cadence" | "active" | "email_type" | "blog_type">>,
+): Promise<ContentSchedule> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("content_schedules")
+    .update(patch)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as ContentSchedule;
+}
+
+export async function deleteContentSchedule(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("content_schedules").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/** Rows where the daily cron should run: active and due. */
+export async function getDueSchedules(): Promise<ContentSchedule[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("content_schedules")
+    .select("*")
+    .eq("active", true)
+    .lte("next_run_at", new Date().toISOString());
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as ContentSchedule[];
+}
+
+/** Records the outcome of a run attempt. `next_run_at` is left out on error so
+ * the row stays due and the next cron tick retries automatically. */
+export async function markScheduleRun(
+  id: string,
+  patch: { next_run_at?: string; last_run_at: string; last_result: string },
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("content_schedules").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+/** The oldest non-archived, un-started ("idea") topic for a brand — the
+ * "next unstarted topic" rule a schedule picks from. Walks strategies →
+ * pillars → clusters → topics rather than a single deep-nested filter, same
+ * step-by-step style as getTopicContext's reverse walk. Performance-informed
+ * selection is deliberately deferred (phase 2). */
+export async function getNextIdeaTopicId(brandId: string): Promise<string | null> {
+  const db = getAdminClient();
+
+  const { data: strategies, error: stratErr } = await db
+    .from("strategies")
+    .select("id")
+    .eq("brand_id", brandId);
+  if (stratErr) throw stratErr;
+  const strategyIds = (strategies ?? []).map((s) => s.id as string);
+  if (!strategyIds.length) return null;
+
+  const { data: pillars, error: pillarErr } = await db
+    .from("pillars")
+    .select("id")
+    .in("strategy_id", strategyIds);
+  if (pillarErr) throw pillarErr;
+  const pillarIds = (pillars ?? []).map((p) => p.id as string);
+  if (!pillarIds.length) return null;
+
+  const { data: clusters, error: clusterErr } = await db
+    .from("clusters")
+    .select("id")
+    .in("pillar_id", pillarIds);
+  if (clusterErr) throw clusterErr;
+  const clusterIds = (clusters ?? []).map((c) => c.id as string);
+  if (!clusterIds.length) return null;
+
+  const { data: topic, error: topicErr } = await db
+    .from("topics")
+    .select("id")
+    .in("cluster_id", clusterIds)
+    .eq("status", "idea")
+    .eq("archived", false)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (topicErr) throw topicErr;
+  return (topic?.id as string) ?? null;
+}
+
+/** Count of currently in-review, non-archived drafts that a schedule (not a
+ * human) triggered, for the dashboard badge. */
+export async function countScheduledAwaitingReview(brandId: string): Promise<number> {
+  const db = getAdminClient();
+  const { count, error } = await db
+    .from("drafts")
+    .select("id, content_jobs!inner(brand_id, trigger_source)", {
+      count: "exact",
+      head: true,
+    })
+    .eq("state", "in_review")
+    .eq("archived", false)
+    .eq("content_jobs.brand_id", brandId)
+    .eq("content_jobs.trigger_source", "schedule");
+  if (error) throw error;
+  return count ?? 0;
 }
