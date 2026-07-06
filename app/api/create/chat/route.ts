@@ -223,8 +223,8 @@ export async function POST(req: NextRequest) {
     // tokens without adding information.
     const transcript: ChatMsg[] = [
       ...(history ?? []).slice(-38),
-      { role: "user", content: message.trim() },
-      { role: "assistant", content: reply },
+      { role: "user" as const, content: message.trim() },
+      { role: "assistant" as const, content: reply },
     ].slice(-40);
 
     await updateCampaign(campaign.id, {

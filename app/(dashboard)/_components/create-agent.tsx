@@ -63,36 +63,52 @@ interface CreateResponse {
   card?: BriefCard | null;
   options?: Option[] | null;
   readyToGenerate?: boolean;
+  draftId?: string | null;
   error?: string;
 }
 
+/** Resumed state from the brand's most recent in-flight campaign, so a page
+ * reload picks the thread back up instead of starting blank. */
+export interface CreateAgentInitialState {
+  campaignId: string;
+  messages: Msg[];
+  card: BriefCard | null;
+  topicId: string | null;
+  ready: boolean;
+}
+
 /**
- * The dashboard creation agent: a brief-then-confirm chat that turns "what are
- * we creating today?" into an editable email brief, then hands off to the
- * existing draft pipeline. Posts to /api/create/chat; on confirm it POSTs
- * /api/generate and opens the draft review page.
+ * The dashboard creation agent: a brief-then-generate chat that turns "what
+ * are we creating today?" into an editable email brief and drives it all the
+ * way to a generated draft. Posts to /api/create/chat; when the agent calls
+ * generate_content, the response carries a draftId and this component
+ * navigates to the draft review page automatically. The brief card + manual
+ * Generate button remain as a fallback for turns where the agent asked a
+ * clarifying question instead.
  */
 export function CreateAgent({
   suggestions = [],
   className,
+  initial,
 }: {
   suggestions?: CreateAgentSuggestion[];
   className?: string;
+  initial?: CreateAgentInitialState;
 }) {
   const router = useRouter();
   const toast = useToast();
 
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<Msg[]>(initial?.messages ?? []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [card, setCard] = useState<BriefCard | null>(null);
-  const [topicId, setTopicId] = useState<string | null>(null);
-  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [card, setCard] = useState<BriefCard | null>(initial?.card ?? null);
+  const [topicId, setTopicId] = useState<string | null>(initial?.topicId ?? null);
+  const [campaignId, setCampaignId] = useState<string | null>(initial?.campaignId ?? null);
   const [options, setOptions] = useState<Option[] | null>(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
   // Which pipeline the brief hands off to. Same brief, different renderer:
   // email → the email draft pipeline, blog → the Sanity-bound blog pipeline.
@@ -145,6 +161,11 @@ export function CreateAgent({
       setCard(data.card ?? null);
       setOptions(data.options ?? null);
       setReady(Boolean(data.readyToGenerate));
+      // The agent already generated (or reused) a draft this turn; skip the
+      // manual Generate fallback and open it directly.
+      if (data.draftId) {
+        router.push(`/drafts/${data.draftId}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setMessages((m) => [

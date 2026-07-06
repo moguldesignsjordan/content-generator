@@ -3,10 +3,12 @@ import { isSupabaseConfigured } from "@/lib/db/client";
 import {
   getBrandStrategy,
   getBrandWithIcps,
+  getLatestActiveCampaign,
   listDrafts,
   listProducts,
 } from "@/lib/db/queries";
 import { brandReadiness } from "@/lib/brand-readiness";
+import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
 import {
   Card,
   LinkButton,
@@ -70,17 +72,50 @@ export default async function DashboardPage() {
   }
 
   const { brand, pillars } = data;
-  const [drafts, withIcps, products] = await Promise.all([
+  const [drafts, withIcps, products, activeCampaign] = await Promise.all([
     listDrafts().catch(() => []),
     getBrandWithIcps().catch(() => null),
     listProducts(brand.id).catch(() => []),
+    getLatestActiveCampaign(brand.id).catch(() => null),
   ]);
   const readiness = brandReadiness(brand, withIcps?.icps ?? [], products);
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
-      c.topics.map((t) => ({ id: t.id, title: t.title, status: t.status })),
+      c.topics.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        funnel_stage: t.funnel_stage,
+      })),
     ),
   );
+
+  // Resume the create-agent thread on reload instead of starting blank, but
+  // only when there's an actual conversation to resume.
+  const activeMessages = activeCampaign?.chat_state?.messages ?? [];
+  const primaryIcp =
+    withIcps?.icps.find((i) => i.is_primary) ?? withIcps?.icps[0] ?? null;
+  const createAgentInitial =
+    activeCampaign && activeMessages.length > 0
+      ? {
+          campaignId: activeCampaign.id,
+          messages: activeMessages,
+          topicId: activeCampaign.topic_id,
+          ready: !!(
+            activeCampaign.brief.goal &&
+            activeCampaign.brief.key_message &&
+            activeCampaign.topic_id
+          ),
+          card: buildBriefCard({
+            brand,
+            strategy: data.strategy,
+            primaryIcp,
+            products,
+            brief: activeCampaign.brief,
+            ...topicContextFor(activeCampaign.topic_id, allTopics),
+          }),
+        }
+      : undefined;
 
   const inReview = drafts.filter((d) => d.state === "in_review").length;
   const approved = drafts.filter((d) => d.state === "approved").length;
@@ -105,7 +140,7 @@ export default async function DashboardPage() {
       />
 
       {/* Create — leads the page */}
-      <CreateAgent suggestions={suggestions} />
+      <CreateAgent suggestions={suggestions} initial={createAgentInitial} />
 
       {/* What's still missing from the brand brain (hides itself when full) */}
       <BrandReadinessCard {...readiness} />
