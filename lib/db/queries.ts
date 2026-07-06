@@ -3,6 +3,7 @@ import { getAdminClient } from "./client";
 import type {
   Brand,
   BrandGuidelines,
+  BrandMemory,
   Campaign,
   CampaignBrief,
   CampaignChatState,
@@ -480,6 +481,8 @@ export async function recordPublication(args: {
   target: string;
   externalId: string;
   url?: string;
+  status?: string;
+  scheduledFor?: string;
 }): Promise<PublicationRecord> {
   const db = getAdminClient();
   const { data, error } = await db
@@ -489,6 +492,8 @@ export async function recordPublication(args: {
       target: args.target,
       external_id: args.externalId,
       url: args.url ?? null,
+      status: args.status ?? "sent",
+      scheduled_for: args.scheduledFor ?? null,
     })
     .select("*")
     .single();
@@ -1212,6 +1217,48 @@ export async function deleteProduct(productId: string): Promise<void> {
   if (error) throw error;
 }
 
+// ── Brand memory (durable facts the create agent learns and recalls) ─────────
+
+/** All learned facts for a brand, newest first. Degrades to [] pre-migration-007. */
+export async function listBrandMemory(brandId: string): Promise<BrandMemory[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_memory")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (error && isMissingTableError(error)) {
+    console.warn(
+      "[queries] brand_memory table missing, apply db/migrations/007 to enable memory",
+    );
+    return [];
+  }
+  if (error) throw error;
+  return (data ?? []) as BrandMemory[];
+}
+
+/** Saves a durable fact the agent learned (its `remember` tool). */
+export async function addBrandMemory(
+  brandId: string,
+  fact: { content: string; kind?: string; source?: string },
+): Promise<BrandMemory> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_memory")
+    .insert({ brand_id: brandId, ...fact })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as BrandMemory;
+}
+
+/** Deletes a learned fact (its `forget` tool). */
+export async function deleteBrandMemory(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("brand_memory").delete().eq("id", id);
+  if (error) throw error;
+}
+
 /**
  * First cluster under the brand's strategy, the home for topics created from
  * the campaign chat (which has no cluster concept). Null when no clusters exist.
@@ -1283,6 +1330,27 @@ export async function getCampaign(
     .from("campaigns")
     .select("*")
     .eq("id", campaignId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Campaign) ?? null;
+}
+
+/**
+ * The brand's most recently active campaign (anything not yet `done`), so the
+ * dashboard can resume the create-agent thread on reload instead of starting
+ * blank. Null when there's nothing in flight.
+ */
+export async function getLatestActiveCampaign(
+  brandId: string,
+): Promise<Campaign | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("campaigns")
+    .select("*")
+    .eq("brand_id", brandId)
+    .neq("status", "done")
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return (data as Campaign) ?? null;

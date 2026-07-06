@@ -151,6 +151,8 @@ export function BlogReviewActions({
         external_id: data.externalId ?? null,
         url: data.url ?? null,
         published_at: "",
+        status: "sent",
+        scheduled_for: null,
       });
       toast.success(
         data.alreadyPublished

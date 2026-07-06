@@ -33,10 +33,14 @@ Last updated: 2026-07-05.
 - AI proposes, the human approves: brand-brain writes only happen on an
   explicit Save/confirm (settings suggest, campaign-chat voice proposals,
   guidelines synthesis all follow this contract).
-- Publishing is built as a provider-agnostic layer (`lib/publishing/`) but
-  sending still requires per-brand credentials + an explicit click — nothing
-  auto-sends. Adapters create drafts/campaigns on the provider side; the
-  actual send/schedule stays a human act.
+- Publishing is built as a provider-agnostic layer (`lib/publishing/`);
+  per-brand credentials are still required and nothing sends without the
+  human clicking Publish in the app. For MailerLite specifically, that one
+  click now drives the actual send/schedule too (instant or a chosen future
+  time), so there's no second manual step inside MailerLite's own dashboard,
+  by Jordan's explicit call on 2026-07-05 (still one explicit human act, just
+  not a second one in a different system). Sanity/blog publishing has no
+  scheduling concept and still just creates a draft doc.
 
 ## Current state (as of `3259d95`, pushed to `origin/feat/dashboard-create-agent`)
 
@@ -127,6 +131,21 @@ is clean — everything below is committed and pushed, not pending.
   Sanity, DataForSEO, `INTEGRATION_ENCRYPTION_KEY`. Migrations 004
   (`brand_integrations`) and 005 (`email_type`/`blog_type`) confirmed applied
   to the live Supabase DB.
+- **MailerLite direct send/schedule (new, migration applied, UI not yet
+  click-tested):** Publish on an approved email now calls MailerLite's real
+  `POST /campaigns/{id}/schedule` right after creating the campaign (verified
+  against developers.mailerlite.com), instead of stopping at a draft campaign
+  the user had to finish inside MailerLite. Two controls on the drafts review
+  screen: "Send now" (instant delivery) and "Schedule for later" (a
+  `datetime-local` picker, no timezone field, relies on MailerLite's own
+  account-default timezone). `publications` has two new columns (migration
+  006, **confirmed applied to the live DB 2026-07-05** via a direct REST
+  query): `status` ('sent' | 'scheduled' | 'draft') and `scheduled_for`. If
+  the schedule call fails after the campaign was already
+  created, `publish()` returns `status: "draft"` instead of throwing (so a
+  retry never double-creates the campaign in MailerLite) and the UI shows a
+  "created but not scheduled, finish it in MailerLite" warning with a link,
+  since there's no in-app retry-just-the-schedule path yet.
 
 **Known limitations (by design or deferred, not bugs):**
 - The SSE generation-run dedupe registry (`lib/pipeline/generation-runs.ts`)
@@ -170,6 +189,16 @@ is purely "click through it as the logged-in user":
   (or `blogType`) and confirm the draft honors it instead of deriving one, and
   that `content_jobs.email_type`/`blog_type` end up populated either way
   (overridden or plain-derived) after generation.
+- **MailerLite direct send/schedule:** migration 006 is applied (confirmed
+  live), but the actual click-through was skipped by Jordan's choice on
+  2026-07-05 (no logged-in browser session available at the time). Still
+  needs: with a real MailerLite key + sender + at least one group, click
+  "Send now" on an approved email and confirm it actually sends (not just
+  creates a draft campaign); click "Schedule for later," pick a future time,
+  confirm MailerLite shows it as scheduled at roughly that time; force a
+  schedule failure (e.g. a campaign with no group set) and confirm the UI
+  shows the "created but not scheduled" warning instead of crashing or
+  silently succeeding.
 
 ## What's not built yet
 
@@ -177,8 +206,12 @@ is purely "click through it as the logged-in user":
   (the backend override path is wired; nothing in the UI sets it yet) or to
   tune per-type word targets.
 - Blog reject/regenerate + click-to-edit for blog drafts (email has both).
-- Actually sending email campaigns (the adapter creates the MailerLite
-  campaign as a draft; scheduling/sending stays a future surface).
+- In-app retry for a MailerLite campaign stuck in `status: "draft"` (schedule
+  call failed after the campaign was created) — today the fix is manual,
+  inside MailerLite.
+- A recurring/automated email series (e.g. "every Monday, auto-generate and
+  send") — what's built is per-email scheduling, each one still approved and
+  triggered individually; no scheduler that also triggers generation.
 - **Slice 4 — Keyword research (DataForSEO):** not started; the natural
   upstream unlock for topic quality.
 - **Slice 7 — Distribution/repurposing checklist:** not started.

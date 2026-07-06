@@ -81,6 +81,8 @@ export function ReviewActions({
   const [creatingBlog, setCreatingBlog] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publication, setPublication] = useState(initialPublication);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleDateTime, setScheduleDateTime] = useState("");
 
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
@@ -332,16 +334,21 @@ export function ReviewActions({
     }
   }
 
-  // Push the approved email to MailerLite as a draft campaign. Idempotent
-  // server-side (the pipeline's publications row check + the route return
-  // alreadyPublished), so a double-click never double-creates.
-  async function handlePublish() {
+  // Sends the approved email through MailerLite directly, immediately or at a
+  // chosen time, no separate manual step in the MailerLite dashboard.
+  // Idempotent server-side (the pipeline's publications row check + the
+  // route return alreadyPublished), so a double-click never double-sends.
+  async function handlePublish(
+    schedule: { type: "instant" } | { type: "scheduled"; date: string; hours: string; minutes: string } = {
+      type: "instant",
+    },
+  ) {
     setPublishing(true);
     try {
       const res = await fetch(`/api/drafts/${draftId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: "mailerlite" }),
+        body: JSON.stringify({ target: "mailerlite", schedule }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -349,6 +356,9 @@ export function ReviewActions({
         externalId?: string;
         url?: string;
         alreadyPublished?: boolean;
+        status?: string;
+        scheduledFor?: string;
+        scheduleError?: string;
       };
       if (!res.ok) throw new Error(data.error ?? "Failed to publish.");
       setPublication({
@@ -358,18 +368,37 @@ export function ReviewActions({
         external_id: data.externalId ?? null,
         url: data.url ?? null,
         published_at: "",
+        status: data.status ?? "sent",
+        scheduled_for: data.scheduledFor ?? null,
       });
-      toast.success(
-        data.alreadyPublished
-          ? "Already in MailerLite, nothing sent twice."
-          : "Sent to MailerLite as a draft campaign.",
-      );
+      setShowSchedule(false);
+      if (data.alreadyPublished) {
+        toast.success("Already in MailerLite, nothing sent twice.");
+      } else if (data.status === "draft") {
+        toast.error(
+          data.scheduleError
+            ? `Created in MailerLite but scheduling failed: ${data.scheduleError}`
+            : "Created in MailerLite but couldn't confirm delivery. Check MailerLite directly.",
+        );
+      } else if (data.status === "scheduled") {
+        toast.success("Scheduled in MailerLite.");
+      } else {
+        toast.success("Sent via MailerLite.");
+      }
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to publish.");
     } finally {
       setPublishing(false);
     }
+  }
+
+  function handleScheduleSubmit() {
+    if (!scheduleDateTime) return;
+    const [date, time] = scheduleDateTime.split("T");
+    const [hours, minutes] = (time ?? "").split(":");
+    if (!date || !hours || !minutes) return;
+    void handlePublish({ type: "scheduled", date, hours, minutes });
   }
 
   // Why the Reject button won't respond, surfaced via tooltip since the
@@ -633,17 +662,29 @@ export function ReviewActions({
 
       {/* Publish to MailerLite (appears once approved). Mirrors the blog
           screen's Sanity card: shows the existing campaign if already pushed,
-          the send button when MailerLite is reachable, or a connect hint. */}
+          the send/schedule controls when MailerLite is reachable, or a
+          connect hint. Approving here is the one explicit action: sending
+          goes straight through MailerLite's API, no separate manual step in
+          the MailerLite dashboard. */}
       {state === "approved" && (
         <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
           {publication?.external_id ? (
             <>
               <p className="text-sm text-foreground">
-                In MailerLite as a draft campaign
+                {publication.status === "scheduled" && publication.scheduled_for
+                  ? `Scheduled in MailerLite for ${new Date(publication.scheduled_for).toLocaleString()}`
+                  : publication.status === "draft"
+                    ? "Created in MailerLite, but not scheduled yet"
+                    : "Sent via MailerLite"}
                 <span className="ml-2 font-mono text-[12px] text-muted">
                   {publication.external_id}
                 </span>
               </p>
+              {publication.status === "draft" && (
+                <p className="text-[13px] text-danger">
+                  Scheduling failed. Open MailerLite to finish sending it.
+                </p>
+              )}
               {publication.url && (
                 <a
                   href={publication.url}
@@ -658,12 +699,27 @@ export function ReviewActions({
           ) : mailerliteConfigured ? (
             <>
               <p className="text-sm text-muted">
-                Creates a DRAFT campaign in MailerLite. You schedule and send it
-                there, so the audience and timing stay your call.
+                Sends this email through MailerLite immediately, no separate
+                step there. Schedule it for later instead if you'd rather.
               </p>
-              <Button variant="gradient" loading={publishing} onClick={handlePublish}>
-                Send to MailerLite
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  loading={publishing && showSchedule}
+                  disabled={publishing}
+                  onClick={() => setShowSchedule(true)}
+                >
+                  Schedule for later
+                </Button>
+                <Button
+                  variant="gradient"
+                  loading={publishing && !showSchedule}
+                  disabled={publishing}
+                  onClick={() => void handlePublish()}
+                >
+                  Send now
+                </Button>
+              </div>
             </>
           ) : (
             <p className="text-sm text-muted">
@@ -845,6 +901,44 @@ export function ReviewActions({
             Max revisions reached. Edit the draft manually or start fresh.
           </p>
         )}
+      </Sheet>
+
+      {/* Schedule for later: date/time only, no timezone field, MailerLite
+          applies the account's own default timezone to it. */}
+      <Sheet
+        open={showSchedule}
+        onClose={() => setShowSchedule(false)}
+        title="Schedule for later"
+        description="Picks a future send time. Uses your MailerLite account's timezone."
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="subtle"
+              className="flex-1"
+              onClick={() => setShowSchedule(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gradient"
+              className="flex-1"
+              loading={publishing}
+              disabled={!scheduleDateTime}
+              onClick={handleScheduleSubmit}
+            >
+              Schedule
+            </Button>
+          </div>
+        }
+      >
+        <Field label="Send at">
+          <Input
+            type="datetime-local"
+            value={scheduleDateTime}
+            min={new Date().toISOString().slice(0, 16)}
+            onChange={(e) => setScheduleDateTime(e.target.value)}
+          />
+        </Field>
       </Sheet>
     </div>
   );

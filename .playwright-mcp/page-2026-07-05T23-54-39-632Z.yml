@@ -1,0 +1,28 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "Mogul" [ref=e5]
+      - heading "On-brand content, shipped on your terms." [level=1] [ref=e6]:
+        - text: On-brand content,
+        - text: shipped on your terms.
+      - paragraph [ref=e7]: Mogul turns your brand strategy into emails and posts you actually approve. Sign in to pick up where you left off.
+    - generic [ref=e10]:
+      - tablist [ref=e11]:
+        - tab "Sign in" [selected] [ref=e12]
+        - tab "Create account" [ref=e13]
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - text: Email
+          - textbox "Email" [ref=e16]:
+            - /placeholder: you@brand.com
+        - generic [ref=e17]:
+          - text: Password
+          - generic [ref=e18]:
+            - textbox "Password" [ref=e19]:
+              - /placeholder: Your password
+            - button "Show" [ref=e20]
+        - button "Forgot password?" [ref=e22]
+        - button "Sign in" [ref=e23]
+      - generic [ref=e24]: or
+      - button "Email me a sign-in link" [ref=e25]
+      - paragraph [ref=e26]: New to Mogul? Create an account to get started.

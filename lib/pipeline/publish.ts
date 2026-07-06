@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/queries";
 import type { BrandIntegration } from "@/lib/db/types";
 import { getProvider, providersForKind } from "@/lib/publishing/registry";
+import type { PublishSchedule } from "@/lib/publishing/provider";
 
 export interface PublishOutcome {
   target: string;
@@ -16,6 +17,11 @@ export interface PublishOutcome {
   url?: string;
   /** True when this call found an existing publication and did nothing. */
   alreadyPublished: boolean;
+  /** 'sent' | 'scheduled' | 'draft'. See PublishResult for what each means. */
+  status: string;
+  scheduledFor?: string;
+  /** Present when status is 'draft' because the provider's send/schedule call failed. */
+  scheduleError?: string;
 }
 
 /**
@@ -36,6 +42,7 @@ export interface PublishOutcome {
 export async function publishDraft(
   draftId: string,
   targetId?: string,
+  schedule?: PublishSchedule,
 ): Promise<PublishOutcome> {
   const draft = await getDraftWithJobContext(draftId);
   if (!draft) throw new Error(`Draft ${draftId} not found.`);
@@ -85,6 +92,8 @@ export async function publishDraft(
       externalId: existing.external_id,
       url: existing.url ?? undefined,
       alreadyPublished: true,
+      status: existing.status,
+      scheduledFor: existing.scheduled_for ?? undefined,
     };
   }
 
@@ -95,6 +104,7 @@ export async function publishDraft(
     meta: draft.meta,
     brand,
     integration,
+    schedule,
   });
 
   const row = await recordPublication({
@@ -102,6 +112,8 @@ export async function publishDraft(
     target: provider.id,
     externalId: result.externalId,
     url: result.url,
+    status: result.status,
+    scheduledFor: result.scheduledFor,
   });
 
   await markJobPublished(draft.jobId, result.url);
@@ -111,5 +123,8 @@ export async function publishDraft(
     externalId: row.external_id ?? result.externalId,
     url: row.url ?? result.url,
     alreadyPublished: false,
+    status: row.status,
+    scheduledFor: row.scheduled_for ?? undefined,
+    scheduleError: result.scheduleError,
   };
 }

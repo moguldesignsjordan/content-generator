@@ -38,6 +38,24 @@ export interface ProviderField {
   envVar?: string;
 }
 
+/**
+ * When to actually deliver an email campaign. Only meaningful to email
+ * providers (MailerLite); blog providers ignore it. "instant" is the default
+ * everywhere Publish is clicked without an explicit schedule, matching "one
+ * approval, no second manual step in the provider's own dashboard."
+ */
+export type PublishSchedule =
+  | { type: "instant" }
+  | {
+      type: "scheduled";
+      /** "YYYY-MM-DD" */
+      date: string;
+      /** "HH" (24h) */
+      hours: string;
+      /** "mm" */
+      minutes: string;
+    };
+
 export interface PublishInput {
   jobId: string;
   draftId: string;
@@ -46,11 +64,24 @@ export interface PublishInput {
   brand: Brand;
   /** The brand's saved connection for this provider, if any (env is fallback). */
   integration: BrandIntegration | null;
+  /** Ignored by providers with no scheduling concept (e.g. Sanity). */
+  schedule?: PublishSchedule;
 }
 
 export interface PublishResult {
   externalId: string;
   url?: string;
+  /**
+   * 'sent' | 'scheduled' | 'draft'. Defaults to 'sent' when a provider
+   * doesn't return one (e.g. Sanity, which has no send/schedule step).
+   * 'draft' means the resource was created but delivery wasn't confirmed
+   * (see scheduleError) — never thrown, so a retry never double-creates it.
+   */
+  status?: "sent" | "scheduled" | "draft";
+  /** Set when status is 'scheduled'. ISO timestamp. */
+  scheduledFor?: string;
+  /** Set when status is 'draft' because the schedule/send call failed. */
+  scheduleError?: string;
 }
 
 export interface PublishProvider {

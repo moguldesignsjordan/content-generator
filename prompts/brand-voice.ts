@@ -1,5 +1,6 @@
 import type {
   Brand,
+  BrandMemory,
   CampaignBrief,
   Icp,
   Product,
@@ -121,6 +122,19 @@ export function buildGuidelinesBlock(brand: Brand): string {
   }
   if (g.cta_philosophy) lines.push(`  Calls to action: ${g.cta_philosophy}`);
   return lines.join("\n");
+}
+
+// Builds the learned-facts block from brand_memory (migration 007): durable
+// preferences/decisions/constraints the agent picked up in past sessions.
+// Empty string when nothing's been learned yet, so buildCreateAgentSystem's
+// .filter(Boolean) drops it cleanly.
+export function buildMemoryBlock(memories: BrandMemory[]): string {
+  if (!memories.length) return "";
+  return [
+    "THINGS YOU'VE LEARNED ABOUT THIS ACCOUNT (from past sessions, trust these).",
+    "Each line's id is for the forget tool if one ever needs removing:",
+    ...memories.map((m) => `  - id=${m.id} — ${m.content}`),
+  ].join("\n");
 }
 
 // ── Shared catalog/state blocks ─────────────────────────────────────────────

@@ -252,6 +252,22 @@ export interface BrandImportProposal {
   pages_scraped?: string[];
 }
 
+// ── Brand memory: durable facts the create agent learns and recalls ─────────
+// (migration 007). Distinct from voice_profile, which only changes via the
+// explicit propose/confirm flow; these are written directly by the agent's
+// `remember` tool when the user states a durable preference, decision, or
+// constraint.
+
+export interface BrandMemory {
+  id: string;
+  brand_id: string;
+  content: string;
+  kind: string | null;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Campaigns: one strategic interview that briefs a piece of content ───────
 
 export type CampaignStatus = "briefing" | "generating" | "drafted" | "done";
@@ -544,6 +560,12 @@ export interface PublicationRecord {
   external_id: string | null;
   url: string | null;
   published_at: string;
+  // 'sent' | 'scheduled' | 'draft' (migration 006). 'draft' means the
+  // provider created the resource but a send/schedule call failed or was
+  // never attempted (e.g. MailerLite scheduling error) — Sanity/blog rows
+  // stay 'sent' since publishing there has no scheduling concept.
+  status: string;
+  scheduled_for: string | null;
 }
 
 // A per-brand publishing connection (MailerLite, Sanity, ...). `config` holds

@@ -24,6 +24,7 @@
   drop table if exists content_jobs    cascade;
   drop table if exists campaigns       cascade;
   drop table if exists products        cascade;
+  drop table if exists brand_memory    cascade;
   drop table if exists topics          cascade;
   drop table if exists clusters        cascade;
   drop table if exists pillars         cascade;
@@ -127,6 +128,20 @@
     unique (brand_id, slug)
   );
 
+  -- Durable brand memory (migration 007): facts the create agent learns mid-
+  -- conversation (a preference, a decision, a constraint) and recalls in every
+  -- future session. Distinct from voice_profile, which only changes via the
+  -- explicit propose/confirm flow. kind is loose free text, not an enum.
+  create table brand_memory (
+    id         uuid primary key default gen_random_uuid(),
+    brand_id   uuid not null references brands(id) on delete cascade,
+    content    text not null,
+    kind       text,
+    source     text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
+
   -- A campaign: one strategic interview (chat) that produces a brief, picks or
   -- creates a topic, and drives generation. chat_state mirrors
   -- brands.onboarding_state ({ messages }) for resume.
@@ -227,6 +242,7 @@
   create index idx_jobs_campaign    on content_jobs(campaign_id);
   create index idx_drafts_job       on drafts(job_id);
   create index idx_products_brand   on products(brand_id);
+  create index idx_brand_memory_brand on brand_memory(brand_id);
   create index idx_campaigns_brand  on campaigns(brand_id);
   create index idx_topics_archived  on topics(archived);
   create index idx_drafts_archived  on drafts(archived);
