@@ -592,6 +592,16 @@ export interface PublicationRecord {
   scheduled_for: string | null;
 }
 
+// One performance snapshot row (migration-free: the `performance` table has
+// existed since schema v1; Plan 2 is the first thing that writes to it).
+// metric is a loose text label ("sent" | "opens" | "open_rate" | "clicks" |
+// "click_rate" for MailerLite today), not an enum, so a new provider's
+// metrics never need a migration.
+export interface PerformanceMetric {
+  metric: string;
+  value: number;
+}
+
 // A per-brand publishing connection (MailerLite, Sanity, ...). `config` holds
 // the connection's fields: plain values as-is, secret values as the
 // "gcm:v1:..." ciphertext from lib/crypto/secrets.ts. One row per

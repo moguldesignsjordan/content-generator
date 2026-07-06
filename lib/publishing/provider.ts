@@ -5,6 +5,7 @@ import type {
   ContentJobType,
   DraftMeta,
   EmailDraftContent,
+  PerformanceMetric,
 } from "@/lib/db/types";
 
 // The publishing abstraction: every destination (MailerLite, Sanity, and
@@ -84,6 +85,14 @@ export interface PublishResult {
   scheduleError?: string;
 }
 
+export interface FetchStatsInput {
+  /** publications.external_id: the campaign/document id at the destination. */
+  externalId: string;
+  brand: Brand;
+  /** The brand's saved connection for this provider, if any (env is fallback). */
+  integration: BrandIntegration | null;
+}
+
 export interface PublishProvider {
   /** Stable id, recorded as publications.target (e.g. "mailerlite"). */
   id: string;
@@ -108,4 +117,10 @@ export interface PublishProvider {
    * the pipeline's publications-row check that runs before every call.
    */
   publish(input: PublishInput): Promise<PublishResult>;
+  /**
+   * Pulls the latest performance numbers for an already-published item.
+   * Optional: providers with no reporting concept yet (Sanity/blog, deferred
+   * to Google Search Console) simply don't implement it.
+   */
+  fetchStats?(input: FetchStatsInput): Promise<PerformanceMetric[]>;
 }

@@ -1,7 +1,8 @@
 import "server-only";
 import { resolvePlain, resolveSecret } from "../credentials";
-import type { Brand, BrandIntegration } from "@/lib/db/types";
+import type { Brand, BrandIntegration, PerformanceMetric } from "@/lib/db/types";
 import type {
+  FetchStatsInput,
   ProviderField,
   PublishInput,
   PublishProvider,
@@ -17,6 +18,11 @@ import type {
 //   { delivery: "instant" }
 //     or { delivery: "scheduled", schedule: { date, hours, minutes, timezone_id? } }
 //   → 200 with { data: { status: "sent" | "ready" | ... } }
+//   GET https://connect.mailerlite.com/api/campaigns/{id}
+//   → 200 with { data: { stats: { sent, opens_count, unique_opens_count,
+//       open_rate: { float, string }, clicks_count, unique_clicks_count,
+//       click_rate: { float, string }, ... } } } (rate fields are objects,
+//     not plain numbers; read .float).
 //
 // The API key is the only MailerLite credential; it resolves from the brand's
 // connection (encrypted) with env-var fallback. Sender identity lives on the
@@ -185,5 +191,51 @@ export const mailerliteProvider: PublishProvider = {
     }
 
     return { externalId: String(id), url, status: "sent" };
+  },
+
+  async fetchStats(input: FetchStatsInput): Promise<PerformanceMetric[]> {
+    const ml = resolveMailerliteConfig(input.brand, input.integration);
+    if (!ml.apiKey) {
+      throw new Error(
+        "MailerLite is not connected. Add an API key in Settings → Connections.",
+      );
+    }
+
+    const res = await fetch(`${API_BASE}/campaigns/${input.externalId}`, {
+      headers: {
+        Authorization: `Bearer ${ml.apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `MailerLite campaign fetch failed (${res.status}): ${body.slice(0, 400)}`,
+      );
+    }
+
+    const data = (await res.json()) as {
+      data?: {
+        stats?: {
+          sent?: number;
+          opens_count?: number;
+          unique_opens_count?: number;
+          open_rate?: { float?: number };
+          clicks_count?: number;
+          unique_clicks_count?: number;
+          click_rate?: { float?: number };
+        };
+      };
+    };
+    const stats = data.data?.stats;
+    if (!stats) return [];
+
+    return [
+      { metric: "sent", value: stats.sent ?? 0 },
+      { metric: "opens", value: stats.unique_opens_count ?? 0 },
+      { metric: "open_rate", value: stats.open_rate?.float ?? 0 },
+      { metric: "clicks", value: stats.unique_clicks_count ?? 0 },
+      { metric: "click_rate", value: stats.click_rate?.float ?? 0 },
+    ];
   },
 };

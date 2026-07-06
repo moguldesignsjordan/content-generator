@@ -23,6 +23,7 @@ import type {
   KeywordData,
   MailerliteConfig,
   OnboardingState,
+  PerformanceMetric,
   PillarWithClusters,
   Positioning,
   Product,
@@ -532,6 +533,46 @@ export async function markJobPublished(
       .eq("id", job.topic_id as string);
     if (error) throw error;
   }
+}
+
+/**
+ * Appends performance snapshot rows for one publication (Plan 2 analytics
+ * loop). No upsert: performance is a time series, one row per metric per
+ * fetch, and getLatestPerformance reads the newest row per metric.
+ */
+export async function recordPerformance(
+  publicationId: string,
+  metrics: PerformanceMetric[],
+): Promise<void> {
+  if (!metrics.length) return;
+  const db = getAdminClient();
+  const { error } = await db.from("performance").insert(
+    metrics.map((m) => ({
+      publication_id: publicationId,
+      metric: m.metric,
+      value: m.value,
+    })),
+  );
+  if (error) throw error;
+}
+
+/** The newest value per metric for one publication (MAX(fetched_at) per metric). */
+export async function getLatestPerformance(
+  publicationId: string,
+): Promise<(PerformanceMetric & { fetched_at: string })[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("performance")
+    .select("metric, value, fetched_at")
+    .eq("publication_id", publicationId)
+    .order("fetched_at", { ascending: false });
+  if (error) throw error;
+
+  const latest = new Map<string, PerformanceMetric & { fetched_at: string }>();
+  for (const row of (data ?? []) as { metric: string; value: number; fetched_at: string }[]) {
+    if (!latest.has(row.metric)) latest.set(row.metric, row);
+  }
+  return Array.from(latest.values());
 }
 
 // ── Brand integrations (per-brand publishing connections; env stays fallback) ──

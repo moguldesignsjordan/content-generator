@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/queries";
 import { resolveSanityConfig } from "@/lib/clients/sanity";
 import { resolveMailerliteConfig } from "@/lib/publishing/providers/mailerlite";
+import { getPerformanceForDraft } from "@/lib/pipeline/performance";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
@@ -33,6 +34,9 @@ export default async function DraftReviewPage({
     generation ? generation.status !== "ready" : !draft.content.html;
   const isBlog = draft.job_type === "blog";
   const publication = await getPublicationForDraft(id).catch(() => null);
+  const performance = publication
+    ? await getPerformanceForDraft(id).catch(() => [])
+    : [];
 
   // Resolve the cross-link between paired drafts: a blog's source email (via
   // meta.source_draft_id), or — for an email — the blog already spun off it.
@@ -135,6 +139,7 @@ export default async function DraftReviewPage({
           existingBlog={existingBlog}
           publication={publication}
           mailerliteConfigured={mailerliteConfigured}
+          initialPerformance={performance}
         />
       )}
     </>

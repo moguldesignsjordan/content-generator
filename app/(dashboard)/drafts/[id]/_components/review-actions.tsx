@@ -20,6 +20,7 @@ import type {
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
+  PerformanceMetric,
   PublicationRecord,
 } from "@/lib/db/types";
 import {
@@ -29,6 +30,7 @@ import {
 } from "@/lib/email/preview-mode";
 import { DesignChat } from "./design-chat";
 import { EmailPreview } from "./email-preview";
+import { PerformanceStats } from "./performance-stats";
 
 interface ReviewActionsProps {
   draftId: string;
@@ -46,6 +48,8 @@ interface ReviewActionsProps {
   publication: PublicationRecord | null;
   /** True when MailerLite has an API key + sender identity and can actually send. */
   mailerliteConfigured: boolean;
+  /** Last-fetched MailerLite performance snapshot, if any (Plan 2). */
+  initialPerformance?: PerformanceMetric[];
 }
 
 /**
@@ -72,6 +76,7 @@ export function ReviewActions({
   existingBlog,
   publication: initialPublication,
   mailerliteConfigured,
+  initialPerformance = [],
 }: ReviewActionsProps) {
   const router = useRouter();
   const [archived, setArchived] = useState(initialArchived);
@@ -695,6 +700,7 @@ export function ReviewActions({
                   Open MailerLite →
                 </a>
               )}
+              <PerformanceStats draftId={draftId} initialMetrics={initialPerformance} />
             </>
           ) : mailerliteConfigured ? (
             <>

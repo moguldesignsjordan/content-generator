@@ -146,8 +146,8 @@ is clean — everything below is committed and pushed, not pending.
   retry never double-creates the campaign in MailerLite) and the UI shows a
   "created but not scheduled, finish it in MailerLite" warning with a link,
   since there's no in-app retry-just-the-schedule path yet.
-- **Slice 4 — DataForSEO keyword research, "enrich" cut (new, not yet
-  committed, migration NOT yet applied):** validates the keyword a topic
+- **Slice 4 — DataForSEO keyword research, "enrich" cut (committed
+  `2326900`, migration NOT yet applied):** validates the keyword a topic
   already carries against real DataForSEO numbers, on an explicit per-topic
   "Research" tap (no auto-spend). `db/migrations/008_topic_keyword_data.sql`
   adds `topics.keyword_data` (jsonb), mirrored in `db/schema.sql`.
@@ -167,6 +167,33 @@ is clean — everything below is committed and pushed, not pending.
   `cluster-card.tsx` once researched; `suggest-topics.tsx` gets the same
   per-proposal Research link (against the raw-keyword route, since a
   proposal isn't a topic row yet).
+- **Plan 2 — Analytics loop, the `performance` table (new, not yet
+  committed):** closes strategy → content → publish → measure. The
+  `performance` table has existed since schema v1 but nothing wrote to it
+  until now. `lib/publishing/provider.ts` gains an optional
+  `fetchStats(input): Promise<PerformanceMetric[]>` on `PublishProvider`
+  (`PerformanceMetric` lives in `lib/db/types.ts` alongside the other row
+  shapes, imported by the publishing layer, not the reverse). MailerLite's
+  adapter implements it via `GET /campaigns/{id}` (verified against
+  developers.mailerlite.com: `stats.sent`, `unique_opens_count`,
+  `open_rate.float`, `unique_clicks_count`, `click_rate.float`, rate fields
+  are `{float, string}` objects, not plain numbers). Sanity/blog leaves
+  `fetchStats` unimplemented (blog metrics deferred to Google Search
+  Console). `lib/db/queries.ts` gets `recordPerformance` (appends a
+  snapshot row per metric, time-series, no upsert) and
+  `getLatestPerformance` (newest row per metric via `MAX(fetched_at)`,
+  computed in JS after an ORDER BY, not SQL DISTINCT ON). New
+  `lib/pipeline/performance.ts` (`refreshPerformance`/
+  `getPerformanceForDraft`) mirrors `publish.ts`'s resolution shape
+  (publication → provider → brand/integration). New
+  `app/api/drafts/[id]/performance/route.ts`: POST refreshes from
+  MailerLite, GET reads the last-fetched snapshot with no external call
+  (so loading the review screen doesn't spend a refresh). UI: new
+  `performance-stats.tsx` (`StatCard` grid + "Refresh stats" button) renders
+  inside the existing MailerLite publish card on `review-actions.tsx` once
+  `publication.external_id` exists. Blog review screen is untouched (no
+  Sanity stats yet). `npm run typecheck`, `npm run build`, `npx vitest run`
+  (76 tests, unchanged, no new tests added for this cut) all pass.
 
 **Known limitations (by design or deferred, not bugs):**
 - The SSE generation-run dedupe registry (`lib/pipeline/generation-runs.ts`)
@@ -239,6 +266,13 @@ is purely "click through it as the logged-in user":
   brief cites real numbers) hasn't happened yet: Supabase Auth gates every
   route including the API ones, and no logged-in session was available in
   this session to drive Playwright with.
+- **Plan 2 analytics loop: not live-verified.** Needs a real, already-sent
+  MailerLite campaign to test against (the "Refresh stats" button calls a
+  real `GET /campaigns/{id}`, and MailerLite's own stats only populate after
+  actual sends/opens/clicks happen) plus a logged-in browser session,
+  neither available in this session. Code paths (`fetchStats`,
+  `recordPerformance`/`getLatestPerformance`, the route, the UI) are
+  typecheck/build-clean but unexercised end to end.
 
 ## What's not built yet
 
@@ -253,7 +287,12 @@ is purely "click through it as the logged-in user":
   send") — what's built is per-email scheduling, each one still approved and
   triggered individually; no scheduler that also triggers generation.
 - **Slice 7 — Distribution/repurposing checklist:** not started.
-- **Analytics loop** (`performance` table) — after publishing goes live.
+- Feeding performance back into topic selection (surfacing "what's working"
+  in `buildTopicLines`/`suggest-topics`) — deliberate phase 2 for the
+  analytics loop, once real performance data exists to feed it.
+- Google Search Console / blog performance metrics (Sanity's `fetchStats`
+  is unimplemented on purpose).
+- A Vercel cron to auto-refresh performance (today it's an explicit tap only).
 - **Multi-tenancy + RLS (Tier 3)** — deliberately out of scope, the one true
   blocker to selling this as SaaS.
 - Topic remap: seeded topics still map to placeholder product slugs.
@@ -265,10 +304,14 @@ is purely "click through it as the logged-in user":
    credentials in `.env.local` (both currently block Slice 4 from working
    live, see "Not yet verified").
 2. Jordan clicks through the "Not yet verified" list above in a logged-in
-   browser session, including the Slice 4 Research flow once 1 is done.
+   browser session, including the Slice 4 Research flow once 1 is done, and
+   the Plan 2 "Refresh stats" flow once a real email has actually been sent
+   via MailerLite.
 3. Pick up the next plan from the 7-plan improvement doc
-   (`~/.claude/plans/refactored-snacking-lightning.md`) or address anything
-   the click-through turns up.
+   (`~/.claude/plans/refactored-snacking-lightning.md`) — recommended order
+   is Plan 7 (verification sweep) or Plan 4 (durable generation runs) next,
+   per that doc's sequencing table — or address anything the click-through
+   turns up.
 
 ## How to verify this doc against reality
 
