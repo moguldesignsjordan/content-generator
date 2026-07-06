@@ -9,9 +9,12 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  Sheet,
   Textarea,
+  Tooltip,
   useToast,
 } from "@/components/ui";
+import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
   ContentImage,
   DraftMeta,
@@ -43,6 +46,7 @@ interface BlogReviewActionsProps {
  */
 export function BlogReviewActions({
   draftId,
+  version,
   state: initialState,
   initialContent,
   initialMeta,
@@ -72,9 +76,69 @@ export function BlogReviewActions({
   const [publishing, setPublishing] = useState(false);
   const [publication, setPublication] = useState(initialPublication);
 
+  const [showReject, setShowReject] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const [newDraftId, setNewDraftId] = useState<string | null>(null);
+  const [rejectedThisDraft, setRejectedThisDraft] = useState(false);
+
   const copy = initialMeta.blog_copy;
   const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
   const hasQa = seoData.qa_pass !== undefined;
+  const atCap = version >= MAX_DRAFT_VERSIONS;
+  const isActionable = state === "in_review";
+  const busy = approving || archiving || publishing || regenerating;
+  const rejectDisabledReason = atCap
+    ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
+    : rejectedThisDraft
+      ? "Already rejected. Check for the new version above."
+      : null;
+
+  function handleReject() {
+    if (!feedback.trim()) return;
+    const sentFeedback = feedback;
+    setShowReject(false);
+    setFeedback("");
+    setRejectedThisDraft(true);
+    setRegenerating(true);
+    setRegenError(null);
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feedback: sentFeedback }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Failed to regenerate.");
+        }
+        const data = (await res.json()) as {
+          newDraftId?: string;
+          capped?: boolean;
+          notInReview?: boolean;
+        };
+        if (data.notInReview) {
+          setRegenError("This draft is no longer awaiting review, so it can't be rejected.");
+          router.refresh();
+          return;
+        }
+        if (data.capped) {
+          setRegenError(
+            `Max revisions (${MAX_DRAFT_VERSIONS}) reached. Start a fresh post instead.`,
+          );
+          return;
+        }
+        if (data.newDraftId) setNewDraftId(data.newDraftId);
+      } catch (e) {
+        setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
+      } finally {
+        setRegenerating(false);
+      }
+    })();
+  }
 
   function handleDownload() {
     const filename =
@@ -351,22 +415,78 @@ export function BlogReviewActions({
         </Card>
       )}
 
+      {/* Background regeneration status: never blocks the page, closes the
+          moment you submit feedback. Mirrors the email review screen. */}
+      {(regenerating || newDraftId || regenError) && (
+        <Card className="flex items-center justify-between gap-3 p-4">
+          {regenerating && (
+            <p className="flex items-center gap-2.5 text-sm text-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              Writing the new version in the background, feel free to leave
+              this page. Usually about a minute.
+            </p>
+          )}
+          {!regenerating && newDraftId && (
+            <>
+              <p className="text-sm text-foreground">New version ready.</p>
+              <Button
+                size="sm"
+                variant="gradient"
+                onClick={() => router.push(`/drafts/${newDraftId}`)}
+              >
+                View new version
+              </Button>
+            </>
+          )}
+          {!regenerating && regenError && (
+            <p className="text-sm text-danger">{regenError}</p>
+          )}
+        </Card>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        {state !== "approved" && (
-          <Button
-            variant="gradient"
-            size="lg"
-            loading={approving}
-            onClick={handleApproveClick}
-          >
-            Approve
-          </Button>
+        {isActionable ? (
+          <>
+            <Button
+              variant="gradient"
+              size="lg"
+              loading={approving}
+              disabled={busy || rejectedThisDraft}
+              onClick={handleApproveClick}
+            >
+              Approve
+            </Button>
+            {rejectDisabledReason ? (
+              <Tooltip label={rejectDisabledReason} side="top">
+                <Button variant="outline" size="lg" disabled>
+                  Reject
+                </Button>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={() => setShowReject(true)}
+              >
+                Reject
+              </Button>
+            )}
+          </>
+        ) : (
+          <p className="text-[13px] text-muted">
+            {state === "approved"
+              ? "This draft has already been approved."
+              : state === "rejected"
+                ? "This draft was rejected. Check for a newer version of this post."
+                : "This is no longer the active version of this draft."}
+          </p>
         )}
         <Button
           variant="ghost"
           size="lg"
           loading={archiving}
+          disabled={busy}
           onClick={handleToggleArchive}
         >
           {archived ? "Unarchive" : "Archive"}
@@ -375,7 +495,7 @@ export function BlogReviewActions({
           variant="ghost"
           size="lg"
           className="text-danger hover:bg-danger/10"
-          disabled={approving || archiving || publishing}
+          disabled={busy}
           onClick={() => setConfirmDelete(true)}
         >
           Delete
@@ -424,6 +544,62 @@ export function BlogReviewActions({
         confirmLabel="Delete"
         loading={deleting}
       />
+
+      {/* Reject sheet: closes instantly on submit, regeneration continues
+          in the background (see the status card above). */}
+      <Sheet
+        open={showReject}
+        onClose={() => {
+          setShowReject(false);
+          setFeedback("");
+        }}
+        title="Reject & regenerate"
+        description={
+          atCap
+            ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
+            : `Version ${version}. Your feedback shapes the next draft.`
+        }
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="subtle"
+              className="flex-1"
+              onClick={() => {
+                setShowReject(false);
+                setFeedback("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="solid"
+              className="flex-1"
+              disabled={!feedback.trim() || atCap}
+              onClick={handleReject}
+            >
+              Reject & regenerate
+            </Button>
+          </div>
+        }
+      >
+        <Field
+          label="What needs to change?"
+          hint="Tighten the copy, cover a different angle, adjust the depth or tone, whatever you want different."
+        >
+          <Textarea
+            rows={5}
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="e.g. Go deeper on the pricing section and cut the intro in half."
+            disabled={atCap}
+          />
+        </Field>
+        {atCap && (
+          <p className="mt-3 text-sm text-danger">
+            Max revisions reached. Start a fresh post instead.
+          </p>
+        )}
+      </Sheet>
     </div>
   );
 }

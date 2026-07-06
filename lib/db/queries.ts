@@ -865,12 +865,13 @@ export async function persistRegeneratedDraft(args: {
   content: EmailDraftContent;
   meta?: DraftMeta;
   seoData?: DraftSeoData;
-  /** Backfills content_jobs.email_type in step with the regenerated draft,
-   * same reasoning as populateDraft's version. */
+  /** Backfills content_jobs.email_type/blog_type in step with the
+   * regenerated draft, same reasoning as populateDraft's version. */
   emailType?: EmailType;
+  blogType?: BlogType;
 }): Promise<string> {
   const db = getAdminClient();
-  const { jobId, version, content, meta, seoData, emailType } = args;
+  const { jobId, version, content, meta, seoData, emailType, blogType } = args;
 
   const { data, error } = await db
     .from("drafts")
@@ -886,10 +887,13 @@ export async function persistRegeneratedDraft(args: {
     .single();
   if (error) throw error;
 
-  if (emailType) {
+  if (emailType || blogType) {
     const { error: jobErr } = await db
       .from("content_jobs")
-      .update({ email_type: emailType })
+      .update({
+        ...(emailType ? { email_type: emailType } : {}),
+        ...(blogType ? { blog_type: blogType } : {}),
+      })
       .eq("id", jobId);
     if (jobErr) throw jobErr;
   }

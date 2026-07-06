@@ -5,7 +5,16 @@ import {
   getAnthropic,
   logUsage,
 } from "@/lib/clients/anthropic";
-import { getCampaign, patchDraftGeneration, populateDraft } from "@/lib/db/queries";
+import {
+  getCampaign,
+  getDraftWithJobContext,
+  getLatestDraftVersion,
+  getTopicContext,
+  patchDraftGeneration,
+  persistRegeneratedDraft,
+  populateDraft,
+  rejectDraftRecord,
+} from "@/lib/db/queries";
 import {
   BLOG_TOOL,
   BlogDraftSchema,
@@ -27,6 +36,7 @@ import type {
   DraftUsage,
   TopicContext,
 } from "@/lib/db/types";
+import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
 
@@ -105,6 +115,81 @@ export async function generateBlogForTopicStreamed(
     onEvent({ type: "error", message });
     throw err;
   }
+}
+
+/**
+ * Rejects the current blog draft and regenerates a new version with the
+ * reviewer's feedback woven into the prompt. Mirrors regenerateEmailDraft
+ * (lib/pipeline/generate.ts): same version cap, same "not the active review
+ * target anymore" guard, same rejection-record-before-generating ordering.
+ * The existing hero image (if any) carries over unchanged, same as a
+ * regenerated email keeps its hero.
+ */
+export async function regenerateBlogDraft(
+  draftId: string,
+  feedback: string,
+): Promise<{ newDraftId: string } | { capped: true } | { notInReview: true }> {
+  const draftCtx = await getDraftWithJobContext(draftId);
+  if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
+
+  if (draftCtx.state !== "in_review") return { notInReview: true };
+
+  const latestVersion = await getLatestDraftVersion(draftCtx.jobId);
+  if (latestVersion >= MAX_DRAFT_VERSIONS) return { capped: true };
+
+  await rejectDraftRecord(draftId, feedback);
+
+  const ctx = await getTopicContext(draftCtx.topicId);
+  if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
+
+  const brief = await loadBrief(draftCtx.campaignId);
+  const { system, user, blogType } = buildBlogMessages(ctx, {
+    brief,
+    blogTypeOverride: draftCtx.blogType ?? undefined,
+    rejection: {
+      feedback,
+      previousTitle: draftCtx.content.subject,
+      previousMetaDescription: draftCtx.content.preheader,
+    },
+  });
+  const lengthTarget = BLOG_LENGTH_TARGETS[blogType];
+
+  const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
+    lengthTarget,
+    blogType,
+  });
+  const copy = cleanBlogCopy(parsed);
+
+  const heroImage = draftCtx.meta.hero_image;
+  const html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
+
+  const seoData = runBlogChecks(ctx, copy, html, lengthTarget, blogType);
+
+  let usage: DraftUsage | undefined;
+  for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
+
+  const meta: DraftMeta = {
+    meta_title: copy.meta_title,
+    meta_description: copy.meta_description,
+    blog_type: blogType,
+    blog_copy: copy,
+    ...(heroImage ? { hero_image: heroImage } : {}),
+    ...(draftCtx.meta.source_draft_id
+      ? { source_draft_id: draftCtx.meta.source_draft_id }
+      : {}),
+    usage,
+  };
+
+  const newDraftId = await persistRegeneratedDraft({
+    jobId: draftCtx.jobId,
+    version: latestVersion + 1,
+    content: { subject: copy.title, preheader: copy.meta_description, html },
+    meta,
+    seoData,
+    blogType,
+  });
+
+  return { newDraftId };
 }
 
 async function loadBrief(

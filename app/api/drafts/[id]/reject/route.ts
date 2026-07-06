@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { regenerateEmailDraft } from "@/lib/pipeline/generate";
+import { regenerateBlogDraft } from "@/lib/pipeline/generate-blog";
+import { getDraftWithJobContext } from "@/lib/db/queries";
 import type { EmailTemplateId } from "@/lib/db/types";
 
 export const maxDuration = 300;
@@ -26,6 +28,16 @@ export async function POST(
         { error: "Feedback is required to regenerate." },
         { status: 400 },
       );
+    }
+
+    const draftCtx = await getDraftWithJobContext(id);
+    if (!draftCtx) {
+      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+
+    if (draftCtx.jobType === "blog") {
+      const result = await regenerateBlogDraft(id, feedback.trim());
+      return NextResponse.json(result);
     }
 
     const override = KNOWN_TEMPLATES.includes(templateOverride as EmailTemplateId)

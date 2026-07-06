@@ -231,7 +231,11 @@ export function countBlogWords(copy: {
 /** Builds the (system, user) message pair for blog generation. */
 export function buildBlogMessages(
   ctx: TopicContext,
-  opts: { brief?: CampaignBrief | null; blogTypeOverride?: BlogType } = {},
+  opts: {
+    brief?: CampaignBrief | null;
+    blogTypeOverride?: BlogType;
+    rejection?: { feedback: string; previousTitle: string; previousMetaDescription: string };
+  } = {},
 ): { system: string; user: string; blogType: BlogType } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
@@ -299,6 +303,16 @@ export function buildBlogMessages(
           ...topic.internal_link_targets.map((l) => `  - ${l}`),
         ].join("\n")
       : "",
+    ...(opts.rejection
+      ? [
+          "",
+          "REVISION REQUEST: address this feedback in the new version:",
+          `FEEDBACK: ${opts.rejection.feedback}`,
+          `PREVIOUS TITLE WAS: ${opts.rejection.previousTitle}`,
+          `PREVIOUS META DESCRIPTION WAS: ${opts.rejection.previousMetaDescription}`,
+          "Write a meaningfully different post that fixes these issues.",
+        ]
+      : []),
     "",
     "Call save_blog_draft now.",
   ]

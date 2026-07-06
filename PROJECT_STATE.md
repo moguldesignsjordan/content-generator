@@ -331,22 +331,101 @@ why a "sent" email apparently never reached anyone.
   subscribers needs Jordan's explicit go-ahead, not an autonomous action).
   Given the subscriber-limit issue surfaced above, worth checking the
   MailerLite account before testing this.
-- **Slice 4 keyword research**: still blocked on (1) migration 008 not
-  applied to the live Supabase DB, (2) `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD`
-  are now **empty** in `.env.local` (previously present-but-invalid; now
-  blank) — get real credentials from app.dataforseo.com.
-- **Migration 009** (durable generation lock) still not applied — apply
-  `db/migrations/009_generation_runs.sql` in the Supabase SQL editor to get
-  the actual cross-instance lock live (today it safely degrades).
+- **Migrations 008 and 009 confirmed applied** (2026-07-06, verified via a
+  direct REST query): `topics.keyword_data` column exists, `generation_runs`
+  table exists. Plan 4's cross-instance lock is now live (no longer just
+  degrading); Slice 4 keyword research just needs real DataForSEO
+  credentials to be fully usable — `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD`
+  are still empty in `.env.local` (get them from app.dataforseo.com: account
+  email + a separate API password from their API Access dashboard, pay-as-
+  you-go billing).
+- MailerLite "sent" vs "draft" mismatch (see above) is expected: Jordan is
+  still testing, hasn't done a real send yet.
 - Onboarding auto-images question / Settings → Visual identity toggle: not
   re-checked this session.
+
+## Plan 5 — Blog editorial parity, Phase A (committed)
+
+Blog drafts previously had only approve/archive/delete/publish + hero image
+(the article itself was read-only v1); email already had reject/regenerate.
+Phase A closes that gap: `regenerateBlogDraft` in
+`lib/pipeline/generate-blog.ts` mirrors `regenerateEmailDraft`
+(`lib/pipeline/generate.ts`) exactly — same version-cap check
+(`MAX_DRAFT_VERSIONS`), same "not the active review target anymore" guard,
+same reject-record-before-generating ordering, existing hero image carries
+over unchanged. `buildBlogMessages` (`prompts/generate-blog.ts`) gained a
+`rejection` option (feedback + previous title/meta description woven into
+the prompt) mirroring `buildEmailMessages`'s block. `persistRegeneratedDraft`
+(`lib/db/queries.ts`) now accepts an optional `blogType` alongside
+`emailType` to backfill `content_jobs.blog_type` on a regenerated version.
+`POST /api/drafts/[id]/reject` now dispatches by `draftCtx.jobType` to either
+regenerate function instead of assuming email. `blog-review-actions.tsx`
+gained the same Reject sheet, background-regeneration status card, and
+disabled-state/tooltip logic as the email review screen (`review-actions.tsx`),
+including the `isActionable`/`atCap`/`rejectedThisDraft` guards.
+
+**Live-verified 2026-07-06:** spun off a fresh test blog post, rejected v1
+with feedback ("make this feel more urgent and add a specific customer
+example"), confirmed the sheet closed instantly and the background status
+card showed correctly with Approve/Reject/Archive/Delete all disabled +
+tooltipped. v2 landed with both requested changes: a concrete customer story
+(response time 3 days → 15 minutes, 40% conversion lift, 20+ hours/week
+reclaimed) and a more urgent opening line. `npm run typecheck`, `npx vitest
+run` (82 tests, unchanged — no new tests added, matching that
+`buildEmailMessages`'s own rejection block was never unit-tested either,
+only the classifier/word-count helpers are), and `npm run build` all pass.
+
+**Bug found and fixed during this work: regenerating a blog draft silently
+dropped its `meta.source_draft_id`** (the email→blog traceability link — see
+[Blogs Section Separation] in memory). Root cause: `persistRegeneratedDraft`
+INSERTs a brand-new draft row (`meta: meta ?? {}`), unlike `populateDraft`
+which UPDATEs in place and merges with prior meta — so any meta field not
+explicitly carried forward by the caller is lost on every regenerated
+version, not just the first one. `regenerateBlogDraft` already carried
+`hero_image` forward this way; it just didn't do the same for
+`source_draft_id`. Fixed in `lib/pipeline/generate-blog.ts` by spreading
+`draftCtx.meta.source_draft_id` into the new version's meta the same way
+`hero_image` already was. Confirmed the bug was real by inspecting the DB
+directly (an earlier, pre-fix test chain's v1 has `source_draft_id`, v2
+doesn't), then live-verified the fix end to end with a fresh chain: created
+a new blog off the same source email, rejected v1, and confirmed v2 both
+kept `source_draft_id` in the DB and rendered the "From email: ..." back-link
+in the UI.
+
+**Code review (medium effort, 8 finder angles + verify pass) surfaced 2
+non-blocking findings, no correctness bugs:** (1) `POST /api/drafts/[id]/reject`
+now does a redundant `getDraftWithJobContext` fetch just to branch on job
+type, then `regenerateBlogDraft`/`regenerateEmailDraft` immediately re-fetch
+the same row internally — an extra DB round-trip per reject, not a
+correctness issue. (2) The reject/regenerate UI state machine in
+`blog-review-actions.tsx` is a near-verbatim copy of `review-actions.tsx`'s
+existing email version — intentional (Phase A mirrors email by design), but
+worth a shared hook/component if a third surface ever needs the same flow.
+Both deferred, not fixed inline.
+
+**Phase B (section-level copy editing) not started.** Per the 7-plan doc:
+blog is Portable Text, not HTML, so email's find/replace-on-HTML model
+doesn't fit — Phase B would edit the markdown source (`meta.blog_copy`) per
+section via `prompts/adjust-copy.ts`, re-render via
+`lib/blog/render-preview.ts`, keep `lib/blog/to-portable-text.ts` as the
+publish-time conversion. Not attempted this session; check with Jordan
+before starting since it's a distinct UI paradigm from Phase A.
+
+**Test data left in place:** two throwaway blog draft chains for the topic
+"Why Businesses Lose Leads" sitting alongside real content in Blogs — the
+original (v1 rejected + v2 rejected + v3 in_review, from before the
+source_draft_id fix, so v2/v3 lack the email back-link) and a fresh one from
+verifying the fix (v1 rejected + v2 in_review, correctly linked back to the
+source email). Cheap to archive/delete if Jordan wants the list tidy, left
+as-is since both are real, usable draft content, not garbage.
 
 ## What's not built yet
 
 - Settings-form UI to pick an email_type/blog_type override per topic/job
   (the backend override path is wired; nothing in the UI sets it yet) or to
   tune per-type word targets.
-- Blog reject/regenerate + click-to-edit for blog drafts (email has both).
+- Blog click-to-edit / section-level copy editing (Plan 5 Phase B) — blog
+  reject/regenerate itself is done (Phase A, see above).
 - In-app retry for a MailerLite campaign stuck in `status: "draft"` (schedule
   call failed after the campaign was created) — today the fix is manual,
   inside MailerLite.
@@ -366,27 +445,26 @@ why a "sent" email apparently never reached anyone.
 
 ## Next step
 
-1. **Working tree is currently dirty** with the 4 bug fixes from the
-   2026-07-06 session (login hang, hero-image placement, Sanity env
-   fallback, MailerLite stats path) — review and commit/push those; they're
-   small, well-tested, and independent of each other. Local branch is also 3
-   commits ahead of `origin/feat/dashboard-create-agent` (Plans 1, 2, 4) —
-   not yet pushed.
-2. Check the MailerLite account for the subscriber-limit/billing issue
-   surfaced above (a "sent" campaign that never actually delivered).
-3. Apply `db/migrations/008_topic_keyword_data.sql` and
-   `db/migrations/009_generation_runs.sql` in the Supabase SQL editor, and
-   get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials (currently
-   blank in `.env.local`) from app.dataforseo.com.
+1. Plan 5 Phase A (blog reject/regenerate) is implemented, live-verified,
+   code-reviewed, and committed, including the `source_draft_id` fix (see
+   above). Local branch is 5 commits ahead of
+   `origin/feat/dashboard-create-agent` (Plans 1, 2, 4, bugfix commit, Plan 5
+   Phase A) — none pushed yet.
+2. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
+   app.dataforseo.com (account email + a separate API password from their
+   dashboard) and add them to `.env.local` — the only remaining blocker on
+   Slice 4 keyword research now that migration 008 is confirmed applied.
+3. Decide on Plan 5 Phase B (section-level copy editing for blogs) — check
+   with Jordan before starting, it's a distinct UI paradigm (markdown-source
+   editing, not HTML find/replace) from Phase A.
 4. Remaining "Not yet verified" items: the from-scratch brand-guidelines
-   generate path (no colors set), onboarding auto-images toggle, and an
-   actual MailerLite "Send now"/"Schedule" click-through (Jordan's call, see
-   above).
-5. Pick up the next plan from the 7-plan improvement doc
-   (`~/.claude/plans/refactored-snacking-lightning.md`) — Plans 1, 2, and 4
-   are code-complete and now largely live-verified; good next candidates are
-   Plan 5 (blog editorial parity, independent) or Plan 6 (recurring
-   automation, now unblocked by Plan 4).
+   generate path (no colors set), onboarding auto-images toggle, an actual
+   MailerLite "Send now"/"Schedule" click-through (Jordan's call, not done
+   yet — still testing), and Plan 4's actual cross-instance lock race test
+   now that migration 009 is confirmed applied.
+5. After Plan 5, pick up Plan 6 (recurring automation, now unblocked by
+   Plan 4) from the 7-plan improvement doc
+   (`~/.claude/plans/refactored-snacking-lightning.md`).
 
 ## How to verify this doc against reality
 
