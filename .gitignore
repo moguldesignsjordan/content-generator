@@ -33,3 +33,6 @@ yarn-error.log*
 
 # local DB snapshots (contain business data)
 /db/backups/
+
+# Playwright MCP debug snapshots/console logs
+/.playwright-mcp/

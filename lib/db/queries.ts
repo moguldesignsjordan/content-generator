@@ -365,6 +365,95 @@ export async function patchDraftGeneration(
     .update({ meta: { ...priorMeta, generation } })
     .eq("id", draftId);
   if (error) throw error;
+
+  // Whoever calls patchDraftGeneration is, by construction, the instance that
+  // holds the generation_runs lock for this draft (see acquireGenerationLock).
+  // Bump its heartbeat so a long-running phase doesn't look stale to another
+  // instance's steal check. Best-effort: a missing table (migration 009 not
+  // yet applied) or a since-released row must never fail generation itself.
+  const { error: heartbeatErr } = await db
+    .from("generation_runs")
+    .update({ heartbeat_at: new Date().toISOString() })
+    .eq("draft_id", draftId);
+  if (heartbeatErr && !isMissingGenerationRunsTable(heartbeatErr)) {
+    console.error("[generation-runs] failed to bump heartbeat:", heartbeatErr);
+  }
+}
+
+/** A heartbeat older than this means the owning instance died mid-run
+ * (crash, redeploy) without releasing its lock row, so it's safe to steal.
+ * Kept comfortably above the 300s maxDuration on the generate-stream route:
+ * a healthy run can't go this long between heartbeat bumps. */
+const STALE_LOCK_MS = 6 * 60 * 1000;
+
+function isMissingGenerationRunsTable(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  return error.code === "42P01" || /does not exist/i.test(error.message ?? "");
+}
+
+/**
+ * Cross-instance lock backing lib/pipeline/generation-runs.ts: true means
+ * THIS call is now the sole owner of generation for `draftId` (either no
+ * other instance was running it, or the prior owner's heartbeat went stale).
+ * false means another instance actively holds it and the caller should poll
+ * drafts.meta.generation instead of starting its own Claude call.
+ *
+ * Degrades to "always acquired" if migration 009 hasn't been applied yet, so
+ * shipping this code never breaks generation against a stale schema.
+ */
+export async function acquireGenerationLock(draftId: string): Promise<boolean> {
+  const db = getAdminClient();
+
+  const { error: insertErr } = await db
+    .from("generation_runs")
+    .insert({ draft_id: draftId });
+  if (!insertErr) return true;
+  if (isMissingGenerationRunsTable(insertErr)) return true;
+  if (insertErr.code !== "23505") throw insertErr; // not a "someone else has it" conflict
+
+  const staleBefore = new Date(Date.now() - STALE_LOCK_MS).toISOString();
+  const { data: stolen, error: stealErr } = await db
+    .from("generation_runs")
+    .update({
+      status: "running",
+      started_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+    })
+    .eq("draft_id", draftId)
+    .lt("heartbeat_at", staleBefore)
+    .select("draft_id");
+  if (stealErr) throw stealErr;
+  return Boolean(stolen && stolen.length > 0);
+}
+
+/** Releases this instance's generation lock once a run finishes (success or
+ * error), so a retry can acquire cleanly. Best-effort: cleanup failing must
+ * never surface as a generation error to the reviewer. */
+export async function releaseGenerationLock(draftId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("generation_runs").delete().eq("draft_id", draftId);
+  if (error && !isMissingGenerationRunsTable(error)) {
+    console.error("[generation-runs] failed to release lock:", error);
+  }
+}
+
+/** Cheap meta-only read for the cross-instance polling fallback: an instance
+ * that lost the generation lock race reads this instead of running its own
+ * Claude call, so its SSE listeners still see real phase progress. */
+export async function getDraftGenerationState(
+  draftId: string,
+): Promise<DraftGenerationState | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("meta")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (error) throw error;
+  const meta = (data?.meta as DraftMeta | undefined) ?? {};
+  return meta.generation ?? null;
 }
 
 /** Loads the minimal context the regeneration pipeline needs for a draft. */

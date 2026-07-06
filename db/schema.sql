@@ -20,6 +20,7 @@
   drop table if exists brand_integrations cascade;
   drop table if exists publications       cascade;
   drop table if exists approvals       cascade;
+  drop table if exists generation_runs cascade;
   drop table if exists drafts          cascade;
   drop table if exists content_jobs    cascade;
   drop table if exists campaigns       cascade;
@@ -195,6 +196,17 @@
     decision   text not null check (decision in ('approved', 'rejected', 'edited')),
     feedback   text,
     created_at timestamptz not null default now()
+  );
+
+  -- Cross-instance lock for in-flight draft generation runs (migration 009).
+  -- One row per actively-generating draft; a stale heartbeat means the owning
+  -- instance died mid-run and the lock can be stolen.
+  create table generation_runs (
+    draft_id     uuid primary key references drafts(id) on delete cascade,
+    status       text not null default 'running'
+      check (status in ('running', 'done', 'error')),
+    started_at   timestamptz not null default now(),
+    heartbeat_at timestamptz not null default now()
   );
 
   -- external_id makes publishing idempotent: on retry we find the existing row

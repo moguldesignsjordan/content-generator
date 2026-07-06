@@ -7,7 +7,7 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-05.
+Last updated: 2026-07-06.
 
 ## Locked decisions
 
@@ -194,11 +194,30 @@ is clean — everything below is committed and pushed, not pending.
   `publication.external_id` exists. Blog review screen is untouched (no
   Sanity stats yet). `npm run typecheck`, `npm run build`, `npx vitest run`
   (76 tests, unchanged, no new tests added for this cut) all pass.
+- **Plan 4 — Durable generation runs (new, not yet committed, migration NOT
+  yet applied):** replaces the single-instance-only dedupe in
+  `lib/pipeline/generation-runs.ts` with a DB-backed lock, so a
+  multi-instance deploy can't start two Claude calls for the same draft. New
+  `generation_runs(draft_id primary key, status, started_at, heartbeat_at)`
+  table (`db/migrations/009_generation_runs.sql`, mirrored in
+  `db/schema.sql`). `lib/db/queries.ts` gains `acquireGenerationLock`
+  (insert-or-steal-on-stale-heartbeat; a heartbeat older than 6 minutes,
+  comfortably above the route's 300s maxDuration, means the owning instance
+  died mid-run) / `releaseGenerationLock` / `getDraftGenerationState` (cheap
+  meta-only read). Both lock functions **degrade to "always acquired"** if
+  `generation_runs` doesn't exist yet (checks for Postgres's 42P01 /
+  "does not exist"), so shipping this code can never break generation against
+  a stale schema before the migration lands. `patchDraftGeneration` now also
+  bumps the lock's heartbeat, best-effort. `generation-runs.ts` keeps the
+  in-memory `Map` as the same-instance fast path unchanged; when an instance
+  loses the cross-instance lock race, it polls `drafts.meta.generation` every
+  2s (capped at 280s, just under the route's 300s maxDuration) and emits the
+  same phase/done/error events, so `useGenerationStream`/`GenerationProgress`
+  need zero changes. `npm run typecheck`, `npm run build`, `npx vitest run`
+  (76 tests, unchanged, no new tests added — this repo's tests are pure-
+  function normalizers/converters, not DB-touching query helpers) all pass.
 
 **Known limitations (by design or deferred, not bugs):**
-- The SSE generation-run dedupe registry (`lib/pipeline/generation-runs.ts`)
-  is in-memory, single-instance only — fine for now, would need a real queue
-  for multi-instance hosting.
 - Regenerating/redesigning a draft never re-triggers auto-image; only the
   first generation does.
 - Seeded topics still map to placeholder product slugs, not real products
@@ -273,6 +292,17 @@ is purely "click through it as the logged-in user":
   neither available in this session. Code paths (`fetchStats`,
   `recordPerformance`/`getLatestPerformance`, the route, the UI) are
   typecheck/build-clean but unexercised end to end.
+- **Plan 4 durable generation runs: not live-verified, blocked on migration
+  009 not yet being applied.** Until `db/migrations/009_generation_runs.sql`
+  is applied to the live Supabase DB, the code deliberately degrades to the
+  old always-acquire single-instance behavior (that's the point — shipping
+  it can't break generation today), so a normal single-tab Generate should
+  behave identically to before; that path wasn't click-tested this session
+  (no logged-in browser session available). Once migration 009 is applied,
+  still needs: simulate two concurrent `generate-stream` opens for one draft
+  (two tabs, or two `curl`s) and confirm only one Claude call actually runs;
+  kill the owning process mid-run (or just wait past the ~6 minute stale
+  window) and confirm a retry can still acquire the lock and complete.
 
 ## What's not built yet
 
@@ -299,19 +329,21 @@ is purely "click through it as the logged-in user":
 
 ## Next step
 
-1. Apply `db/migrations/008_topic_keyword_data.sql` in the Supabase SQL
-   editor, and fix/regenerate the `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD`
-   credentials in `.env.local` (both currently block Slice 4 from working
-   live, see "Not yet verified").
+1. Apply `db/migrations/008_topic_keyword_data.sql` and
+   `db/migrations/009_generation_runs.sql` in the Supabase SQL editor, and
+   fix/regenerate the `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials in
+   `.env.local` (all three currently block Slice 4 and Plan 4 from being
+   fully live-verified, see "Not yet verified").
 2. Jordan clicks through the "Not yet verified" list above in a logged-in
-   browser session, including the Slice 4 Research flow once 1 is done, and
-   the Plan 2 "Refresh stats" flow once a real email has actually been sent
-   via MailerLite.
+   browser session, including the Slice 4 Research flow and the Plan 4
+   cross-instance lock test once 1 is done, and the Plan 2 "Refresh stats"
+   flow once a real email has actually been sent via MailerLite.
 3. Pick up the next plan from the 7-plan improvement doc
-   (`~/.claude/plans/refactored-snacking-lightning.md`) — recommended order
-   is Plan 7 (verification sweep) or Plan 4 (durable generation runs) next,
-   per that doc's sequencing table — or address anything the click-through
-   turns up.
+   (`~/.claude/plans/refactored-snacking-lightning.md`) — Plans 1, 2, and 4
+   are now code-complete (live-verification pending per above); good next
+   candidates are Plan 5 (blog editorial parity, independent) or Plan 6
+   (recurring automation, now unblocked by Plan 4) — or Plan 7 (verification
+   sweep) to close out the pending live-verification backlog first.
 
 ## How to verify this doc against reality
 
