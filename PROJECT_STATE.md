@@ -224,85 +224,122 @@ is clean — everything below is committed and pushed, not pending.
   (7 real products are live in Supabase — see memory
   `project-pending-product-save`).
 
-## Not yet verified
+## Session 2026-07-06: live verification sweep + 4 bugs found and fixed
 
-Nothing here is blocked on infra (keys/migration/commit are all done) — this
-is purely "click through it as the logged-in user":
-- **Brand guidelines document** (see above, including the "Generate brand
-  identity" merge): `npm run typecheck` + `npm run build` + `npx vitest run`
-  all pass after both rounds of changes, and `renderBrandBookTemplate` was
-  exercised directly (outside the app) with realistic sample data for both
-  variants, confirming the section pipeline and CSS produce a correct,
-  complete document. `.mcp.json` now has a `playwright` MCP server entry for
-  real browser click-through, but it wasn't connected in the session that
-  built this (needs a Claude Code session restart to pick up a newly-added
-  MCP server) — not yet used to verify. Still needs a live click-through:
-  Generate → edit → Save on a real brand with no guidelines/colors yet
-  (confirms the combined identity+guidelines path and the two PATCH calls
-  both land), the variant switcher and Download button, and the onboarding
-  completion CTA.
-- Email image tool: add/move/regenerate at all three placements.
-- Blog: "+ Add image," approve → publish to Sanity, confirm the doc carries
-  `mainImage`.
-- Onboarding asks the auto-images question; Settings → Visual identity shows
-  the toggle.
-- A generated email and blog both render correctly in dark mode (macOS dark
-  appearance).
-- Settings → Connections: save a fake MailerLite/Sanity key, confirm the
-  "Connected via your account" banner, disconnect, confirm fallback to
-  ".env default"; one real end-to-end publish on each channel with connected
-  credentials.
-- Content subtype override: POST `/api/generate` with an explicit `emailType`
-  (or `blogType`) and confirm the draft honors it instead of deriving one, and
-  that `content_jobs.email_type`/`blog_type` end up populated either way
-  (overridden or plain-derived) after generation.
-- **MailerLite direct send/schedule:** migration 006 is applied (confirmed
-  live), but the actual click-through was skipped by Jordan's choice on
-  2026-07-05 (no logged-in browser session available at the time). Still
-  needs: with a real MailerLite key + sender + at least one group, click
-  "Send now" on an approved email and confirm it actually sends (not just
-  creates a draft campaign); click "Schedule for later," pick a future time,
-  confirm MailerLite shows it as scheduled at roughly that time; force a
-  schedule failure (e.g. a campaign with no group set) and confirm the UI
-  shows the "created but not scheduled" warning instead of crashing or
-  silently succeeding.
-- **Slice 4 keyword research is code-complete but blocked on two things
-  outside this session's reach:** (1) **migration 008 has NOT been applied**
-  to the live Supabase DB (`topics.keyword_data` doesn't exist yet, confirmed
-  via a direct REST query, `column topics.keyword_data does not exist`) —
-  paste `db/migrations/008_topic_keyword_data.sql` into the Supabase SQL
-  editor before using Research on a real topic. (2) **The
-  `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` values currently in `.env.local`
-  are not valid**: direct live calls to `api.dataforseo.com` (and the
-  sandbox host, and the plain `appendix/user_data` account-info endpoint)
-  all returned `40100 "You are not Authorized to Access this Resource"` at
-  $0 cost (no spend happened) — check/regenerate credentials at
-  app.dataforseo.com before relying on Research. Everything else is
-  verified: `npm run typecheck`, `npm run build`, and `npx vitest run` (76
-  tests, including new `research.test.ts` and `brand-voice.test.ts` cases for
-  `normalizeKeywordData`/`buildKeywordLines`) all pass. The actual browser
-  click-through (tap Research, confirm the badge, generate and confirm the
-  brief cites real numbers) hasn't happened yet: Supabase Auth gates every
-  route including the API ones, and no logged-in session was available in
-  this session to drive Playwright with.
-- **Plan 2 analytics loop: not live-verified.** Needs a real, already-sent
-  MailerLite campaign to test against (the "Refresh stats" button calls a
-  real `GET /campaigns/{id}`, and MailerLite's own stats only populate after
-  actual sends/opens/clicks happen) plus a logged-in browser session,
-  neither available in this session. Code paths (`fetchStats`,
-  `recordPerformance`/`getLatestPerformance`, the route, the UI) are
-  typecheck/build-clean but unexercised end to end.
-- **Plan 4 durable generation runs: not live-verified, blocked on migration
-  009 not yet being applied.** Until `db/migrations/009_generation_runs.sql`
-  is applied to the live Supabase DB, the code deliberately degrades to the
-  old always-acquire single-instance behavior (that's the point — shipping
-  it can't break generation today), so a normal single-tab Generate should
-  behave identically to before; that path wasn't click-tested this session
-  (no logged-in browser session available). Once migration 009 is applied,
-  still needs: simulate two concurrent `generate-stream` opens for one draft
-  (two tabs, or two `curl`s) and confirm only one Claude call actually runs;
-  kill the owning process mid-run (or just wait past the ~6 minute stale
-  window) and confirm a retry can still acquire the lock and complete.
+Logged in via Playwright MCP and drove the "Not yet verified" checklist below
+for real. Found and fixed four real bugs along the way (all uncommitted,
+working tree not clean — see "Next step"). `npm run typecheck`, `npx vitest
+run` (82 tests, up from 76), and `npm run build` all pass after every fix.
+
+1. **Login silently hung on every sign-in** (`app/(auth)/login/login-card.tsx`
+   `finish()`): called `router.refresh()` immediately followed by
+   `router.push(redirectTo)` — a Next.js App Router race where `refresh()`
+   can drop the pending `push()`, leaving the "Sign in" button spinning
+   forever even though the Supabase auth call succeeded (confirmed via
+   network log: `POST /auth/v1/token` returned 200, session cookie was valid,
+   but the URL never left `/login`). Fixed by replacing both calls with a
+   single hard `window.location.href = redirectTo`, which forces a fresh
+   request through middleware, no client-router race possible. Verified:
+   sign out → sign in now lands on `/` immediately.
+2. **Email hero-image "Below headline" / "Above button" placements were
+   silently broken** (`lib/email/hero-image.ts`): every real email template
+   wraps each region in its own `<tr><td data-region="...">`, but the splice
+   inserted a bare `<div data-region="image">` as a stray sibling between
+   `</td>` and `</tr>` — invalid table markup. Browsers (and presumably real
+   mail clients) "foster parent" that div out of the table entirely, so it
+   always rendered above the whole card regardless of the chosen placement.
+   "Top" only ever looked correct by coincidence (foster-parenting relocates
+   to the same spot "top" wants anyway). The existing unit tests never caught
+   this because the `TAGGED` test fixture used bare `<div>`/`<h1>` regions,
+   not real `<td>`-in-`<tr>` markup. Fixed: `spliceHeroImage`/`removeHeroImage`
+   now detect a `<td>` anchor and insert/remove a whole `<tr><td
+   data-region="image">` row instead of a bare div (bare-div path kept as a
+   fallback for untagged documents). Also fixed the generation prompt
+   (`prompts/email-design.ts`) that told Claude to emit the same invalid bare
+   div. Added 6 new regression tests in `hero-image.test.ts` against a
+   realistic table fixture (`TAGGED_TABLE`) that would have caught this.
+   Verified live: moved a real generated image to "Above button," downloaded
+   the HTML, confirmed a well-formed `<tr><td data-region="image">` row
+   sitting correctly right before the CTA row.
+3. **Sanity's `.env` fallback was unreachable** (`app/(dashboard)/drafts/[id]
+   /page.tsx`): `sanityConfigured` was computed as `integration ?
+   resolveSanityConfig(integration) !== null : false` — when no brand-level
+   Connections entry exists (the normal case, since Sanity keys are only in
+   `.env.local`), it hard-coded `false` instead of calling
+   `resolveSanityConfig(null)`, even though that function was written to
+   accept `null` and fall back to `process.env.SANITY_*` (exactly what the
+   file's own comment promises, and exactly how the MailerLite check right
+   below it does it correctly). Result: the "Send to Sanity" button never
+   appeared for any blog, ever, despite valid env keys. One-line fix:
+   `sanityConfigured = resolveSanityConfig(integration) !== null`. Verified
+   live: button appeared, published a real approved blog draft to Sanity as a
+   draft doc, then queried Sanity's API directly and confirmed the doc
+   carries `mainImage` with the correct asset reference and alt text.
+4. **Plan 2 analytics loop always returned zero stats**
+   (`lib/publishing/providers/mailerlite.ts` `fetchStats`): read
+   `data.data.stats` from MailerLite's `GET /campaigns/{id}` response, but a
+   live call proved stats actually live at `data.data.emails[].stats` (keyed
+   by `default_email_id` — a campaign can carry more than one email for A/B
+   tests). The top-level `stats` key doesn't exist, so `fetchStats` silently
+   returned `[]` every time, which is why "Refresh stats" always showed "No
+   stats yet" even on a real campaign. Fixed the read path and the file's
+   header comment (which documented the wrong shape). Verified live: the
+   `/performance` route now returns real metric rows and the stat-card grid
+   (Sent/Opens/Open rate/Clicks/Click rate) renders on the review screen.
+
+**Also surfaced, not a code bug:** the one real MailerLite campaign in the DB
+(`publications.status = 'sent'`) is actually still `status: "draft"` in
+MailerLite itself — `recipients_count: 291`, all stats zero,
+`cannot_be_scheduled_reason: "Cannot schedule due to active subscribers limit
+reached"`. The publish code's error handling is correct (it only writes
+`'sent'` when the `/schedule` call itself returns 2xx); this looks like
+MailerLite accepted the schedule request and then failed to actually deliver
+afterward, likely an account/plan subscriber-limit issue. **Jordan: check the
+MailerLite account for a subscriber-limit or billing block** — this explains
+why a "sent" email apparently never reached anyone.
+
+### What's now confirmed live (was "not yet verified")
+
+- Brand guidelines document: renders correctly (existing guidelines), variant
+  switcher (Bold Spectrum / Clean Minimal) both render distinctly correct,
+  Download .html works. **Still open:** the from-scratch "Generate → edit →
+  Save" combined-identity path specifically for a brand with *no* colors set
+  yet — this brand already has colors, so that exact path wasn't
+  re-exercised.
+- Email image tool: generate (Top), move (Below headline, Above button, both
+  now correct post-fix), all via the real Gemini pipeline.
+- Blog image → approve → publish to Sanity → `mainImage` present with correct
+  asset ref: confirmed via a live Sanity API query.
+- Dark mode: confirmed visually via screenshot (proper dark background,
+  contrast, gradient bar) on a real generated email.
+- Settings → Connections: saved a fake Sanity key → "Connected via your
+  account" banner appeared correctly → Disconnect → confirmed dialog →
+  falls back to "Using server default (.env)" cleanly.
+- Content subtype override: set "Announcement" on a real topic via `/create`,
+  generation succeeded, quality check passed (DB-column confirmation wasn't
+  possible without direct Postgres access, only the UI-level override path
+  was exercised).
+- Plan 4 durable generation runs, degraded path: a normal single-tab Generate
+  works identically now that the DB-lock code exists but migration 009 isn't
+  applied yet — confirms the degrade-to-always-acquire guarantee holds.
+- Plan 2 analytics loop: fully live-verified end to end (see bug #4 above).
+
+### Still open / blocked (not code, needs Jordan)
+
+- **MailerLite "Send now" / "Schedule for later" real click-through**: still
+  not click-tested this session (by design — sending a real campaign to real
+  subscribers needs Jordan's explicit go-ahead, not an autonomous action).
+  Given the subscriber-limit issue surfaced above, worth checking the
+  MailerLite account before testing this.
+- **Slice 4 keyword research**: still blocked on (1) migration 008 not
+  applied to the live Supabase DB, (2) `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD`
+  are now **empty** in `.env.local` (previously present-but-invalid; now
+  blank) — get real credentials from app.dataforseo.com.
+- **Migration 009** (durable generation lock) still not applied — apply
+  `db/migrations/009_generation_runs.sql` in the Supabase SQL editor to get
+  the actual cross-instance lock live (today it safely degrades).
+- Onboarding auto-images question / Settings → Visual identity toggle: not
+  re-checked this session.
 
 ## What's not built yet
 
@@ -329,21 +366,27 @@ is purely "click through it as the logged-in user":
 
 ## Next step
 
-1. Apply `db/migrations/008_topic_keyword_data.sql` and
+1. **Working tree is currently dirty** with the 4 bug fixes from the
+   2026-07-06 session (login hang, hero-image placement, Sanity env
+   fallback, MailerLite stats path) — review and commit/push those; they're
+   small, well-tested, and independent of each other. Local branch is also 3
+   commits ahead of `origin/feat/dashboard-create-agent` (Plans 1, 2, 4) —
+   not yet pushed.
+2. Check the MailerLite account for the subscriber-limit/billing issue
+   surfaced above (a "sent" campaign that never actually delivered).
+3. Apply `db/migrations/008_topic_keyword_data.sql` and
    `db/migrations/009_generation_runs.sql` in the Supabase SQL editor, and
-   fix/regenerate the `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials in
-   `.env.local` (all three currently block Slice 4 and Plan 4 from being
-   fully live-verified, see "Not yet verified").
-2. Jordan clicks through the "Not yet verified" list above in a logged-in
-   browser session, including the Slice 4 Research flow and the Plan 4
-   cross-instance lock test once 1 is done, and the Plan 2 "Refresh stats"
-   flow once a real email has actually been sent via MailerLite.
-3. Pick up the next plan from the 7-plan improvement doc
+   get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials (currently
+   blank in `.env.local`) from app.dataforseo.com.
+4. Remaining "Not yet verified" items: the from-scratch brand-guidelines
+   generate path (no colors set), onboarding auto-images toggle, and an
+   actual MailerLite "Send now"/"Schedule" click-through (Jordan's call, see
+   above).
+5. Pick up the next plan from the 7-plan improvement doc
    (`~/.claude/plans/refactored-snacking-lightning.md`) — Plans 1, 2, and 4
-   are now code-complete (live-verification pending per above); good next
-   candidates are Plan 5 (blog editorial parity, independent) or Plan 6
-   (recurring automation, now unblocked by Plan 4) — or Plan 7 (verification
-   sweep) to close out the pending live-verification backlog first.
+   are code-complete and now largely live-verified; good next candidates are
+   Plan 5 (blog editorial parity, independent) or Plan 6 (recurring
+   automation, now unblocked by Plan 4).
 
 ## How to verify this doc against reality
 

@@ -23,8 +23,7 @@ export function LoginCard() {
   const toast = useToast();
 
   function finish() {
-    router.refresh();
-    router.push(redirectTo);
+    window.location.href = redirectTo;
   }
 
   async function handleSubmit(e: React.FormEvent) {

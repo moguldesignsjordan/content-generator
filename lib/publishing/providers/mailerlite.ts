@@ -19,10 +19,12 @@ import type {
 //     or { delivery: "scheduled", schedule: { date, hours, minutes, timezone_id? } }
 //   → 200 with { data: { status: "sent" | "ready" | ... } }
 //   GET https://connect.mailerlite.com/api/campaigns/{id}
-//   → 200 with { data: { stats: { sent, opens_count, unique_opens_count,
-//       open_rate: { float, string }, clicks_count, unique_clicks_count,
-//       click_rate: { float, string }, ... } } } (rate fields are objects,
-//     not plain numbers; read .float).
+//   → 200 with { data: { default_email_id, emails: [{ id, stats: { sent,
+//       opens_count, unique_opens_count, open_rate: { float, string },
+//       clicks_count, unique_clicks_count, click_rate: { float, string },
+//       ... } }] } } — stats live per-email (an A/B campaign has more than
+//     one), NOT on the campaign object itself; match default_email_id.
+//     Rate fields are objects, not plain numbers; read .float.
 //
 // The API key is the only MailerLite credential; it resolves from the brand's
 // connection (encrypted) with env-var fallback. Sender identity lives on the
@@ -214,20 +216,28 @@ export const mailerliteProvider: PublishProvider = {
       );
     }
 
+    type EmailStats = {
+      sent?: number;
+      opens_count?: number;
+      unique_opens_count?: number;
+      open_rate?: { float?: number };
+      clicks_count?: number;
+      unique_clicks_count?: number;
+      click_rate?: { float?: number };
+    };
     const data = (await res.json()) as {
       data?: {
-        stats?: {
-          sent?: number;
-          opens_count?: number;
-          unique_opens_count?: number;
-          open_rate?: { float?: number };
-          clicks_count?: number;
-          unique_clicks_count?: number;
-          click_rate?: { float?: number };
-        };
+        default_email_id?: string | number;
+        emails?: { id?: string | number; stats?: EmailStats }[];
       };
     };
-    const stats = data.data?.stats;
+    // Stats live per-email, not on the campaign itself (a campaign can carry
+    // more than one email for an A/B test); match the one actually sent.
+    const campaign = data.data;
+    const stats =
+      campaign?.emails?.find(
+        (e) => String(e.id) === String(campaign.default_email_id),
+      )?.stats ?? campaign?.emails?.[0]?.stats;
     if (!stats) return [];
 
     return [

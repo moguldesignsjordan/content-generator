@@ -61,9 +61,7 @@ export default async function DraftReviewPage({
     const integration = brand
       ? await getBrandIntegration(brand.id, "sanity").catch(() => null)
       : null;
-    sanityConfigured = integration
-      ? resolveSanityConfig(integration) !== null
-      : false;
+    sanityConfigured = resolveSanityConfig(integration) !== null;
   } else {
     const brand = await getSingleBrand().catch(() => null);
     const integration = brand
