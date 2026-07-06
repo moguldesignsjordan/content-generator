@@ -24,6 +24,7 @@ import type {
   PublicationRecord,
 } from "@/lib/db/types";
 import { ImageSheet } from "./image-sheet";
+import { BlogPreview } from "./blog-preview";
 
 interface BlogReviewActionsProps {
   draftId: string;
@@ -73,9 +74,13 @@ export function BlogReviewActions({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copy, setCopy] = useState<BlogCopy | null>(initialMeta.blog_copy ?? null);
-  const [copyDirty, setCopyDirty] = useState(false);
-  const [savingCopy, setSavingCopy] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  const [seoOpen, setSeoOpen] = useState(false);
+  const [metaTitle, setMetaTitle] = useState(initialMeta.blog_copy?.meta_title ?? "");
+  const [metaDescription, setMetaDescription] = useState(
+    initialMeta.blog_copy?.meta_description ?? "",
+  );
+  const [savingSeo, setSavingSeo] = useState(false);
+  const [seoError, setSeoError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [showQaNudge, setShowQaNudge] = useState(false);
   const [bannedBlock, setBannedBlock] = useState<string[] | null>(null);
@@ -93,7 +98,7 @@ export function BlogReviewActions({
   const hasQa = seoData.qa_pass !== undefined;
   const atCap = version >= MAX_DRAFT_VERSIONS;
   const isActionable = state === "in_review";
-  const busy = approving || archiving || publishing || regenerating || savingCopy;
+  const busy = approving || archiving || publishing || regenerating || savingSeo;
   const rejectDisabledReason = atCap
     ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
     : rejectedThisDraft
@@ -157,31 +162,26 @@ export function BlogReviewActions({
     URL.revokeObjectURL(url);
   }
 
-  function updateCopy(patch: Partial<BlogCopy>) {
-    setCopy((c) => (c ? { ...c, ...patch } : c));
-    setCopyDirty(true);
+  function openSeo() {
+    setMetaTitle(copy?.meta_title ?? "");
+    setMetaDescription(copy?.meta_description ?? "");
+    setSeoError(null);
+    setSeoOpen(true);
   }
 
-  function updateSection(index: number, patch: Partial<BlogCopy["sections"][number]>) {
-    setCopy((c) => {
-      if (!c) return c;
-      return {
-        ...c,
-        sections: c.sections.map((s, i) => (i === index ? { ...s, ...patch } : s)),
-      };
-    });
-    setCopyDirty(true);
-  }
-
-  async function handleSaveCopy() {
+  async function handleSaveSeo() {
     if (!copy) return;
-    setSavingCopy(true);
-    setCopyError(null);
+    setSavingSeo(true);
+    setSeoError(null);
     try {
       const res = await fetch(`/api/drafts/${draftId}/blog-copy`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(copy),
+        body: JSON.stringify({
+          ...copy,
+          meta_title: metaTitle,
+          meta_description: metaDescription,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         html?: string;
@@ -193,12 +193,12 @@ export function BlogReviewActions({
       }
       setHtml(data.html);
       setCopy(data.copy);
-      setCopyDirty(false);
-      toast.success("Article saved.");
+      setSeoOpen(false);
+      toast.success("SEO details saved.");
     } catch (e) {
-      setCopyError(e instanceof Error ? e.message : "Couldn't save your edits.");
+      setSeoError(e instanceof Error ? e.message : "Couldn't save your edits.");
     } finally {
-      setSavingCopy(false);
+      setSavingSeo(false);
     }
   }
 
@@ -368,118 +368,27 @@ export function BlogReviewActions({
         </Card>
       )}
 
-      {/* Editable article body: the structured fields meta.blog_copy stores
-          and Sanity publish reads directly. Saving re-renders the preview
-          below from these exact values. */}
-      <Card className="space-y-4 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-[15px] font-semibold">Edit article</h3>
-            <p className="mt-0.5 text-[12.5px] text-muted">
-              Basic markdown works in the text fields: **bold**, *italic*, - bullets, {"> quotes"}, [text](url).
-            </p>
-          </div>
-          {copyDirty && (
-            <span className="shrink-0 text-[12px] font-medium text-warning">
-              Unsaved changes
-            </span>
-          )}
-        </div>
-
-        {copy ? (
-          <>
-            <Field label="URL slug" hint="Lowercase, hyphenated.">
-              <Input value={copy.slug} onChange={(e) => updateCopy({ slug: e.target.value })} />
-            </Field>
-            <Field label="Page title" hint="The title tag search engines show.">
-              <Input
-                value={copy.meta_title}
-                onChange={(e) => updateCopy({ meta_title: e.target.value })}
-              />
-            </Field>
-            <Field label="Page summary" hint="The meta description under the title in search results.">
-              <Textarea
-                rows={2}
-                value={copy.meta_description}
-                onChange={(e) => updateCopy({ meta_description: e.target.value })}
-              />
-            </Field>
-            <Field label="Headline">
-              <Input value={copy.title} onChange={(e) => updateCopy({ title: e.target.value })} />
-            </Field>
-            <Field label="Intro">
-              <Textarea
-                rows={4}
-                value={copy.intro}
-                onChange={(e) => updateCopy({ intro: e.target.value })}
-              />
-            </Field>
-            {copy.sections.map((section, i) => (
-              <div key={i} className="space-y-3 rounded-lg border border-border p-3">
-                <Field label={`Section ${i + 1} heading`}>
-                  <Input
-                    value={section.heading}
-                    onChange={(e) => updateSection(i, { heading: e.target.value })}
-                  />
-                </Field>
-                <Field label={`Section ${i + 1} body`}>
-                  <Textarea
-                    rows={6}
-                    value={section.body}
-                    onChange={(e) => updateSection(i, { body: e.target.value })}
-                  />
-                </Field>
-              </div>
-            ))}
-            <Field label="Conclusion">
-              <Textarea
-                rows={4}
-                value={copy.conclusion}
-                onChange={(e) => updateCopy({ conclusion: e.target.value })}
-              />
-            </Field>
-            <Field label="Call-to-action text">
-              <Input
-                value={copy.cta_text}
-                onChange={(e) => updateCopy({ cta_text: e.target.value })}
-              />
-            </Field>
-            <Field label="Call-to-action link">
-              <Input
-                type="url"
-                value={copy.cta_url ?? ""}
-                onChange={(e) => updateCopy({ cta_url: e.target.value })}
-                placeholder="https://…"
-              />
-            </Field>
-
-            {copyError && <p className="text-sm text-danger">{copyError}</p>}
-
-            <div className="flex justify-end">
-              <Button
-                variant="gradient"
-                loading={savingCopy}
-                disabled={!copyDirty || savingCopy}
-                onClick={handleSaveCopy}
-              >
-                Save changes
-              </Button>
-            </div>
-          </>
-        ) : (
-          <p className="text-[13px] text-muted">
-            This draft has no stored article copy to edit.
+      {/* SEO details: page title / meta description. Edited separately from
+          the article body since search-facing meta isn't part of the
+          rendered preview. */}
+      <Card className="flex items-center justify-between gap-3 p-5">
+        <div className="min-w-0">
+          <h3 className="text-[15px] font-semibold">SEO details</h3>
+          <p className="mt-0.5 truncate text-[12.5px] text-muted">
+            {copy?.meta_title || "No page title set."}
           </p>
-        )}
+        </div>
+        <Button variant="outline" size="sm" onClick={openSeo} disabled={!copy}>
+          Edit SEO details
+        </Button>
       </Card>
 
-      {/* Article preview */}
+      {/* Article preview: click any highlighted part of the article to edit
+          it in place. This is exactly what publishes to Sanity. */}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <p className="min-w-0 truncate text-[13px] font-medium text-muted">
-            {copyDirty
-              ? "Article preview: save your edits above to update this"
-              : "Article preview: exactly what publishes to Sanity"}
+            Article preview: click any part of the text to edit it
           </p>
           <div className="flex shrink-0 items-center gap-3">
             <button
@@ -498,11 +407,14 @@ export function BlogReviewActions({
             </button>
           </div>
         </div>
-        <iframe
-          title="Blog preview"
-          srcDoc={html}
-          sandbox=""
-          className="h-[720px] w-full bg-white"
+        <BlogPreview
+          draftId={draftId}
+          copy={copy}
+          html={html}
+          onSaved={(newHtml, newCopy) => {
+            setHtml(newHtml);
+            setCopy(newCopy);
+          }}
         />
       </Card>
 
@@ -745,6 +657,47 @@ export function BlogReviewActions({
             Max revisions reached. Start a fresh post instead.
           </p>
         )}
+      </Sheet>
+
+      {/* SEO details sheet: page title / meta description only, separate
+          from the click-to-edit article fields above. */}
+      <Sheet
+        open={seoOpen}
+        onClose={() => setSeoOpen(false)}
+        title="SEO details"
+        description="The title and summary search engines show. Separate from the headline shown on the page."
+        footer={
+          <div className="flex gap-2">
+            <Button variant="subtle" className="flex-1" onClick={() => setSeoOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="gradient"
+              className="flex-1"
+              loading={savingSeo}
+              onClick={handleSaveSeo}
+            >
+              Save
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Page title" hint="The title tag search engines show.">
+            <Input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} />
+          </Field>
+          <Field
+            label="Page summary"
+            hint="The meta description under the title in search results."
+          >
+            <Textarea
+              rows={3}
+              value={metaDescription}
+              onChange={(e) => setMetaDescription(e.target.value)}
+            />
+          </Field>
+          {seoError && <p className="text-sm text-danger">{seoError}</p>}
+        </div>
       </Sheet>
     </div>
   );

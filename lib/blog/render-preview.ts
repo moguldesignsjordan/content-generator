@@ -1,13 +1,23 @@
 import { toHTML } from "@portabletext/to-html";
 import type { BlogCopy, Brand, ContentImage } from "@/lib/db/types";
-import { blogCopyToPortableText } from "./to-portable-text";
+import { markdownToPortableText } from "./to-portable-text";
 
 // Renders a blog draft as a readable article page for the review screen (and
-// the downloadable preview). This is EXACTLY the Portable Text that would be
-// published to Sanity, run through @portabletext/to-html, so what you review
-// is what ships, wrapped in minimal typographic CSS using the brand palette.
-// The optional hero image previews what publishing attaches as the Sanity
-// mainImage; it renders under the title, where post layouts put it.
+// the downloadable preview). Each field is rendered into its own
+// `data-field` (and, for sections, `data-index`) container so the review
+// screen can turn the preview itself into the editor: it scans for these
+// markers, overlays a click-to-edit hotspot on each, and edits happen right
+// on the rendered article instead of a parallel form. This is otherwise
+// EXACTLY the Portable Text that would be published to Sanity (see
+// blogCopyToPortableText, used independently by the Sanity publish path),
+// run field-by-field through @portabletext/to-html, wrapped in minimal
+// typographic CSS using the brand palette. The optional hero image previews
+// what publishing attaches as the Sanity mainImage; it renders under the
+// title, where post layouts put it.
+
+function renderMarkdown(text: string): string {
+  return toHTML(markdownToPortableText(text));
+}
 
 export function renderBlogPreviewHtml(
   copy: BlogCopy,
@@ -22,7 +32,19 @@ export function renderBlogPreviewHtml(
   const heading = fonts.heading ?? "Georgia, serif";
   const body = fonts.body ?? "system-ui, -apple-system, sans-serif";
 
-  const bodyHtml = toHTML(blogCopyToPortableText(copy));
+  const sectionsHtml = copy.sections
+    .map(
+      (section, i) =>
+        `<h2 data-field="section-heading" data-index="${i}">${escapeHtml(section.heading)}</h2>` +
+        `<div data-field="section-body" data-index="${i}">${renderMarkdown(section.body)}</div>`,
+    )
+    .join("\n");
+
+  const ctaMarkdown = copy.cta_text
+    ? copy.cta_url
+      ? `[${copy.cta_text}](${copy.cta_url})`
+      : `**${copy.cta_text}**`
+    : "";
 
   return [
     "<!DOCTYPE html>",
@@ -60,12 +82,15 @@ export function renderBlogPreviewHtml(
     "</head>",
     "<body>",
     "<article>",
-    `<h1>${escapeHtml(copy.title)}</h1>`,
-    `<p class="post-meta">/${escapeHtml(copy.slug)}</p>`,
+    `<h1 data-field="title">${escapeHtml(copy.title)}</h1>`,
+    `<p class="post-meta" data-field="slug">/${escapeHtml(copy.slug)}</p>`,
     hero
       ? `<figure class="hero"><img src="${escapeHtml(hero.url)}" alt="${escapeHtml(hero.alt)}" width="${hero.width}" height="${hero.height}" /></figure>`
       : "",
-    bodyHtml,
+    `<div data-field="intro">${renderMarkdown(copy.intro)}</div>`,
+    sectionsHtml,
+    `<div data-field="conclusion">${renderMarkdown(copy.conclusion)}</div>`,
+    ctaMarkdown ? `<div data-field="cta">${renderMarkdown(ctaMarkdown)}</div>` : "",
     "</article>",
     "</body>",
     "</html>",
