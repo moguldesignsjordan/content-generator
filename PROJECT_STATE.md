@@ -443,7 +443,7 @@ as-is since both are real, usable draft content, not garbage.
   blocker to selling this as SaaS.
 - Topic remap: seeded topics still map to placeholder product slugs.
 
-## Plan 6 — Recurring automation (code complete, uncommitted; migration not applied)
+## Plan 6 — Recurring automation (done, live-verified, committed & pushed)
 
 Started 2026-07-06, right after Plan 5 Phase A + the blog-copy-editing commit
 (`b6f427d`) landed on `main`. Full plan lives at
@@ -452,8 +452,9 @@ Started 2026-07-06, right after Plan 5 Phase A + the blog-copy-editing commit
 Jordan's call locked in: dashboard badge only for notification, no new
 Resend integration this cut.
 
-**Everything in the plan is now implemented (uncommitted in the working
-tree):**
+**Everything in the plan is implemented, committed, and pushed to
+`origin/main`** (`19bf24a` finishes the blog click-to-edit refactor,
+`5d0a3ff` is Plan 6 itself):
 - `db/migrations/010_content_schedules.sql` + mirrored into `db/schema.sql`.
 - `lib/db/types.ts`: `Cadence`, `ContentSchedule`.
 - `lib/scheduling/cadence.ts` + test: `computeNextRunAt`.
@@ -534,11 +535,7 @@ app's own delete/archive flows, not raw DB deletes.
 1. Set `CRON_SECRET` (a real value is already in `.env.local`) as a Vercel
    project env var at/before deploy time, so the real daily cron tick
    authenticates in production.
-2. Nothing committed yet — this entire Plan 6 section plus the blog-preview
-   click-to-edit finish (see the earlier "blog copy editing" note) are all
-   working-tree changes on top of `b6f427d`. Ready to commit whenever Jordan
-   wants.
-3. Minor, non-blocking UX gap noticed during verification:
+2. Minor, non-blocking UX gap noticed during verification:
    `SchedulesForm`'s "Run now" doesn't update its row's last-run text until
    the page is reloaded (Pause/Resume and Delete do update immediately). Not
    fixed this session, cheap to pick up later.
