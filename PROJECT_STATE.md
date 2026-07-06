@@ -146,6 +146,27 @@ is clean — everything below is committed and pushed, not pending.
   retry never double-creates the campaign in MailerLite) and the UI shows a
   "created but not scheduled, finish it in MailerLite" warning with a link,
   since there's no in-app retry-just-the-schedule path yet.
+- **Slice 4 — DataForSEO keyword research, "enrich" cut (new, not yet
+  committed, migration NOT yet applied):** validates the keyword a topic
+  already carries against real DataForSEO numbers, on an explicit per-topic
+  "Research" tap (no auto-spend). `db/migrations/008_topic_keyword_data.sql`
+  adds `topics.keyword_data` (jsonb), mirrored in `db/schema.sql`.
+  `lib/clients/dataforseo.ts` (server-only, Basic Auth) + `lib/keyword/
+  research.ts` (`researchKeyword`, 4 Live calls: google_ads/search_volume,
+  dataforseo_labs bulk_keyword_difficulty, search_intent, related_keywords
+  for secondary suggestions) + `lib/keyword/normalize.ts` (pure normalizer,
+  unit-tested, kept free of the "server-only" import chain so Vitest can
+  import it directly). `POST /api/topics/[id]/research` persists onto the
+  topic; `POST /api/keywords/research` validates a raw keyword for an
+  unsaved topic-idea proposal (Suggest topics). `prompts/brand-voice.ts
+  buildKeywordLines` (unit-tested) swaps the generation brief's bare TARGET
+  KEYWORD/SEARCH INTENT lines for validated figures + a SECONDARY KEYWORDS
+  line once a topic has been researched; wired into both
+  `generate-email.ts` and `generate-blog.ts`. UI: `KeywordBadge` (colored
+  vs `seo_defaults.keyword_difficulty_max`) replaces a "Research" link on
+  `cluster-card.tsx` once researched; `suggest-topics.tsx` gets the same
+  per-proposal Research link (against the raw-keyword route, since a
+  proposal isn't a topic row yet).
 
 **Known limitations (by design or deferred, not bugs):**
 - The SSE generation-run dedupe registry (`lib/pipeline/generation-runs.ts`)
@@ -199,6 +220,25 @@ is purely "click through it as the logged-in user":
   schedule failure (e.g. a campaign with no group set) and confirm the UI
   shows the "created but not scheduled" warning instead of crashing or
   silently succeeding.
+- **Slice 4 keyword research is code-complete but blocked on two things
+  outside this session's reach:** (1) **migration 008 has NOT been applied**
+  to the live Supabase DB (`topics.keyword_data` doesn't exist yet, confirmed
+  via a direct REST query, `column topics.keyword_data does not exist`) —
+  paste `db/migrations/008_topic_keyword_data.sql` into the Supabase SQL
+  editor before using Research on a real topic. (2) **The
+  `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` values currently in `.env.local`
+  are not valid**: direct live calls to `api.dataforseo.com` (and the
+  sandbox host, and the plain `appendix/user_data` account-info endpoint)
+  all returned `40100 "You are not Authorized to Access this Resource"` at
+  $0 cost (no spend happened) — check/regenerate credentials at
+  app.dataforseo.com before relying on Research. Everything else is
+  verified: `npm run typecheck`, `npm run build`, and `npx vitest run` (76
+  tests, including new `research.test.ts` and `brand-voice.test.ts` cases for
+  `normalizeKeywordData`/`buildKeywordLines`) all pass. The actual browser
+  click-through (tap Research, confirm the badge, generate and confirm the
+  brief cites real numbers) hasn't happened yet: Supabase Auth gates every
+  route including the API ones, and no logged-in session was available in
+  this session to drive Playwright with.
 
 ## What's not built yet
 
@@ -212,8 +252,6 @@ is purely "click through it as the logged-in user":
 - A recurring/automated email series (e.g. "every Monday, auto-generate and
   send") — what's built is per-email scheduling, each one still approved and
   triggered individually; no scheduler that also triggers generation.
-- **Slice 4 — Keyword research (DataForSEO):** not started; the natural
-  upstream unlock for topic quality.
 - **Slice 7 — Distribution/repurposing checklist:** not started.
 - **Analytics loop** (`performance` table) — after publishing goes live.
 - **Multi-tenancy + RLS (Tier 3)** — deliberately out of scope, the one true
@@ -222,10 +260,15 @@ is purely "click through it as the logged-in user":
 
 ## Next step
 
-1. Jordan clicks through the "Not yet verified" list above in a logged-in
-   browser session.
-2. Pick up the next slice (keyword research is the natural next unlock) or
-   address anything the click-through turns up.
+1. Apply `db/migrations/008_topic_keyword_data.sql` in the Supabase SQL
+   editor, and fix/regenerate the `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD`
+   credentials in `.env.local` (both currently block Slice 4 from working
+   live, see "Not yet verified").
+2. Jordan clicks through the "Not yet verified" list above in a logged-in
+   browser session, including the Slice 4 Research flow once 1 is done.
+3. Pick up the next plan from the 7-plan improvement doc
+   (`~/.claude/plans/refactored-snacking-lightning.md`) or address anything
+   the click-through turns up.
 
 ## How to verify this doc against reality
 

@@ -8,10 +8,15 @@ import { ClusterCard } from "./cluster-card";
 interface ContentPlanProps {
   pillars: PillarWithClusters[];
   latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
+  keywordDifficultyMax?: number;
 }
 
 /** The Content Plan tree with a toggle to reveal archived topics. */
-export function ContentPlan({ pillars, latestDraftByTopic }: ContentPlanProps) {
+export function ContentPlan({
+  pillars,
+  latestDraftByTopic,
+  keywordDifficultyMax,
+}: ContentPlanProps) {
   const [showArchived, setShowArchived] = useState(false);
   const archivedCount = pillars.reduce(
     (sum, p) =>
@@ -53,6 +58,7 @@ export function ContentPlan({ pillars, latestDraftByTopic }: ContentPlanProps) {
                   cluster={cluster}
                   latestDraftByTopic={latestDraftByTopic}
                   showArchived={showArchived}
+                  keywordDifficultyMax={keywordDifficultyMax}
                 />
               ))}
             </div>

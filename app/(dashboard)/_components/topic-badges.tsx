@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, type BadgeTone } from "@/components/ui";
-import type { FunnelStage, TopicStatus } from "@/lib/db/types";
+import type { FunnelStage, KeywordMetric, TopicStatus } from "@/lib/db/types";
 
 const STATUS_TONES: Record<TopicStatus, BadgeTone> = {
   idea: "neutral",
@@ -56,6 +56,31 @@ export function DraftStateBadge({ state }: { state: string }) {
       {DRAFT_LABELS[state] ?? state}
     </Badge>
   );
+}
+
+/**
+ * DataForSEO-validated numbers for a topic's primary keyword (Slice 4
+ * "enrich" cut). Colored against the brand's keyword_difficulty_max, when
+ * set: warning above the brand's comfort range, success at or under it.
+ */
+export function KeywordBadge({
+  data,
+  difficultyMax,
+}: {
+  data: KeywordMetric;
+  difficultyMax?: number;
+}) {
+  const tone: BadgeTone =
+    data.difficulty == null
+      ? "neutral"
+      : difficultyMax != null && data.difficulty > difficultyMax
+        ? "warning"
+        : "success";
+  const parts = [
+    data.search_volume != null ? `~${data.search_volume}/mo` : null,
+    data.difficulty != null ? `diff ${data.difficulty}` : null,
+  ].filter(Boolean);
+  return <Badge tone={tone}>{parts.length ? parts.join(" · ") : "Researched"}</Badge>;
 }
 
 export function DraftLink({

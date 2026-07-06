@@ -14,6 +14,7 @@ import {
   buildBrandVoiceBlock,
   buildCampaignBriefBlock,
   buildGuidelinesBlock,
+  buildKeywordLines,
   buildPositioningBlock,
 } from "./brand-voice";
 import { buildEmailDesignBrief } from "./email-design";
@@ -407,8 +408,7 @@ export function buildEmailMessages(
     `EMAIL TYPE: ${emailType}`,
     `LENGTH FOR THIS EMAIL (required, not optional): ${length.words[0]} to ${length.words[1]} words of body copy across ${length.sections[0]} to ${length.sections[1]} body_sections. This is ${emailType === "promotional" || emailType === "announcement" ? `an ${emailType}` : `a ${emailType}`} email: ${length.directive} The body_sections array must hold ${length.sections[0]} to ${length.sections[1]} entries that together total ${length.words[0]} to ${length.words[1]} words.`,
     `TITLE: ${topic.title}`,
-    topic.target_keyword ? `TARGET KEYWORD: ${topic.target_keyword}` : "",
-    topic.intent ? `SEARCH INTENT: ${topic.intent}` : "",
+    ...buildKeywordLines(topic),
     topic.funnel_stage ? `FUNNEL STAGE: ${topic.funnel_stage}` : "",
     ctaText
       ? `CALL TO ACTION (use this intent, write the button text in brand voice): ${ctaText}`

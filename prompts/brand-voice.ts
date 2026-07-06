@@ -5,6 +5,7 @@ import type {
   Icp,
   Product,
   Strategy,
+  Topic,
   VoiceExampleChannel,
 } from "@/lib/db/types";
 
@@ -172,6 +173,48 @@ export function buildTopicLines(topics: TopicOptionLine[]): string[] {
             `  - id=${t.id} | ${t.title} | pillar: ${t.pillar}${t.funnel_stage ? ` | ${t.funnel_stage}` : ""} | ${t.status}`,
         )
     : ["  (none yet, you will need create_topic)"];
+}
+
+/**
+ * Keyword brief lines for one topic. When keyword_data.primary is present
+ * (the topic has been through DataForSEO "Research", Slice 4 "enrich" cut),
+ * the bare TARGET KEYWORD/SEARCH INTENT lines are replaced with real
+ * validated figures plus a SECONDARY KEYWORDS line, so the model treats the
+ * keyword as real market data instead of a guess. Falls back to the raw
+ * topic fields when the topic hasn't been researched yet.
+ */
+export function buildKeywordLines(
+  topic: Pick<Topic, "target_keyword" | "intent" | "keyword_data">,
+): string[] {
+  const primary = topic.keyword_data?.primary;
+  if (!primary) {
+    return [
+      topic.target_keyword ? `TARGET KEYWORD: ${topic.target_keyword}` : "",
+      topic.intent ? `SEARCH INTENT: ${topic.intent}` : "",
+    ].filter(Boolean);
+  }
+
+  const facts = [
+    primary.search_volume != null ? `~${primary.search_volume}/mo searches` : null,
+    primary.difficulty != null ? `difficulty ${primary.difficulty}/100` : null,
+    primary.intent ? `${primary.intent} intent` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const lines = [
+    `TARGET KEYWORD (DataForSEO-validated): ${primary.keyword}${facts ? ` (${facts})` : ""}`,
+  ];
+
+  const secondary = topic.keyword_data?.secondary ?? [];
+  if (secondary.length) {
+    lines.push(
+      `SECONDARY KEYWORDS (work in naturally where they fit): ${secondary
+        .map((s) => `${s.keyword}${s.search_volume != null ? ` (~${s.search_volume}/mo)` : ""}`)
+        .join(", ")}`,
+    );
+  }
+  return lines;
 }
 
 /** The strategy's funnel stage → CTA type mapping, one line per stage. */

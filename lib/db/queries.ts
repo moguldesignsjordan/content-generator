@@ -20,6 +20,7 @@ import type {
   BlogType,
   Icp,
   IcpProfile,
+  KeywordData,
   MailerliteConfig,
   OnboardingState,
   PillarWithClusters,
@@ -979,6 +980,19 @@ export async function deleteTopic(topicId: string): Promise<void> {
 export async function archiveTopic(topicId: string, archived: boolean): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("topics").update({ archived }).eq("id", topicId);
+  if (error) throw error;
+}
+
+/** Persists the result of a DataForSEO "Research" action on one topic. */
+export async function updateTopicKeywordData(
+  topicId: string,
+  keywordData: KeywordData,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("topics")
+    .update({ keyword_data: keywordData })
+    .eq("id", topicId);
   if (error) throw error;
 }
 

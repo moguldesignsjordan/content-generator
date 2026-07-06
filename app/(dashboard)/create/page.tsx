@@ -50,7 +50,7 @@ export default async function CreatePage() {
     );
   }
 
-  const { pillars, latestDraftByTopic } = data;
+  const { brand, pillars, latestDraftByTopic } = data;
   // Archived topics are tucked away: excluded from quick-generate, but the
   // Content Plan tree itself still renders (with its own "show archived"
   // toggle) as long as ANY topic exists, archived or not, so archived-only
@@ -106,7 +106,11 @@ export default async function CreatePage() {
       </div>
 
       {hasAnyTopics ? (
-        <ContentPlan pillars={pillars} latestDraftByTopic={latestDraftByTopic} />
+        <ContentPlan
+          pillars={pillars}
+          latestDraftByTopic={latestDraftByTopic}
+          keywordDifficultyMax={brand.seo_defaults?.keyword_difficulty_max}
+        />
       ) : (
         <Card className="p-7 text-center">
           <h3 className="font-display text-[16px] font-semibold text-foreground">

@@ -186,6 +186,29 @@ export interface Cluster {
   hub_intent: string | null;
 }
 
+// ── Keyword research: DataForSEO-validated numbers for a topic's keyword ────
+// (migration 008, Slice 4 "enrich" cut). A topic starts with a guessed
+// target_keyword; tapping "Research" fills this in with real search data.
+// "Researched" = !!keyword_data.primary.
+
+export interface KeywordMetric {
+  keyword: string;
+  search_volume: number | null;
+  difficulty: number | null; // 0-100, DataForSEO keyword_difficulty
+  intent: string | null; // informational | navigational | commercial | transactional
+  cpc: number | null;
+  competition: string | null; // LOW | MEDIUM | HIGH
+}
+
+export interface KeywordData {
+  primary?: KeywordMetric;
+  secondary?: KeywordMetric[];
+  location?: string;
+  language?: string;
+  researched_at?: string; // ISO timestamp
+  source?: string; // "dataforseo"
+}
+
 export interface Topic {
   id: string;
   cluster_id: string;
@@ -199,6 +222,7 @@ export interface Topic {
   status: TopicStatus;
   published_url: string | null;
   archived: boolean;
+  keyword_data: KeywordData;
   created_at: string;
 }
 

@@ -9,8 +9,9 @@ import type {
   Topic,
   TopicFormData,
 } from "@/lib/db/types";
-import { StatusBadge, FunnelBadge, DraftLink } from "./topic-badges";
+import { StatusBadge, FunnelBadge, KeywordBadge, DraftLink } from "./topic-badges";
 import { GenerateButton } from "./generate-button";
+import { ResearchButton } from "./research-button";
 
 const EMPTY_FORM: TopicFormData = {
   title: "",
@@ -35,12 +36,15 @@ interface ClusterCardProps {
   latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
   /** When false (default), archived topics are hidden entirely. */
   showArchived?: boolean;
+  /** brand.seo_defaults.keyword_difficulty_max, for coloring KeywordBadge. */
+  keywordDifficultyMax?: number;
 }
 
 export function ClusterCard({
   cluster,
   latestDraftByTopic,
   showArchived = false,
+  keywordDifficultyMax,
 }: ClusterCardProps) {
   const router = useRouter();
   const toast = useToast();
@@ -173,6 +177,15 @@ export function ClusterCard({
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {topic.funnel_stage && <FunnelBadge stage={topic.funnel_stage} />}
+                {topic.target_keyword &&
+                  (topic.keyword_data?.primary ? (
+                    <KeywordBadge
+                      data={topic.keyword_data.primary}
+                      difficultyMax={keywordDifficultyMax}
+                    />
+                  ) : (
+                    <ResearchButton topicId={topic.id} />
+                  ))}
                 <StatusBadge status={topic.status} />
                 {latestDraftByTopic[topic.id] ? (
                   <DraftLink draft={latestDraftByTopic[topic.id]} />

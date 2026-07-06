@@ -3,20 +3,49 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, Checkbox, useToast } from "@/components/ui";
-import { FunnelBadge } from "./topic-badges";
+import { FunnelBadge, KeywordBadge } from "./topic-badges";
 import type { TopicIdeaInput } from "@/prompts/suggest-topics";
+import type { KeywordData } from "@/lib/db/types";
 
 // "Suggest topic ideas" on the Create tab: proposals come from the brand
 // brain, the user picks which to add (nothing persists until Add selected).
 
-type Proposal = TopicIdeaInput & { include: boolean };
+type Proposal = TopicIdeaInput & { include: boolean; keywordData?: KeywordData };
 
 export function SuggestTopics({ compact = false }: { compact?: boolean }) {
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [researchingIndex, setResearchingIndex] = useState<number | null>(null);
   const router = useRouter();
   const toast = useToast();
+
+  async function handleResearch(i: number) {
+    const proposal = proposals?.[i];
+    if (!proposal?.target_keyword) return;
+    setResearchingIndex(i);
+    try {
+      const res = await fetch("/api/keywords/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: proposal.target_keyword }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        keywordData?: KeywordData;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Keyword research failed.");
+      setProposals((prev) =>
+        prev
+          ? prev.map((p, pi) => (pi === i ? { ...p, keywordData: data.keywordData } : p))
+          : prev,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Keyword research failed.");
+    } finally {
+      setResearchingIndex(null);
+    }
+  }
 
   async function handleSuggest() {
     setLoading(true);
@@ -46,7 +75,7 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topics: picked.map(({ include: _include, ...t }) => t),
+          topics: picked.map(({ include: _include, keywordData: _keywordData, ...t }) => t),
         }),
       });
       if (!res.ok) throw new Error();
@@ -108,6 +137,22 @@ export function SuggestTopics({ compact = false }: { compact?: boolean }) {
               <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
                 {p.funnel_stage && <FunnelBadge stage={p.funnel_stage} />}
                 {p.target_keyword && <span>“{p.target_keyword}”</span>}
+                {p.target_keyword &&
+                  (p.keywordData?.primary ? (
+                    <KeywordBadge data={p.keywordData.primary} />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleResearch(i);
+                      }}
+                      disabled={researchingIndex === i}
+                      className="font-medium text-accent transition-colors hover:text-accent-press disabled:opacity-50"
+                    >
+                      {researchingIndex === i ? "Researching…" : "Research"}
+                    </button>
+                  ))}
                 {p.maps_to_product && <span>sells: {p.maps_to_product}</span>}
               </span>
             </span>

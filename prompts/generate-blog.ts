@@ -5,6 +5,7 @@ import {
   buildBrandVoiceBlock,
   buildCampaignBriefBlock,
   buildGuidelinesBlock,
+  buildKeywordLines,
   buildPositioningBlock,
 } from "./brand-voice";
 import { buildOfferBlock, resolveCta } from "./generate-email";
@@ -288,8 +289,7 @@ export function buildBlogMessages(
     `BLOG TYPE: ${blogType}`,
     `LENGTH FOR THIS POST (required, not optional): ${length.words[0]} to ${length.words[1]} words total across ${length.sections[0]} to ${length.sections[1]} sections. This is ${blogType === "landing" ? `an ${blogType}` : `a ${blogType.replace(/_/g, " ")}`} post: ${length.directive} The intro plus section bodies plus conclusion together must reach ${length.words[0]} words.`,
     `TITLE / TOPIC: ${topic.title}`,
-    topic.target_keyword ? `TARGET KEYWORD: ${topic.target_keyword}` : "",
-    topic.intent ? `SEARCH INTENT: ${topic.intent}` : "",
+    ...buildKeywordLines(topic),
     topic.funnel_stage ? `FUNNEL STAGE: ${topic.funnel_stage}` : "",
     ctaText ? `CALL TO ACTION (use this, adapted to action + value): ${ctaText}` : "",
     offerBlock,

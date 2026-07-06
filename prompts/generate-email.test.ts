@@ -27,6 +27,7 @@ function makeTopic(overrides: Partial<Topic> = {}): Topic {
     status: "idea" as TopicStatus,
     published_url: null,
     archived: false,
+    keyword_data: {},
     created_at: "2026-07-05T00:00:00Z",
     ...overrides,
   };

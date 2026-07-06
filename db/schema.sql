@@ -110,6 +110,7 @@
       check (status in ('idea', 'queued', 'in_progress', 'published')),
     published_url         text,
     archived              boolean not null default false,  -- hides from the default Content Plan view
+    keyword_data          jsonb not null default '{}'::jsonb,  -- DataForSEO research (migration 008)
     created_at            timestamptz not null default now()
   );
 
