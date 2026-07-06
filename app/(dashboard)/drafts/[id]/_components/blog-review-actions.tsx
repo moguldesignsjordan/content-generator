@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
+  BlogCopy,
   ContentImage,
   DraftMeta,
   DraftSeoData,
@@ -37,12 +38,15 @@ interface BlogReviewActionsProps {
 }
 
 /**
- * Review surface for blog drafts. Simpler than the email one by design:
- * the article text is read-only v1 (the Portable Text that ships to Sanity
- * is exactly what's shown), with the same approve gates (QA nudge + server
- * banned-terms block) and a publish-to-Sanity step once approved. The one
- * editable visual is the hero image (generate or upload; it publishes to
- * Sanity as the post's main image).
+ * Review surface for blog drafts. Simpler than the email one by design: the
+ * article body is edited as structured fields (title, slug, intro, each
+ * section, conclusion, CTA) rather than click-to-edit HTML regions, since
+ * blog HTML is code-rendered from meta.blog_copy, not model-authored markup.
+ * Edits save via PATCH /blog-copy, which re-renders the preview from the
+ * updated copy so the iframe below always shows exactly what would publish
+ * to Sanity. Same approve gates as email (QA nudge + server banned-terms
+ * block) and a publish-to-Sanity step once approved. The hero image is
+ * edited separately (generate or upload; publishes as the post's main image).
  */
 export function BlogReviewActions({
   draftId,
@@ -68,8 +72,10 @@ export function BlogReviewActions({
   const [archiving, setArchiving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [metaTitle, setMetaTitle] = useState(initialMeta.meta_title ?? "");
-  const [metaDesc, setMetaDesc] = useState(initialMeta.meta_description ?? "");
+  const [copy, setCopy] = useState<BlogCopy | null>(initialMeta.blog_copy ?? null);
+  const [copyDirty, setCopyDirty] = useState(false);
+  const [savingCopy, setSavingCopy] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [showQaNudge, setShowQaNudge] = useState(false);
   const [bannedBlock, setBannedBlock] = useState<string[] | null>(null);
@@ -83,12 +89,11 @@ export function BlogReviewActions({
   const [newDraftId, setNewDraftId] = useState<string | null>(null);
   const [rejectedThisDraft, setRejectedThisDraft] = useState(false);
 
-  const copy = initialMeta.blog_copy;
   const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
   const hasQa = seoData.qa_pass !== undefined;
   const atCap = version >= MAX_DRAFT_VERSIONS;
   const isActionable = state === "in_review";
-  const busy = approving || archiving || publishing || regenerating;
+  const busy = approving || archiving || publishing || regenerating || savingCopy;
   const rejectDisabledReason = atCap
     ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
     : rejectedThisDraft
@@ -152,6 +157,51 @@ export function BlogReviewActions({
     URL.revokeObjectURL(url);
   }
 
+  function updateCopy(patch: Partial<BlogCopy>) {
+    setCopy((c) => (c ? { ...c, ...patch } : c));
+    setCopyDirty(true);
+  }
+
+  function updateSection(index: number, patch: Partial<BlogCopy["sections"][number]>) {
+    setCopy((c) => {
+      if (!c) return c;
+      return {
+        ...c,
+        sections: c.sections.map((s, i) => (i === index ? { ...s, ...patch } : s)),
+      };
+    });
+    setCopyDirty(true);
+  }
+
+  async function handleSaveCopy() {
+    if (!copy) return;
+    setSavingCopy(true);
+    setCopyError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/blog-copy`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(copy),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        html?: string;
+        copy?: BlogCopy;
+        error?: string;
+      };
+      if (!res.ok || !data.html || !data.copy) {
+        throw new Error(data.error ?? "Couldn't save your edits.");
+      }
+      setHtml(data.html);
+      setCopy(data.copy);
+      setCopyDirty(false);
+      toast.success("Article saved.");
+    } catch (e) {
+      setCopyError(e instanceof Error ? e.message : "Couldn't save your edits.");
+    } finally {
+      setSavingCopy(false);
+    }
+  }
+
   function handleApproveClick() {
     if (seoData.qa_pass === false) {
       setShowQaNudge(true);
@@ -170,7 +220,11 @@ export function BlogReviewActions({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           force,
-          meta: { ...initialMeta, meta_title: metaTitle, meta_description: metaDesc },
+          meta: {
+            ...initialMeta,
+            meta_title: copy?.meta_title ?? initialMeta.meta_title,
+            meta_description: copy?.meta_description ?? initialMeta.meta_description,
+          },
         }),
       });
       if (res.status === 409) {
@@ -314,26 +368,118 @@ export function BlogReviewActions({
         </Card>
       )}
 
-      {/* SEO fields */}
+      {/* Editable article body: the structured fields meta.blog_copy stores
+          and Sanity publish reads directly. Saving re-renders the preview
+          below from these exact values. */}
       <Card className="space-y-4 p-5">
-        {copy && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-[15px] font-semibold">Edit article</h3>
+            <p className="mt-0.5 text-[12.5px] text-muted">
+              Basic markdown works in the text fields: **bold**, *italic*, - bullets, {"> quotes"}, [text](url).
+            </p>
+          </div>
+          {copyDirty && (
+            <span className="shrink-0 text-[12px] font-medium text-warning">
+              Unsaved changes
+            </span>
+          )}
+        </div>
+
+        {copy ? (
+          <>
+            <Field label="URL slug" hint="Lowercase, hyphenated.">
+              <Input value={copy.slug} onChange={(e) => updateCopy({ slug: e.target.value })} />
+            </Field>
+            <Field label="Page title" hint="The title tag search engines show.">
+              <Input
+                value={copy.meta_title}
+                onChange={(e) => updateCopy({ meta_title: e.target.value })}
+              />
+            </Field>
+            <Field label="Page summary" hint="The meta description under the title in search results.">
+              <Textarea
+                rows={2}
+                value={copy.meta_description}
+                onChange={(e) => updateCopy({ meta_description: e.target.value })}
+              />
+            </Field>
+            <Field label="Headline">
+              <Input value={copy.title} onChange={(e) => updateCopy({ title: e.target.value })} />
+            </Field>
+            <Field label="Intro">
+              <Textarea
+                rows={4}
+                value={copy.intro}
+                onChange={(e) => updateCopy({ intro: e.target.value })}
+              />
+            </Field>
+            {copy.sections.map((section, i) => (
+              <div key={i} className="space-y-3 rounded-lg border border-border p-3">
+                <Field label={`Section ${i + 1} heading`}>
+                  <Input
+                    value={section.heading}
+                    onChange={(e) => updateSection(i, { heading: e.target.value })}
+                  />
+                </Field>
+                <Field label={`Section ${i + 1} body`}>
+                  <Textarea
+                    rows={6}
+                    value={section.body}
+                    onChange={(e) => updateSection(i, { body: e.target.value })}
+                  />
+                </Field>
+              </div>
+            ))}
+            <Field label="Conclusion">
+              <Textarea
+                rows={4}
+                value={copy.conclusion}
+                onChange={(e) => updateCopy({ conclusion: e.target.value })}
+              />
+            </Field>
+            <Field label="Call-to-action text">
+              <Input
+                value={copy.cta_text}
+                onChange={(e) => updateCopy({ cta_text: e.target.value })}
+              />
+            </Field>
+            <Field label="Call-to-action link">
+              <Input
+                type="url"
+                value={copy.cta_url ?? ""}
+                onChange={(e) => updateCopy({ cta_url: e.target.value })}
+                placeholder="https://…"
+              />
+            </Field>
+
+            {copyError && <p className="text-sm text-danger">{copyError}</p>}
+
+            <div className="flex justify-end">
+              <Button
+                variant="gradient"
+                loading={savingCopy}
+                disabled={!copyDirty || savingCopy}
+                onClick={handleSaveCopy}
+              >
+                Save changes
+              </Button>
+            </div>
+          </>
+        ) : (
           <p className="text-[13px] text-muted">
-            URL slug: <span className="font-mono text-foreground/80">/{copy.slug}</span>
+            This draft has no stored article copy to edit.
           </p>
         )}
-        <Field label="Page title" hint="The title tag search engines show.">
-          <Input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} />
-        </Field>
-        <Field label="Page summary" hint="The meta description under the title in search results.">
-          <Textarea rows={2} value={metaDesc} onChange={(e) => setMetaDesc(e.target.value)} />
-        </Field>
       </Card>
 
       {/* Article preview */}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <p className="min-w-0 truncate text-[13px] font-medium text-muted">
-            Article preview — exactly what publishes to Sanity
+            {copyDirty
+              ? "Article preview: save your edits above to update this"
+              : "Article preview: exactly what publishes to Sanity"}
           </p>
           <div className="flex shrink-0 items-center gap-3">
             <button
