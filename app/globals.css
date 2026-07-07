@@ -313,8 +313,14 @@
   mask-composite: exclude;
   opacity: 0.72;
   animation: hero-ring-spin 9s linear infinite;
+  transition: opacity 200ms ease;
   pointer-events: none;
   z-index: 1;
+}
+
+/* Typing brightens the ring — the input is live. */
+.hero-ring:focus-within::before {
+  opacity: 1;
 }
 
 /* One small, warm halo. Replaces the heavy three-stop spectrum glow. */

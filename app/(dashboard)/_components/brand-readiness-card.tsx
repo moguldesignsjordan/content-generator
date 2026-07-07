@@ -28,7 +28,7 @@ export function BrandReadinessCard({
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
         <div
-          className="h-full rounded-full bg-accent transition-[width]"
+          className="h-full rounded-full bg-amber transition-[width]"
           style={{ width: `${Math.round((done / total) * 100)}%` }}
         />
       </div>

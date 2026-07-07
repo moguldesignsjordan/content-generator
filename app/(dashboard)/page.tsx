@@ -128,11 +128,6 @@ export default async function DashboardPage() {
   const greeting =
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  const suggestions = allTopics.slice(0, 3).map((t) => ({
-    label: t.title.length > 30 ? `${t.title.slice(0, 30)}…` : t.title,
-    text: `Draft an email for "${t.title}"`,
-  }));
-
   return (
     <div className="relative space-y-8">
       {/* Ambient brand light behind the top of the screen. */}
@@ -148,8 +143,8 @@ export default async function DashboardPage() {
         subtitle={`${brand.name} · content engine`}
       />
 
-      {/* Create — the work surface. Wears the spectrum as a living ring. */}
-      <CreateAgent suggestions={suggestions} initial={createAgentInitial} />
+      {/* Create — the work surface. Quick actions + an animated type box. */}
+      <CreateAgent initial={createAgentInitial} />
 
       {/* What's still missing from the brand brain (hides itself when full) */}
       <BrandReadinessCard {...readiness} />

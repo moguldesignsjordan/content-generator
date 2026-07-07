@@ -87,11 +87,9 @@ export interface CreateAgentInitialState {
  * clarifying question instead.
  */
 export function CreateAgent({
-  suggestions = [],
   className,
   initial,
 }: {
-  suggestions?: CreateAgentSuggestion[];
   className?: string;
   initial?: CreateAgentInitialState;
 }) {
@@ -211,7 +209,7 @@ export function CreateAgent({
   return (
     <div
       className={cn(
-        "hero-ring hero-glow hero-surface flex flex-col overflow-hidden rounded-[var(--radius-card)]",
+        "flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface",
         className,
       )}
       style={{ height: "clamp(464px, 64vh, 640px)" }}
@@ -222,7 +220,7 @@ export function CreateAgent({
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
       >
         {empty ? (
-          <div className="flex min-h-full flex-col items-center justify-center gap-5 px-4 py-8 text-center">
+          <div className="flex min-h-full flex-col items-center justify-center gap-4 px-4 py-8 text-center">
             <span className="hero-beacon flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface-2 shadow-[0_0_30px_-8px_rgba(255,61,140,0.45)]">
               <SparkleIcon className="text-accent" size={22} />
             </span>
@@ -231,49 +229,9 @@ export function CreateAgent({
                 What are we creating today?
               </p>
               <p className="text-[13px] text-muted">
-                Describe it, or start from a quick action below.
+                Describe it, or tap a quick action.
               </p>
             </div>
-
-            {/* Primary quick actions — tap before type. Each seeds the
-                conversation except Campaign, which is its own flow. */}
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <QuickAction
-                icon={<MailIcon size={16} />}
-                label="Email"
-                onClick={() => send("Draft an on-brand email")}
-              />
-              <QuickAction
-                icon={<BlogIcon size={16} />}
-                label="Blog post"
-                onClick={() => send("Draft a blog post")}
-              />
-              <QuickAction
-                icon={<SparkleIcon size={16} />}
-                label="Campaign"
-                onClick={() => router.push("/campaigns/new")}
-              />
-            </div>
-
-            {/* Jump straight from a queued topic in the content plan. */}
-            {suggestions.length > 0 && (
-              <div className="w-full max-w-sm">
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
-                  From your plan
-                </p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s.label}
-                      onClick={() => send(s.text)}
-                      className="rounded-full border border-border bg-surface-2/60 px-3 py-1.5 text-[12.5px] text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           <>
@@ -329,25 +287,50 @@ export function CreateAgent({
 
       {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
 
-      {/* Composer */}
-      <div className="border-t border-border p-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send(input);
-              }
-            }}
-            rows={1}
-            placeholder={
-              ready ? "Tweak the brief, or hit Generate" : "Describe the email you want…"
-            }
-            className="max-h-32 min-h-[44px] flex-1 resize-none rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 py-2.5 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+      {/* Quick actions — sit just above the type box, before the first
+          message. Each seeds the conversation except Campaign, which is
+          its own flow. */}
+      {empty && (
+        <div className="flex flex-wrap items-center justify-center gap-2 px-4 pb-1">
+          <QuickAction
+            icon={<MailIcon size={16} />}
+            label="Email"
+            onClick={() => send("Draft an on-brand email")}
           />
+          <QuickAction
+            icon={<BlogIcon size={16} />}
+            label="Blog post"
+            onClick={() => send("Draft a blog post")}
+          />
+          <QuickAction
+            icon={<SparkleIcon size={16} />}
+            label="Campaign"
+            onClick={() => router.push("/campaigns/new")}
+          />
+        </div>
+      )}
+
+      {/* Composer — the type box wears the animated spectrum ring. */}
+      <div className="p-3 pt-2">
+        <div className="flex items-end gap-2">
+          <div className="hero-ring flex-1 rounded-[var(--radius-md)] bg-surface-2 transition-shadow duration-200 focus-within:shadow-[0_0_28px_-10px_rgba(255,61,140,0.55)]">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              rows={1}
+              placeholder={
+                ready ? "Tweak the brief, or hit Generate" : "Describe the email you want…"
+              }
+              className="block max-h-32 min-h-[44px] w-full resize-none rounded-[var(--radius-md)] bg-transparent px-3.5 py-2.5 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
+            />
+          </div>
           <Button
             variant="gradient"
             size="md"
