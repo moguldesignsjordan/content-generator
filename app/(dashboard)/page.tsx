@@ -136,9 +136,6 @@ export default async function DashboardPage() {
       {/* Create — the work surface. Quick actions + an animated type box. */}
       <CreateAgent initial={createAgentInitial} />
 
-      {/* What's still missing from the brand brain (hides itself when full) */}
-      <BrandReadinessCard {...readiness} />
-
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2.5">
         <StatCard
@@ -214,6 +211,9 @@ export default async function DashboardPage() {
           </ListGroup>
         )}
       </section>
+
+      {/* What's still missing from the brand brain (hides itself when full) */}
+      <BrandReadinessCard {...readiness} />
     </div>
   );
 }
