@@ -5,6 +5,7 @@ import { createDraftShell, getTopicContext } from "@/lib/db/queries";
 import type { BlogType, EmailType } from "@/lib/db/types";
 import { EMAIL_LENGTH_TARGETS } from "@/prompts/generate-email";
 import { BLOG_LENGTH_TARGETS } from "@/prompts/generate-blog";
+import { logError } from "@/lib/log";
 
 // Only creates the draft shell here (fast DB writes) and returns immediately.
 // The actual generation runs when the draft page opens the generate-stream
@@ -62,14 +63,7 @@ export async function POST(request: Request) {
     console.log("[generate] shell created topicId:", topicId, "draftId:", draftId);
     return NextResponse.json({ draftId });
   } catch (err) {
-    console.error(
-      "[generate] failed topicId:",
-      topicId,
-      err instanceof Error ? err.message : err,
-    );
-    if (err instanceof Error && err.stack) {
-      console.error("[generate] stack:", err.stack);
-    }
+    logError("api:/api/generate", err, { topicId });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Generation failed." },
       { status: 500 },

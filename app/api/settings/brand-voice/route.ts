@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateBrandVoice } from "@/lib/db/queries";
 import type { VoiceProfile } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function PATCH(req: NextRequest) {
     await updateBrandVoice(brandId, voiceProfile);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("brand-voice update error", err);
+    logError("api:/api/settings/brand-voice", err);
     return NextResponse.json({ error: "Failed to save brand voice" }, { status: 500 });
   }
 }

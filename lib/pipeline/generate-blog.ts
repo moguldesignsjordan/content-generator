@@ -39,6 +39,7 @@ import type {
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
+import { logError, logWarn } from "@/lib/log";
 
 /**
  * Fills in a blog draft shell (content_jobs.type='blog'), mirroring
@@ -110,7 +111,7 @@ export async function generateBlogForTopicStreamed(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed.";
     await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
-      (e) => console.error("[generate-blog] failed to record error phase:", e),
+      (e) => logError("pipeline:generate-blog:record-error-phase", e, { draftId }),
     );
     onEvent({ type: "error", message });
     throw err;
@@ -248,7 +249,7 @@ async function generateBlogCopy(
 
   const runOnce = async (label: string, u: string): Promise<BlogDraftOutput> => {
     const resp = await call(u);
-    logUsage(label, resp.usage);
+    logUsage(label, DRAFT_MODEL, resp.usage);
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
     return extract(resp);
   };
@@ -258,7 +259,7 @@ async function generateBlogCopy(
   try {
     parsed = await runOnce("blog-copy", user);
   } catch (err) {
-    console.error("[generate-blog] copy failed, retrying once:", err);
+    logError("pipeline:generate-blog:copy", err);
     parsed = await runOnce("blog-copy-retry", user);
   }
 
@@ -270,8 +271,9 @@ async function generateBlogCopy(
   if (lengthTarget) {
     const words = countBlogWords(parsed);
     if (words < lengthTarget.words[0]) {
-      console.warn(
-        `[generate-blog] post too short (${words} < ${lengthTarget.words[0]} for ${blogType ?? "this type"}); retrying once`,
+      logWarn(
+        "pipeline:generate-blog:length-check",
+        `post too short (${words} < ${lengthTarget.words[0]} for ${blogType ?? "this type"}); retrying once`,
       );
       const nudge = [
         "",
@@ -291,10 +293,7 @@ async function generateBlogCopy(
       try {
         parsed = await runOnce("blog-copy-length-retry", user + nudge);
       } catch (err) {
-        console.error(
-          "[generate-blog] length retry failed, keeping first draft:",
-          err,
-        );
+        logError("pipeline:generate-blog:length-retry", err);
       }
     }
   }

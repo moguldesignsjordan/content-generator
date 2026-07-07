@@ -1,6 +1,10 @@
 import "server-only";
 import { getAdminClient } from "./client";
+import { isMissingTableError } from "./table-guard";
+import { logError, logWarn } from "@/lib/log";
 import type {
+  AppLog,
+  AppLogLevel,
   Brand,
   BrandGuidelines,
   BrandMemory,
@@ -184,8 +188,9 @@ export async function getTopicContext(
       .maybeSingle();
     if (productErr && !isMissingTableError(productErr)) throw productErr;
     if (productErr) {
-      console.warn(
-        "[queries] products table missing, apply db/migrations/002 to enable offer context",
+      logWarn(
+        "db:queries:topic-context",
+        "products table missing, apply db/migrations/002 to enable offer context",
       );
     }
     product = (productRow as Product) ?? null;
@@ -382,8 +387,8 @@ export async function patchDraftGeneration(
     .from("generation_runs")
     .update({ heartbeat_at: new Date().toISOString() })
     .eq("draft_id", draftId);
-  if (heartbeatErr && !isMissingGenerationRunsTable(heartbeatErr)) {
-    console.error("[generation-runs] failed to bump heartbeat:", heartbeatErr);
+  if (heartbeatErr && !isMissingTableError(heartbeatErr)) {
+    logError("db:generation-runs:heartbeat", heartbeatErr);
   }
 }
 
@@ -392,13 +397,6 @@ export async function patchDraftGeneration(
  * Kept comfortably above the 300s maxDuration on the generate-stream route:
  * a healthy run can't go this long between heartbeat bumps. */
 const STALE_LOCK_MS = 6 * 60 * 1000;
-
-function isMissingGenerationRunsTable(
-  error: { code?: string; message?: string } | null,
-): boolean {
-  if (!error) return false;
-  return error.code === "42P01" || /does not exist/i.test(error.message ?? "");
-}
 
 /**
  * Cross-instance lock backing lib/pipeline/generation-runs.ts: true means
@@ -417,7 +415,7 @@ export async function acquireGenerationLock(draftId: string): Promise<boolean> {
     .from("generation_runs")
     .insert({ draft_id: draftId });
   if (!insertErr) return true;
-  if (isMissingGenerationRunsTable(insertErr)) return true;
+  if (isMissingTableError(insertErr)) return true;
   if (insertErr.code !== "23505") throw insertErr; // not a "someone else has it" conflict
 
   const staleBefore = new Date(Date.now() - STALE_LOCK_MS).toISOString();
@@ -441,8 +439,8 @@ export async function acquireGenerationLock(draftId: string): Promise<boolean> {
 export async function releaseGenerationLock(draftId: string): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("generation_runs").delete().eq("draft_id", draftId);
-  if (error && !isMissingGenerationRunsTable(error)) {
-    console.error("[generation-runs] failed to release lock:", error);
+  if (error && !isMissingTableError(error)) {
+    logError("db:generation-runs:release-lock", error);
   }
 }
 
@@ -1306,19 +1304,6 @@ export async function updateBrandGuidelines(
 // ── Products (the offers behind topics.maps_to_product) ───────────────────────
 
 /**
- * True when a query failed because the table doesn't exist yet (migration not
- * applied). PGRST205 is PostgREST's "table not in schema cache"; 42P01 is
- * Postgres "undefined_table".
- */
-function isMissingTableError(err: { code?: string; message?: string }): boolean {
-  return (
-    err.code === "PGRST205" ||
-    err.code === "42P01" ||
-    (err.message ?? "").includes("schema cache")
-  );
-}
-
-/**
  * All products for a brand, alphabetical by name. Returns [] (with a warning)
  * when the products table doesn't exist yet so Settings keeps working
  * pre-migration.
@@ -1331,8 +1316,9 @@ export async function listProducts(brandId: string): Promise<Product[]> {
     .eq("brand_id", brandId)
     .order("name", { ascending: true });
   if (error && isMissingTableError(error)) {
-    console.warn(
-      "[queries] products table missing, apply db/migrations/002 to enable products",
+    logWarn(
+      "db:queries:list-products",
+      "products table missing, apply db/migrations/002 to enable products",
     );
     return [];
   }
@@ -1383,8 +1369,9 @@ export async function listBrandMemory(brandId: string): Promise<BrandMemory[]> {
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false });
   if (error && isMissingTableError(error)) {
-    console.warn(
-      "[queries] brand_memory table missing, apply db/migrations/007 to enable memory",
+    logWarn(
+      "db:queries:list-brand-memory",
+      "brand_memory table missing, apply db/migrations/007 to enable memory",
     );
     return [];
   }
@@ -1874,4 +1861,94 @@ export async function countScheduledAwaitingReview(brandId: string): Promise<num
     .eq("content_jobs.trigger_source", "schedule");
   if (error) throw error;
   return count ?? 0;
+}
+
+// ── Logs (migration 011) ───────────────────────────────────────────────────
+
+/** The most recent app_logs rows, newest first. Powers the /logs page's
+ * initial server-rendered feed. Degrades to [] pre-migration. */
+export async function listRecentLogs(opts?: {
+  level?: AppLogLevel;
+  limit?: number;
+}): Promise<AppLog[]> {
+  const db = getAdminClient();
+  let query = db
+    .from("app_logs")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(opts?.limit ?? 100);
+  if (opts?.level) query = query.eq("level", opts.level);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as AppLog[];
+}
+
+/** Rows created after `since` (exclusive), oldest first, so the client's
+ * poll loop can append them in order and advance its cursor to the last row's
+ * created_at. Degrades to [] pre-migration. */
+export async function listLogsSince(
+  since: string,
+  opts?: { level?: AppLogLevel; limit?: number },
+): Promise<AppLog[]> {
+  const db = getAdminClient();
+  let query = db
+    .from("app_logs")
+    .select("*")
+    .gt("created_at", since)
+    .order("created_at", { ascending: true })
+    .limit(opts?.limit ?? 500);
+  if (opts?.level) query = query.eq("level", opts.level);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as AppLog[];
+}
+
+/** Counts/spend for the /logs page's stat tiles, last 24h. Degrades to all
+ * zeroes pre-migration. */
+export async function getLogStats(): Promise<{
+  errorCount24h: number;
+  warnCount24h: number;
+  usageCount24h: number;
+  estimatedUsd24h: number;
+}> {
+  const db = getAdminClient();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await db
+    .from("app_logs")
+    .select("level, estimated_usd")
+    .gte("created_at", since);
+  if (error) {
+    if (isMissingTableError(error)) {
+      return { errorCount24h: 0, warnCount24h: 0, usageCount24h: 0, estimatedUsd24h: 0 };
+    }
+    throw error;
+  }
+
+  const rows = (data ?? []) as { level: AppLogLevel; estimated_usd: number | null }[];
+  let errorCount24h = 0;
+  let warnCount24h = 0;
+  let usageCount24h = 0;
+  let estimatedUsd24h = 0;
+  for (const row of rows) {
+    if (row.level === "error") errorCount24h++;
+    else if (row.level === "warn") warnCount24h++;
+    else if (row.level === "usage") {
+      usageCount24h++;
+      estimatedUsd24h += row.estimated_usd ?? 0;
+    }
+  }
+  return {
+    errorCount24h,
+    warnCount24h,
+    usageCount24h,
+    estimatedUsd24h: Number(estimatedUsd24h.toFixed(4)),
+  };
 }

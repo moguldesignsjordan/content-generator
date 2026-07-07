@@ -1,5 +1,8 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { logTokenUsage } from "@/lib/log";
+
+export { DRAFT_MODEL, FAST_MODEL } from "./model-ids";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server-only Anthropic client.
@@ -12,16 +15,6 @@ import Anthropic from "@anthropic-ai/sdk";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
-
-/** Model used for generating email/blog drafts. */
-export const DRAFT_MODEL = "claude-sonnet-4-6";
-
-/**
- * Cheapest/fastest tier, for small structured-output calls where quality
- * needn't scale with cost: picking from a curated list, short classification,
- * a brand-identity palette. Don't use for anything drafting reader-facing copy.
- */
-export const FAST_MODEL = "claude-haiku-4-5-20251001";
 
 export function isAnthropicConfigured(): boolean {
   return Boolean(apiKey);
@@ -88,15 +81,20 @@ export function withCacheBreakpoint(
  * — almost always because it's under the model's minimum cacheable length
  * (1,024 tokens for Sonnet 4.6). Pass a short label to tell calls apart in
  * the server log. Intended for dev-time verification; safe to leave on.
+ *
+ * Also persists the call as a `usage` row in app_logs (see lib/log.ts) so
+ * token spend is visible on the /logs page, not just in server console output.
  */
 export function logUsage(
   label: string,
+  model: string,
   usage: {
     input_tokens?: number | null;
     output_tokens?: number | null;
     cache_creation_input_tokens?: number | null;
     cache_read_input_tokens?: number | null;
   },
+  opts?: { draftId?: string },
 ): void {
   const input = usage.input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;
@@ -108,4 +106,5 @@ export function logUsage(
   console.log(
     `[usage:${label}] input=${input} cache_write=${cacheWrite} cache_read=${cacheRead} output=${output} (${verdict}, ${totalInput} total input)`,
   );
+  logTokenUsage(label, model, usage, opts);
 }

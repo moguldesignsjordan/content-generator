@@ -3,6 +3,7 @@ import {
   DRAFT_MODEL,
   getAnthropic,
   isAnthropicConfigured,
+  logUsage,
 } from "@/lib/clients/anthropic";
 import {
   createTopic,
@@ -19,6 +20,7 @@ import {
   type TopicIdeaInput,
 } from "@/prompts/suggest-topics";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 120;
 
@@ -62,6 +64,7 @@ export async function POST() {
       tools: [SUGGEST_TOPICS_TOOL],
       tool_choice: { type: "tool", name: "save_topic_ideas" },
     });
+    logUsage("topics-suggest", DRAFT_MODEL, response.usage);
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_topic_ideas",
@@ -91,7 +94,7 @@ export async function POST() {
 
     return NextResponse.json({ proposals });
   } catch (err) {
-    console.error("[topics/suggest] error", err);
+    logError("api:/api/topics/suggest:post", err);
     return NextResponse.json(
       { error: "Couldn't suggest topics. Try again." },
       { status: 500 },
@@ -133,7 +136,7 @@ export async function PUT(req: NextRequest) {
     }
     return NextResponse.json({ created });
   } catch (err) {
-    console.error("[topics/suggest] save error", err);
+    logError("api:/api/topics/suggest:put", err);
     return NextResponse.json(
       { error: "Couldn't add topics. Try again." },
       { status: 500 },

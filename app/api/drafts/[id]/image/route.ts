@@ -26,6 +26,7 @@ import type {
   TopicContext,
 } from "@/lib/db/types";
 import type { UsageDelta } from "@/lib/pipeline/cost";
+import { logError } from "@/lib/log";
 
 // A Gemini render + Haiku prompt-craft + optimize + upload usually lands in
 // 10-25s, but leave headroom for retries and cold storage buckets.
@@ -225,7 +226,7 @@ export async function POST(
     }
     return NextResponse.json({ html: result.html, history: result.history, image });
   } catch (err) {
-    console.error("[image] error", err);
+    logError("api:/api/drafts/[id]/image:post", err);
     const message =
       err instanceof Error ? err.message : "Couldn't generate the image. Try again.";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -276,7 +277,7 @@ export async function DELETE(
     }
     return NextResponse.json({ html: result.html, history: result.history });
   } catch (err) {
-    console.error("[image] delete error", err);
+    logError("api:/api/drafts/[id]/image:delete", err);
     return NextResponse.json(
       { error: "Couldn't remove the image. Try again." },
       { status: 500 },

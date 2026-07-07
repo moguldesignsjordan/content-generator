@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DRAFT_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import { DRAFT_MODEL, getAnthropic, logUsage } from "@/lib/clients/anthropic";
 import { getBrandWithIcps } from "@/lib/db/queries";
 import { buildSuggestMessages, type SuggestField } from "@/prompts/suggest";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 300;
 
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
       system,
       messages: [{ role: "user", content: user }],
     });
+    logUsage("settings-suggest", DRAFT_MODEL, response.usage);
 
     const suggestion = response.content
       .filter((b) => b.type === "text")
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ suggestion });
   } catch (err) {
-    console.error("suggest error", err);
+    logError("api:/api/settings/suggest", err);
     return NextResponse.json(
       { error: "Failed to generate a suggestion" },
       { status: 500 },

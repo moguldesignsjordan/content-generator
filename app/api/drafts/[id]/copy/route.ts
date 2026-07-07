@@ -4,6 +4,7 @@ import { getDraftWithJobContext } from "@/lib/db/queries";
 import { locateRegion, replaceRegionText } from "@/lib/email/inline-style";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import type { CopyMode } from "@/prompts/adjust-copy";
+import { logError } from "@/lib/log";
 
 // Inline wording edit on one region: cheap, no thinking, but leave headroom
 // for a slow model turn or the Sonnet fallback. Sibling to /adjust-style.
@@ -71,7 +72,7 @@ export async function POST(
       caveat: result.caveat,
     });
   } catch (err) {
-    console.error("[copy] error", err);
+    logError("api:/api/drafts/[id]/copy", err);
     return NextResponse.json(
       { error: "Couldn't apply that edit. Try again." },
       { status: 500 },

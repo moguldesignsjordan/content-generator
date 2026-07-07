@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminClient } from "@/lib/db/client";
 import { updateTopic, deleteTopic } from "@/lib/db/queries";
 import type { TopicFormData } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(
   req: NextRequest,
@@ -18,7 +19,7 @@ export async function PATCH(
     await updateTopic(id, body.data);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("topic update error", err);
+    logError("api:/api/topics/[id]:patch", err);
     return NextResponse.json({ error: "Failed to update topic." }, { status: 500 });
   }
 }
@@ -49,7 +50,7 @@ export async function DELETE(
     await deleteTopic(id);
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    console.error("topic delete error", err);
+    logError("api:/api/topics/[id]:delete", err);
     return NextResponse.json({ error: "Failed to delete topic." }, { status: 500 });
   }
 }

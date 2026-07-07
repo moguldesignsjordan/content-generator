@@ -540,16 +540,80 @@ app's own delete/archive flows, not raw DB deletes.
    the page is reloaded (Pause/Resume and Delete do update immediately). Not
    fixed this session, cheap to pick up later.
 
-## Next step (pre-Plan-6 backlog, still open)
+## Logging & observability (app_logs) — new, not yet committed, migration NOT yet applied
 
-1. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
+Started in an earlier session that got cut off mid-build; picked back up and
+finished the page this session. Every error/warning/info line across all
+`app/api/**/route.ts` handlers, plus every Claude call's token usage, now
+funnels through `lib/log.ts` (`logError`/`logWarn`/`logInfo`/`logTokenUsage`)
+instead of bare `console.*` calls — console output is unchanged (kept
+alongside), the addition is a persisted `app_logs` row (migration 011,
+`db/migrations/011_app_logs.sql`, mirrored in `db/schema.sql`) so there's a
+live feed instead of only server logs. One table, not two: `level`
+(`info`/`warn`/`error`/`usage`) doubles as severity and as the usage-row
+discriminator (usage-only columns — model, token counts, `estimated_usd` —
+are null on plain log rows and vice versa), matching the jsonb-flex-plus-
+typed-columns split already used for `drafts.meta`/`topics.keyword_data`.
+`lib/db/table-guard.ts` extracts the shared `isMissingTableError` check
+(PGRST205/42P01/"schema cache") that `queries.ts` already had duplicated for
+products/brand_memory/generation_runs, so every not-yet-migrated table now
+degrades identically. `lib/clients/model-ids.ts` pulls `DRAFT_MODEL`/
+`FAST_MODEL` out of `lib/clients/anthropic.ts` (which now just re-exports
+them) to break an import cycle (`cost.ts` needs the model constants for the
+new `priceUsage` helper, `log.ts` needs `cost.ts` for pricing, `anthropic.ts`
+needs `log.ts` for `logTokenUsage`). `instrumentation.ts` adds Next's
+`onRequestError` hook as a belt-and-suspenders catch-all for anything outside
+a route's own try/catch (middleware, layouts).
+
+New this session: the actual `/logs` page (`app/(dashboard)/logs/page.tsx` +
+`_components/logs-feed.tsx`), added to `NAV` (`_components/nav.tsx`, new
+`ActivityIcon`) so it shows in both the sidebar and mobile tab bar. Server
+component reads `listRecentLogs()` + `getLogStats()` (24h error/warn/usage
+counts + estimated spend) for the first paint; `LogsFeed` is a client
+component using the already-built `lib/use-logs-poll.ts` hook (2.5s poll,
+`since`-cursor incremental fetch) with an All/Errors/Warnings/Usage
+`SegmentedControl` filter. Usage rows show model + token breakdown +
+`$estimated_usd`; other rows show the message and, if present, a collapsed
+`context` JSON blob.
+
+`npm run typecheck`, `npm run build` (both `/logs` and `/api/logs/recent`
+appear in the route manifest), `npx vitest run` (86 tests, unchanged) all
+pass. Confirmed live via curl against a local dev server: `/logs` and
+`/api/logs/recent` both correctly 307-redirect to `/login` when
+unauthenticated, matching every other dashboard route (no crash, auth gate
+wired correctly).
+
+**Migration 011 applied by Jordan 2026-07-06**; confirmed live via a direct
+Supabase REST query (`app_logs` now returns 200, was `PGRST205` before).
+Went further and exercised the actual write path end to end: ran `lib/log.ts`
+directly against the live DB (via `npx tsx`, env vars sourced from
+`.env.local`; needed a throwaway local `server-only` shim in `node_modules/`
+since that package only resolves inside Next's own bundler, removed after),
+calling real `logError`/`logTokenUsage`. Confirmed via REST that both an
+`error`-level row (message + stack trace in `context`) and a `usage`-level
+row (`model`, token counts, correctly computed `estimated_usd`) landed in
+`app_logs` with the right shape, then deleted both test rows via REST so no
+fake data sits in the real feed. This confirms the write path Jordan will
+actually hit on every caught error and every Claude call is live and correct,
+not just that the table exists. **Not yet verified: the `/logs` page's own
+UI** (filter tabs switching, live polling picking up a new row within the
+poll interval, stat tiles reflecting real data) — needs Jordan's own logged-in
+session since there are no test credentials in this repo for a browser
+click-through.
+
+## Next step (backlog, still open)
+
+1. Click through `/logs` logged in as Jordan: confirm the stat tiles and feed
+   render, the All/Errors/Warnings/Usage filter works, and a real
+   error/generation shows up live within the ~2.5s poll interval.
+2. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
    app.dataforseo.com (account email + a separate API password from their
    dashboard) and add them to `.env.local` — the only remaining blocker on
    Slice 4 keyword research now that migration 008 is confirmed applied.
-2. Decide on Plan 5 Phase B (AI-assisted section-level copy editing for
+3. Decide on Plan 5 Phase B (AI-assisted section-level copy editing for
    blogs, vs. the direct manual field editor already shipped in `b6f427d`)
    — check with Jordan before starting.
-3. Remaining "Not yet verified" items: the from-scratch brand-guidelines
+4. Remaining "Not yet verified" items: the from-scratch brand-guidelines
    generate path (no colors set), onboarding auto-images toggle, an actual
    MailerLite "Send now"/"Schedule" click-through (Jordan's call, not done
    yet — still testing), and Plan 4's actual cross-instance lock race test

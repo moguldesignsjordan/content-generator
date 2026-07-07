@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteProduct, upsertProduct } from "@/lib/db/queries";
 import type { Product } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 /** Creates or updates one product (keyed by brand_id + slug). */
 export async function PATCH(req: NextRequest) {
@@ -25,7 +26,7 @@ export async function PATCH(req: NextRequest) {
     });
     return NextResponse.json({ product: saved });
   } catch (err) {
-    console.error("[products] save error", err);
+    logError("api:/api/settings/products:patch", err);
     return NextResponse.json({ error: "Failed to save product" }, { status: 500 });
   }
 }
@@ -39,7 +40,7 @@ export async function DELETE(req: NextRequest) {
     await deleteProduct(productId);
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    console.error("[products] delete error", err);
+    logError("api:/api/settings/products:delete", err);
     return NextResponse.json({ error: "Failed to delete product" }, { status: 500 });
   }
 }

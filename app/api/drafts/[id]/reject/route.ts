@@ -3,6 +3,7 @@ import { regenerateEmailDraft } from "@/lib/pipeline/generate";
 import { regenerateBlogDraft } from "@/lib/pipeline/generate-blog";
 import { getDraftWithJobContext } from "@/lib/db/queries";
 import type { EmailTemplateId } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 300;
 
@@ -49,7 +50,7 @@ export async function POST(
     });
     return NextResponse.json(result);
   } catch (err) {
-    console.error("reject error", err);
+    logError("api:/api/drafts/[id]/reject", err);
     return NextResponse.json({ error: "Failed to regenerate draft" }, { status: 500 });
   }
 }

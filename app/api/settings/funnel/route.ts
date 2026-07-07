@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateFunnelDefinition } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function PATCH(req: NextRequest) {
     await updateFunnelDefinition(body.strategyId, body.funnelDefinition);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("funnel update error", err);
+    logError("api:/api/settings/funnel", err);
     return NextResponse.json({ error: "Failed to save." }, { status: 500 });
   }
 }

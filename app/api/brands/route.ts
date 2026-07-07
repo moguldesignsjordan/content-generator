@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createBrand } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 /**
  * Creates a minimal brand row (name only), the first step of onboarding when
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
     const brand = await createBrand(name);
     return NextResponse.json({ id: brand.id, name: brand.name });
   } catch (err) {
-    console.error("create brand error", err);
+    logError("api:/api/brands:post", err);
     return NextResponse.json(
       { error: "Failed to create brand" },
       { status: 500 },

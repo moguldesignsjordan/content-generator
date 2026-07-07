@@ -3,6 +3,7 @@ import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { getBrandWithIcps } from "@/lib/db/queries";
 import type { BrandImportProposal } from "@/lib/db/types";
 import { generateBrandIdentity } from "@/lib/pipeline/brand-identity";
+import { logError } from "@/lib/log";
 
 // Cheap, non-thinking, single forced tool call: no scraping, no drafting
 // prose, just picking a palette and a font pairing. Comfortably fast on
@@ -51,7 +52,7 @@ export async function POST() {
 
     return NextResponse.json({ proposal, reasoning: result.reasoning });
   } catch (err) {
-    console.error("[brand-identity] error", err);
+    logError("api:/api/settings/brand-identity", err);
     return NextResponse.json(
       { error: "Couldn't generate an identity. Try again." },
       { status: 500 },

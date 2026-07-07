@@ -145,3 +145,9 @@ export const TrashIcon = (p: IconProps) => (
     <path d="M10 11v6M14 11v6" />
   </Svg>
 );
+
+export const ActivityIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />
+  </Svg>
+);

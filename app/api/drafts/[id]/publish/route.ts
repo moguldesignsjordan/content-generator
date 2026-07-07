@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publishDraft } from "@/lib/pipeline/publish";
 import type { PublishSchedule } from "@/lib/publishing/provider";
+import { logError } from "@/lib/log";
 
 // Pushes an approved draft to its destination (blog → Sanity, email →
 // MailerLite) through the provider registry. Idempotent: repeat calls return
@@ -27,7 +28,7 @@ export async function POST(
     const outcome = await publishDraft(id, body.target, parseSchedule(body));
     return NextResponse.json(outcome);
   } catch (err) {
-    console.error("publish error", err);
+    logError("api:/api/drafts/[id]/publish", err);
     const message = err instanceof Error ? err.message : "Failed to publish.";
     return NextResponse.json({ error: message }, { status: 400 });
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redesignEmail } from "@/lib/pipeline/redesign";
+import { logError } from "@/lib/log";
 
 // No thinking, no copywriting: cheap despite regenerating the whole
 // document, but leave headroom for a slow model turn or the Sonnet fallback.
@@ -30,7 +31,7 @@ export async function POST(
     }
     return NextResponse.json({ html: result.html, history: result.history });
   } catch (err) {
-    console.error("[redesign] error", err);
+    logError("api:/api/drafts/[id]/redesign", err);
     return NextResponse.json({ error: "Redesign failed. Try again." }, { status: 500 });
   }
 }

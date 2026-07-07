@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteContentSchedule, updateContentSchedule } from "@/lib/db/queries";
 import type { BlogType, Cadence, EmailType } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 /** Toggle active (pause/resume), or edit cadence/type override. */
 export async function PATCH(
@@ -23,7 +24,7 @@ export async function PATCH(
     });
     return NextResponse.json({ schedule });
   } catch (err) {
-    console.error("[schedules] update error", err);
+    logError("api:/api/schedules/[id]:patch", err);
     return NextResponse.json({ error: "Failed to update schedule" }, { status: 500 });
   }
 }
@@ -37,7 +38,7 @@ export async function DELETE(
     await deleteContentSchedule(id);
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    console.error("[schedules] delete error", err);
+    logError("api:/api/schedules/[id]:delete", err);
     return NextResponse.json({ error: "Failed to delete schedule" }, { status: 500 });
   }
 }

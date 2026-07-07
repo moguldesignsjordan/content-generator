@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { archiveTopic } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 /**
  * POST: archives a topic (hides it from the default Content Plan view).
@@ -14,7 +15,7 @@ export async function POST(
     await archiveTopic(id, true);
     return NextResponse.json({ archived: true });
   } catch (err) {
-    console.error("topic archive error", err);
+    logError("api:/api/topics/[id]/archive:post", err);
     return NextResponse.json({ error: "Failed to archive topic." }, { status: 500 });
   }
 }
@@ -29,7 +30,7 @@ export async function DELETE(
     await archiveTopic(id, false);
     return NextResponse.json({ archived: false });
   } catch (err) {
-    console.error("topic unarchive error", err);
+    logError("api:/api/topics/[id]/archive:delete", err);
     return NextResponse.json({ error: "Failed to unarchive topic." }, { status: 500 });
   }
 }

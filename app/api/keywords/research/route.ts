@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDataForSeoConfigured } from "@/lib/clients/dataforseo";
 import { researchKeyword } from "@/lib/keyword/research";
 import { getSingleBrand } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 60;
 
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     const keywordData = await researchKeyword(keyword.trim(), brand.seo_defaults);
     return NextResponse.json({ keywordData });
   } catch (err) {
-    console.error("keyword research error", err);
+    logError("api:/api/keywords/research", err);
     return NextResponse.json(
       { error: "Keyword research failed. Try again." },
       { status: 500 },

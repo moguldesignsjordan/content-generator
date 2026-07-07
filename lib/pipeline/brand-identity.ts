@@ -1,5 +1,5 @@
 import "server-only";
-import { FAST_MODEL, getAnthropic } from "@/lib/clients/anthropic";
+import { FAST_MODEL, getAnthropic, logUsage } from "@/lib/clients/anthropic";
 import type { BrandColors, BrandFonts, Positioning, VoiceProfile } from "@/lib/db/types";
 import type { ColorCandidate } from "@/lib/scrape/types";
 import { contrast, luminance } from "@/lib/color/contrast";
@@ -80,6 +80,7 @@ export async function generateBrandIdentity(
     tools: [BRAND_IDENTITY_TOOL],
     tool_choice: { type: "tool", name: "save_brand_identity" },
   });
+  logUsage("brand-identity", FAST_MODEL, response.usage);
 
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_brand_identity",

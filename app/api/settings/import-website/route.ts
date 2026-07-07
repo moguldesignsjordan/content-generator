@@ -4,6 +4,7 @@ import {
   DRAFT_MODEL,
   getAnthropic,
   isAnthropicConfigured,
+  logUsage,
 } from "@/lib/clients/anthropic";
 import { getBrandWithIcps } from "@/lib/db/queries";
 import type { BrandImportProposal, ProposedProduct } from "@/lib/db/types";
@@ -16,6 +17,7 @@ import {
   type ImportToolInput,
 } from "@/prompts/import-website";
 import { stripEmDashes } from "@/lib/text";
+import { logError, logWarn } from "@/lib/log";
 
 // Scrape (~45s budget) + one Claude call with a large input can be slow.
 export const maxDuration = 300;
@@ -73,6 +75,7 @@ export async function POST(req: NextRequest) {
       tools: [IMPORT_TOOL],
       tool_choice: { type: "tool", name: "save_brand_extraction" },
     });
+    logUsage("import-website", DRAFT_MODEL, response.usage);
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_brand_extraction",
@@ -189,7 +192,10 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn("[import-website] identity fallback failed:", err);
+        logWarn(
+          "api:/api/settings/import-website:identity-fallback",
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
 
@@ -250,7 +256,7 @@ export async function POST(req: NextRequest) {
           : err.message;
       return NextResponse.json({ error: message }, { status });
     }
-    console.error("[import-website] error", err);
+    logError("api:/api/settings/import-website", err);
     return NextResponse.json(
       { error: "Import failed. Try again." },
       { status: 500 },

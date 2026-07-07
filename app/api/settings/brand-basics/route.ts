@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateBrandBasics } from "@/lib/db/queries";
 import type { MailerliteConfig, SeoDefaults } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -26,7 +27,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("brand-basics update error", err);
+    logError("api:/api/settings/brand-basics", err);
     return NextResponse.json({ error: "Failed to save." }, { status: 500 });
   }
 }

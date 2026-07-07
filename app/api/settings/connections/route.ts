@@ -8,6 +8,7 @@ import {
 import { getProvider, listProviders } from "@/lib/publishing/registry";
 import { describeConnection } from "@/lib/publishing/connections";
 import { encryptSecret } from "@/lib/crypto/secrets";
+import { logError } from "@/lib/log";
 
 // Connections: per-brand publishing credentials (MailerLite API key, Sanity
 // project/token). Secrets are encrypted at rest (lib/crypto/secrets.ts); this
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
     );
     return NextResponse.json({ connections });
   } catch (err) {
-    console.error("connections GET error", err);
+    logError("api:/api/settings/connections:get", err);
     return NextResponse.json({ error: "Failed to load connections." }, { status: 500 });
   }
 }
@@ -109,7 +110,7 @@ export async function PATCH(req: NextRequest) {
       ...describeConnection(provider, brand, integration),
     });
   } catch (err) {
-    console.error("connections PATCH error", err);
+    logError("api:/api/settings/connections:patch", err);
     return NextResponse.json({ error: "Failed to save connection." }, { status: 500 });
   }
 }
@@ -128,7 +129,7 @@ export async function DELETE(req: NextRequest) {
     await deleteBrandIntegration(brandId, providerId);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("connections DELETE error", err);
+    logError("api:/api/settings/connections:delete", err);
     return NextResponse.json({ error: "Failed to disconnect." }, { status: 500 });
   }
 }

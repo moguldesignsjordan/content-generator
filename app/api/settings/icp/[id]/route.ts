@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateIcp } from "@/lib/db/queries";
 import type { IcpProfile } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(
   req: NextRequest,
@@ -18,7 +19,7 @@ export async function PATCH(
     await updateIcp(id, { label, profile });
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("icp update error", err);
+    logError("api:/api/settings/icp/[id]", err);
     return NextResponse.json({ error: "Failed to save ICP" }, { status: 500 });
   }
 }

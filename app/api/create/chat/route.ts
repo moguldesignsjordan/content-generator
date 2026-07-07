@@ -5,6 +5,7 @@ import {
   cacheableSystem,
   getAnthropic,
   isAnthropicConfigured,
+  logUsage,
   withCacheBreakpoint,
 } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
@@ -48,6 +49,7 @@ import {
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -182,9 +184,10 @@ export async function POST(req: NextRequest) {
       try {
         response = await call();
       } catch (err) {
-        console.error(`[create chat] step ${step} failed, retrying once:`, err);
+        logError("api:/api/create/chat", err, { step });
         response = await call();
       }
+      logUsage("create-chat", DRAFT_MODEL, response.usage);
 
       for (const block of response.content) {
         if (block.type === "text") reply += block.text;
@@ -256,7 +259,7 @@ export async function POST(req: NextRequest) {
       channel: state.channel,
     });
   } catch (err) {
-    console.error("[create chat] error", err);
+    logError("api:/api/create/chat", err);
     return NextResponse.json(
       { error: "The create agent hit a snag. Try again." },
       { status: 500 },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { approveDraft, getDraftWithJobContext, getSingleBrand } from "@/lib/db/queries";
 import { findBannedTerms } from "@/lib/email/quality";
 import type { DraftMeta, EmailDraftContent } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function POST(
   req: NextRequest,
@@ -57,7 +58,7 @@ export async function POST(
     await approveDraft(id, body.editedContent, body.meta);
     return NextResponse.json({ approved: true });
   } catch (err) {
-    console.error("approve error", err);
+    logError("api:/api/drafts/[id]/approve", err);
     return NextResponse.json({ error: "Failed to approve draft" }, { status: 500 });
   }
 }

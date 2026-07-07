@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createTopic } from "@/lib/db/queries";
 import type { TopicFormData } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
     const topic = await createTopic(body.clusterId, body.data);
     return NextResponse.json(topic, { status: 201 });
   } catch (err) {
-    console.error("topic create error", err);
+    logError("api:/api/topics:post", err);
     return NextResponse.json({ error: "Failed to create topic." }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDataForSeoConfigured } from "@/lib/clients/dataforseo";
 import { researchKeyword } from "@/lib/keyword/research";
 import { getTopicContext, updateTopicKeywordData } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 60;
 
@@ -39,7 +40,7 @@ export async function POST(
     await updateTopicKeywordData(id, keywordData);
     return NextResponse.json({ keywordData });
   } catch (err) {
-    console.error("topic research error", err);
+    logError("api:/api/topics/[id]/research", err);
     return NextResponse.json(
       { error: "Keyword research failed. Try again." },
       { status: 500 },

@@ -4,6 +4,7 @@ import {
   FAST_MODEL,
   cacheableSystem,
   getAnthropic,
+  logUsage,
 } from "@/lib/clients/anthropic";
 import {
   getDraftWithJobContext,
@@ -57,6 +58,7 @@ export type AdjustStyleResult =
  * skip most of its input cost.
  */
 async function attemptEdit(
+  draftId: string,
   model: string,
   system: string,
   user: string,
@@ -70,6 +72,7 @@ async function attemptEdit(
     tools: [ADJUST_STYLE_TOOL],
     tool_choice: { type: "tool", name: "save_style_patch" },
   });
+  logUsage("adjust-style", model, response.usage, { draftId });
 
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_style_patch",
@@ -115,12 +118,12 @@ export async function adjustEmailStyle(
   // with fresh output matched fine), so retry once on the SAME cheap model
   // before escalating to DRAFT_MODEL (Sonnet) as a last resort. The user
   // only ever sees an error if all three attempts fail.
-  let attempt = await attemptEdit(FAST_MODEL, system, user, draftCtx.content.html);
+  let attempt = await attemptEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
   if ("error" in attempt) {
-    attempt = await attemptEdit(FAST_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
   }
   if ("error" in attempt) {
-    attempt = await attemptEdit(DRAFT_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptEdit(draftId, DRAFT_MODEL, system, user, draftCtx.content.html);
   }
   if ("error" in attempt) {
     return { ok: false, error: `${attempt.error} Try rephrasing the request.` };

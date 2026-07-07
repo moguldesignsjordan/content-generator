@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminClient } from "@/lib/db/client";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 60;
 
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
         upsert: false,
       });
     if (upErr) {
-      console.error("storage upload error", upErr);
+      logError("api:/api/settings/upload-logo:storage", upErr);
       return NextResponse.json(
         { error: "Upload failed. Is the `logos` bucket created in Supabase?" },
         { status: 500 },
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
     const { data } = db.storage.from("logos").getPublicUrl(path);
     return NextResponse.json({ url: data.publicUrl });
   } catch (err) {
-    console.error("upload-logo error", err);
+    logError("api:/api/settings/upload-logo", err);
     return NextResponse.json({ error: "Failed to upload logo" }, { status: 500 });
   }
 }

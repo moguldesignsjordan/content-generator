@@ -4,6 +4,7 @@ import {
   DRAFT_MODEL,
   cacheableSystem,
   getAnthropic,
+  logUsage,
   withCacheBreakpoint,
 } from "@/lib/clients/anthropic";
 import {
@@ -37,6 +38,7 @@ import {
 } from "@/prompts/campaign";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 // A chat turn is short, but give the strategist headroom for thinking.
 export const maxDuration = 120;
@@ -130,9 +132,10 @@ export async function POST(req: NextRequest) {
     try {
       response = await call();
     } catch (err) {
-      console.error("[campaign chat] failed, retrying once:", err);
+      logError("api:/api/campaigns/chat", err);
       response = await call();
     }
+    logUsage("campaigns-chat", DRAFT_MODEL, response.usage);
 
     // Snapshot readiness BEFORE this turn's tool calls: if the brief was
     // already complete going in and the model produces a pure-text turn (no
@@ -171,6 +174,7 @@ export async function POST(req: NextRequest) {
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "any" },
         });
+        logUsage("campaigns-chat-forced", DRAFT_MODEL, forced.usage);
         const forcedResult = await applyContentBlocks(forced.content, state, {
           brand,
           strategy,
@@ -178,7 +182,7 @@ export async function POST(req: NextRequest) {
         });
         if (forcedResult.reply.trim()) reply = forcedResult.reply;
       } catch (err) {
-        console.error("[campaign chat] forced-action retry failed:", err);
+        logError("api:/api/campaigns/chat:forced-action", err);
       }
     }
 
@@ -208,11 +212,12 @@ export async function POST(req: NextRequest) {
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "none" },
         });
+        logUsage("campaigns-chat-followup", DRAFT_MODEL, followUp.usage);
         for (const block of followUp.content) {
           if (block.type === "text") reply += block.text;
         }
       } catch (err) {
-        console.error("[campaign chat] follow-up call failed:", err);
+        logError("api:/api/campaigns/chat:follow-up", err);
       }
     }
 
@@ -245,7 +250,7 @@ export async function POST(req: NextRequest) {
       readyToGenerate: state.readyToGenerate,
     });
   } catch (err) {
-    console.error("[campaign chat] error", err);
+    logError("api:/api/campaigns/chat", err);
     return NextResponse.json(
       { error: "Failed to process campaign turn." },
       { status: 500 },

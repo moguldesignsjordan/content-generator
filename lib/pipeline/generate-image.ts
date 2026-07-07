@@ -19,6 +19,7 @@ import { stripEmDashes } from "@/lib/text";
 import type { ContentImage, ContentImageStyle, ReferenceUse } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
+import { logError } from "@/lib/log";
 
 // AI hero images for emails and blogs. Cost discipline: this runs on explicit
 // user action from the review screen, or during generation ONLY when the
@@ -103,7 +104,7 @@ export async function generateContentImage(
     tools: [IMAGE_PROMPT_TOOL],
     tool_choice: { type: "tool", name: "save_image_prompt" },
   });
-  logUsage("image-prompt", response.usage);
+  logUsage("image-prompt", FAST_MODEL, response.usage);
   usage.push({ model: FAST_MODEL, ...response.usage });
 
   const tu = response.content.find(
@@ -194,7 +195,7 @@ async function uploadContentImage(data: Buffer): Promise<string> {
     }));
   }
   if (error) {
-    console.error("[generate-image] storage upload failed:", error);
+    logError("pipeline:generate-image:storage-upload", error);
     throw new Error("Couldn't save the generated image. Try again.");
   }
 

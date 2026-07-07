@@ -3,6 +3,7 @@ import { getSingleBrand, updateBrandVoice } from "@/lib/db/queries";
 import type { VoiceExample, VoiceProfile } from "@/lib/db/types";
 import type { VoiceProposals } from "@/prompts/campaign";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 /**
  * The explicit-confirm write path for voice proposals from the campaign chat.
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     await updateBrandVoice(brand.id, next);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("[apply-voice] error", err);
+    logError("api:/api/campaigns/apply-voice", err);
     return NextResponse.json(
       { error: "Failed to save voice updates" },
       { status: 500 },

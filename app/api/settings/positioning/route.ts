@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updatePositioning } from "@/lib/db/queries";
 import type { Positioning } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function PATCH(req: NextRequest) {
     await updatePositioning(brandId, positioning);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("positioning update error", err);
+    logError("api:/api/settings/positioning", err);
     return NextResponse.json(
       { error: "Failed to save positioning" },
       { status: 500 },

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DRAFT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/clients/anthropic";
+import {
+  DRAFT_MODEL,
+  getAnthropic,
+  isAnthropicConfigured,
+  logUsage,
+} from "@/lib/clients/anthropic";
 import {
   getBrandWithIcps,
   listProducts,
@@ -12,6 +17,7 @@ import {
   type GuidelinesToolInput,
 } from "@/prompts/guidelines";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 120;
 
@@ -43,6 +49,7 @@ export async function POST() {
       tools: [GUIDELINES_TOOL],
       tool_choice: { type: "tool", name: "save_brand_guidelines" },
     });
+    logUsage("guidelines-synthesis", DRAFT_MODEL, response.usage);
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_brand_guidelines",
@@ -71,7 +78,7 @@ export async function POST() {
 
     return NextResponse.json({ proposal });
   } catch (err) {
-    console.error("[guidelines] synthesis error", err);
+    logError("api:/api/settings/guidelines:post", err);
     return NextResponse.json(
       { error: "Failed to generate guidelines." },
       { status: 500 },
@@ -98,7 +105,7 @@ export async function PATCH(req: NextRequest) {
     });
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("[guidelines] save error", err);
+    logError("api:/api/settings/guidelines:patch", err);
     return NextResponse.json(
       { error: "Failed to save guidelines" },
       { status: 500 },

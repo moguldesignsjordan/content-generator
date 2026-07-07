@@ -1,5 +1,5 @@
 import "server-only";
-import { DRAFT_MODEL, FAST_MODEL } from "@/lib/clients/anthropic";
+import { DRAFT_MODEL, FAST_MODEL } from "@/lib/clients/model-ids";
 import type { DraftMeta, DraftUsage } from "@/lib/db/types";
 
 // Display-only spend estimates for the review screen's cost panel. Rates from
@@ -40,32 +40,46 @@ export function emptyUsage(): DraftUsage {
   };
 }
 
+/** Prices one call's token usage (no images) at a model's per-MTok rates.
+ * Shared by accumulateUsage (draft cost rollup) and lib/log.ts (per-call
+ * usage rows), so the pricing formula lives in exactly one place. */
+export function priceUsage(
+  model: string,
+  usage: Pick<
+    UsageDelta,
+    "input_tokens" | "output_tokens" | "cache_read_input_tokens" | "cache_creation_input_tokens"
+  >,
+): number {
+  const rates = RATES[model] ?? RATES[DRAFT_MODEL];
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+
+  return (
+    (input / 1e6) * rates.inputPerMTok +
+    (cacheRead / 1e6) * rates.inputPerMTok * 0.1 +
+    (cacheWrite / 1e6) * rates.inputPerMTok * 1.25 +
+    (output / 1e6) * rates.outputPerMTok
+  );
+}
+
 /** Adds one API call's usage onto a rolling DraftUsage, repricing as it goes. */
 export function accumulateUsage(
   current: DraftUsage | undefined,
   delta: UsageDelta,
 ): DraftUsage {
   const base = current ?? emptyUsage();
-  const rates = RATES[delta.model] ?? RATES[DRAFT_MODEL];
-
-  const input = delta.input_tokens ?? 0;
-  const output = delta.output_tokens ?? 0;
-  const cacheRead = delta.cache_read_input_tokens ?? 0;
-  const cacheWrite = delta.cache_creation_input_tokens ?? 0;
   const images = delta.images ?? 0;
-
-  const usd =
-    (input / 1e6) * rates.inputPerMTok +
-    (cacheRead / 1e6) * rates.inputPerMTok * 0.1 +
-    (cacheWrite / 1e6) * rates.inputPerMTok * 1.25 +
-    (output / 1e6) * rates.outputPerMTok +
-    images * IMAGE_COST_USD;
+  const usd = priceUsage(delta.model, delta) + images * IMAGE_COST_USD;
 
   return {
-    input_tokens: base.input_tokens + input,
-    output_tokens: base.output_tokens + output,
-    cache_read_input_tokens: base.cache_read_input_tokens + cacheRead,
-    cache_creation_input_tokens: base.cache_creation_input_tokens + cacheWrite,
+    input_tokens: base.input_tokens + (delta.input_tokens ?? 0),
+    output_tokens: base.output_tokens + (delta.output_tokens ?? 0),
+    cache_read_input_tokens:
+      base.cache_read_input_tokens + (delta.cache_read_input_tokens ?? 0),
+    cache_creation_input_tokens:
+      base.cache_creation_input_tokens + (delta.cache_creation_input_tokens ?? 0),
     images: base.images + images,
     estimated_usd: Number((base.estimated_usd + usd).toFixed(4)),
   };

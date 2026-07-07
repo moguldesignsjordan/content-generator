@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPerformanceForDraft, refreshPerformance } from "@/lib/pipeline/performance";
+import { logError } from "@/lib/log";
 
 // Plan 2 analytics loop. POST re-fetches from the destination (MailerLite
 // campaign reports today); GET reads back the last-fetched snapshot with no
@@ -16,7 +17,7 @@ export async function POST(
     const metrics = await refreshPerformance(id);
     return NextResponse.json({ metrics });
   } catch (err) {
-    console.error("performance refresh error", err);
+    logError("api:/api/drafts/[id]/performance:post", err);
     const message = err instanceof Error ? err.message : "Couldn't refresh stats.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
@@ -31,7 +32,7 @@ export async function GET(
     const metrics = await getPerformanceForDraft(id);
     return NextResponse.json({ metrics });
   } catch (err) {
-    console.error("performance fetch error", err);
+    logError("api:/api/drafts/[id]/performance:get", err);
     return NextResponse.json({ error: "Couldn't load stats." }, { status: 500 });
   }
 }

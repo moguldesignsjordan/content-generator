@@ -22,6 +22,7 @@
   drop table if exists approvals       cascade;
   drop table if exists generation_runs cascade;
   drop table if exists content_schedules cascade;
+  drop table if exists app_logs        cascade;
   drop table if exists drafts          cascade;
   drop table if exists content_jobs    cascade;
   drop table if exists campaigns       cascade;
@@ -261,6 +262,27 @@
     created_at    timestamptz not null default now()
   );
 
+  -- Unified real-time feed for errors/warnings/info and per-call Claude token
+  -- usage (migration 011). One table, not two: the Logs page is a single
+  -- chronological feed with an All/Errors/Warnings/Usage filter. Usage-only
+  -- columns are null on log rows and vice versa. draft_id is set-null (not
+  -- cascade) so a log row survives a hard-deleted draft as audit history.
+  create table app_logs (
+    id                           uuid primary key default gen_random_uuid(),
+    created_at                   timestamptz not null default now(),
+    level                        text not null check (level in ('info', 'warn', 'error', 'usage')),
+    source                       text not null,
+    message                      text not null,
+    context                      jsonb not null default '{}'::jsonb,
+    model                        text,
+    input_tokens                 integer,
+    output_tokens                integer,
+    cache_creation_input_tokens  integer,
+    cache_read_input_tokens      integer,
+    estimated_usd                numeric,
+    draft_id                     uuid references drafts(id) on delete set null
+  );
+
   -- ── Indexes the pipeline actually queries on ────────────────────────────────
 
   create index idx_topics_cluster   on topics(cluster_id);
@@ -279,3 +301,5 @@
   create index idx_drafts_archived  on drafts(archived);
   create index idx_content_schedules_due   on content_schedules(next_run_at) where active;
   create index idx_content_schedules_brand on content_schedules(brand_id);
+  create index idx_app_logs_created        on app_logs(created_at desc);
+  create index idx_app_logs_level_created  on app_logs(level, created_at desc);

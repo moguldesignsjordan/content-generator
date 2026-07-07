@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateVisualIdentity } from "@/lib/db/queries";
 import type { VisualIdentity } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function PATCH(req: NextRequest) {
     await updateVisualIdentity(brandId, visualIdentity);
     return NextResponse.json({ saved: true });
   } catch (err) {
-    console.error("visual-identity update error", err);
+    logError("api:/api/settings/visual-identity", err);
     return NextResponse.json(
       { error: "Failed to save visual identity" },
       { status: 500 },

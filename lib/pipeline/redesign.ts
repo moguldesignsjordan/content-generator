@@ -4,6 +4,7 @@ import {
   FAST_MODEL,
   cacheableSystem,
   getAnthropic,
+  logUsage,
 } from "@/lib/clients/anthropic";
 import {
   getDraftWithJobContext,
@@ -41,6 +42,7 @@ const MAX_HISTORY = 10;
 // this brand; caching it makes the same-model retry below and every later
 // redesign within the cache window cost a fraction of full input price.
 async function attemptRedesign(
+  draftId: string,
   model: string,
   system: string,
   user: string,
@@ -53,6 +55,7 @@ async function attemptRedesign(
     tools: [REDESIGN_TOOL],
     tool_choice: { type: "tool", name: "save_redesigned_email" },
   });
+  logUsage("redesign", model, response.usage, { draftId });
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_redesigned_email",
   );
@@ -96,9 +99,9 @@ export async function redesignEmail(
   // FAST_MODEL first (no copywriting judgment needed, just following the
   // design brief), retry once, then escalate to DRAFT_MODEL, mirroring the
   // adjust-style reliability pattern.
-  let attempt = await attemptRedesign(FAST_MODEL, system, user);
-  if ("error" in attempt) attempt = await attemptRedesign(FAST_MODEL, system, user);
-  if ("error" in attempt) attempt = await attemptRedesign(DRAFT_MODEL, system, user);
+  let attempt = await attemptRedesign(draftId, FAST_MODEL, system, user);
+  if ("error" in attempt) attempt = await attemptRedesign(draftId, FAST_MODEL, system, user);
+  if ("error" in attempt) attempt = await attemptRedesign(draftId, DRAFT_MODEL, system, user);
   if ("error" in attempt) {
     return { ok: false, error: `${attempt.error} Try again.` };
   }

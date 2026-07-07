@@ -4,6 +4,7 @@ import {
   DRAFT_MODEL,
   cacheableSystem,
   getAnthropic,
+  logUsage,
   withCacheBreakpoint,
 } from "@/lib/clients/anthropic";
 import {
@@ -30,6 +31,7 @@ import {
   type OnboardingToolInput,
 } from "@/prompts/onboarding";
 import { stripEmDashes } from "@/lib/text";
+import { logError } from "@/lib/log";
 
 export const maxDuration = 120;
 
@@ -92,9 +94,10 @@ export async function POST(req: NextRequest) {
     try {
       response = await call();
     } catch (err) {
-      console.error("onboarding chat failed, retrying once:", err);
+      logError("api:/api/onboarding/chat", err);
       response = await call();
     }
+    logUsage("onboarding-chat", DRAFT_MODEL, response.usage);
 
     let reply = "";
     let toolInput: OnboardingToolInput | null = null;
@@ -128,7 +131,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ reply, isComplete });
   } catch (err) {
-    console.error("onboarding chat error", err);
+    logError("api:/api/onboarding/chat", err);
     return NextResponse.json(
       { error: "Failed to process onboarding turn." },
       { status: 500 },

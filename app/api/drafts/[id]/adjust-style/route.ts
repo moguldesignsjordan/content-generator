@@ -4,6 +4,7 @@ import {
   getStyleEditHistory,
   undoLastStyleEdit,
 } from "@/lib/pipeline/adjust-style";
+import { logError } from "@/lib/log";
 
 // No thinking, no copy regeneration: comfortably faster than the full
 // generation/regeneration routes, but leaves headroom for a slow model turn.
@@ -26,7 +27,7 @@ export async function GET(
     }
     return NextResponse.json(result);
   } catch (err) {
-    console.error("[adjust-style] GET error", err);
+    logError("api:/api/drafts/[id]/adjust-style:get", err);
     return NextResponse.json({ error: "Couldn't load history." }, { status: 500 });
   }
 }
@@ -71,7 +72,7 @@ export async function POST(
       caveat: result.caveat,
     });
   } catch (err) {
-    console.error("[adjust-style] error", err);
+    logError("api:/api/drafts/[id]/adjust-style:post", err);
     return NextResponse.json(
       { error: "Couldn't apply that change. Try again." },
       { status: 500 },
@@ -95,7 +96,7 @@ export async function DELETE(
     }
     return NextResponse.json({ html: result.html, history: result.history });
   } catch (err) {
-    console.error("[adjust-style] DELETE error", err);
+    logError("api:/api/drafts/[id]/adjust-style:delete", err);
     return NextResponse.json({ error: "Couldn't undo. Try again." }, { status: 500 });
   }
 }

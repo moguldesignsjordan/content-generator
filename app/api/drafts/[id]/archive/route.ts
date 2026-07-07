@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { archiveDraft } from "@/lib/db/queries";
+import { logError } from "@/lib/log";
 
 /**
  * POST: archives a draft (hides it from the default Emails list) without
@@ -14,7 +15,7 @@ export async function POST(
     await archiveDraft(id, true);
     return NextResponse.json({ archived: true });
   } catch (err) {
-    console.error("draft archive error", err);
+    logError("api:/api/drafts/[id]/archive:post", err);
     return NextResponse.json({ error: "Failed to archive draft." }, { status: 500 });
   }
 }
@@ -29,7 +30,7 @@ export async function DELETE(
     await archiveDraft(id, false);
     return NextResponse.json({ archived: false });
   } catch (err) {
-    console.error("draft unarchive error", err);
+    logError("api:/api/drafts/[id]/archive:delete", err);
     return NextResponse.json({ error: "Failed to unarchive draft." }, { status: 500 });
   }
 }

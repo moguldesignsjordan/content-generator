@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDraftWithJobContext } from "@/lib/db/queries";
 import { applyStyleChanges, locateRegion, type StyleChanges } from "@/lib/email/inline-style";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
+import { logError } from "@/lib/log";
 
 // Native (no model) style edit on one region: a mechanical inline-style
 // mutation, so this never needs model headroom. Sibling to /copy and
@@ -81,7 +82,7 @@ export async function POST(
     }
     return NextResponse.json({ html: result.html, history: result.history });
   } catch (err) {
-    console.error("[style-edit] error", err);
+    logError("api:/api/drafts/[id]/style-edit", err);
     return NextResponse.json(
       { error: "Couldn't apply that change. Try again." },
       { status: 500 },

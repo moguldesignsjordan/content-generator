@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContentSchedule, listContentSchedules } from "@/lib/db/queries";
 import type { BlogType, Cadence, ContentJobType, EmailType } from "@/lib/db/types";
+import { logError } from "@/lib/log";
 
 export async function GET(req: NextRequest) {
   const brandId = req.nextUrl.searchParams.get("brandId");
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ schedule });
   } catch (err) {
-    console.error("[schedules] create error", err);
+    logError("api:/api/schedules:post", err);
     return NextResponse.json({ error: "Failed to create schedule" }, { status: 500 });
   }
 }

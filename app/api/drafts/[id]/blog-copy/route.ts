@@ -6,6 +6,7 @@ import {
 } from "@/lib/db/queries";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { BlogDraftSchema } from "@/prompts/generate-blog";
+import { logError } from "@/lib/log";
 
 /**
  * Saves an edited article body for a blog draft: validates it with the same
@@ -63,7 +64,7 @@ export async function PATCH(
 
     return NextResponse.json({ html, copy });
   } catch (err) {
-    console.error("[blog-copy] error", err);
+    logError("api:/api/drafts/[id]/blog-copy", err);
     return NextResponse.json(
       { error: "Couldn't save your edits. Try again." },
       { status: 500 },

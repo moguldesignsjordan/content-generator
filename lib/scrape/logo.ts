@@ -1,6 +1,7 @@
 import "server-only";
 import { getAdminClient } from "@/lib/db/client";
 import { fetchBinary } from "./fetch-page";
+import { logWarn } from "@/lib/log";
 
 // Mirrors the best scraped logo into the public `logos` Storage bucket (same
 // contract as /api/settings/upload-logo: limits match, orphaned objects on
@@ -47,7 +48,7 @@ export async function mirrorLogoToStorage(
       upsert: false,
     });
     if (error) {
-      console.warn("[scrape] logo upload failed", error.message);
+      logWarn("scrape:logo", `upload failed: ${error.message}`);
       return null; // storage problem, not a candidate problem: stop trying
     }
     const { data } = db.storage.from("logos").getPublicUrl(path);

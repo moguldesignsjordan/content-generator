@@ -54,6 +54,7 @@ import {
 } from "./generate-image";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
+import { logError, logWarn } from "@/lib/log";
 
 /** Phase-by-phase events emitted while a draft shell is being filled in. */
 export type GenerationEvent =
@@ -141,7 +142,7 @@ export async function generateEmailForTopicStreamed(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed.";
     await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
-      (e) => console.error("[generate] failed to record error phase:", e),
+      (e) => logError("pipeline:generate:record-error-phase", e, { draftId }),
     );
     onEvent({ type: "error", message });
     throw err;
@@ -183,7 +184,7 @@ export async function maybeAutoHeroImage(
     usageDeltas.push(...generated.usage);
     return { ...generated.image, placement: "top" };
   } catch (err) {
-    console.error("[generate] auto hero image failed (non-fatal):", err);
+    logError("pipeline:generate:auto-hero-image", err);
     return undefined;
   }
 }
@@ -255,7 +256,7 @@ async function generateEmailCopy(
 
   const runOnce = async (label: string, u: string): Promise<EmailDraftOutput> => {
     const resp = await call(u);
-    logUsage(label, resp.usage);
+    logUsage(label, DRAFT_MODEL, resp.usage);
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
     return extract(resp);
   };
@@ -265,7 +266,7 @@ async function generateEmailCopy(
   try {
     parsed = await runOnce("email-copy", user);
   } catch (err) {
-    console.error("[generate] email copy failed, retrying once:", err);
+    logError("pipeline:generate:email-copy", err);
     parsed = await runOnce("email-copy-retry", user);
   }
 
@@ -278,8 +279,9 @@ async function generateEmailCopy(
   if (lengthTarget) {
     const words = countEmailWords(parsed);
     if (words < lengthTarget.words[0]) {
-      console.warn(
-        `[generate] email too short (${words} < ${lengthTarget.words[0]} for ${emailType ?? "this type"}); retrying once`,
+      logWarn(
+        "pipeline:generate:length-check",
+        `email too short (${words} < ${lengthTarget.words[0]} for ${emailType ?? "this type"}); retrying once`,
       );
       const nudge = [
         "",
@@ -301,10 +303,7 @@ async function generateEmailCopy(
       try {
         parsed = await runOnce("email-copy-length-retry", user + nudge);
       } catch (err) {
-        console.error(
-          "[generate] length retry failed, keeping first draft:",
-          err,
-        );
+        logError("pipeline:generate:length-retry", err);
       }
     }
   }
@@ -365,9 +364,10 @@ function renderEmailForContext(
     designSource = "model";
     html = modelHtml;
   } else {
-    console.warn(
-      "[generate] model HTML failed validation or lacked dark-mode CSS; falling back to code template",
-      templateId,
+    logWarn(
+      "pipeline:generate:html-fallback",
+      "model HTML failed validation or lacked dark-mode CSS; falling back to code template",
+      { templateId },
     );
     designSource = "template";
     html = renderEmailTemplate(templateId, { copy, tokens });
@@ -448,7 +448,7 @@ async function runQaPass(
       tools: [QA_TOOL],
       tool_choice: { type: "tool", name: "qa_review" },
     });
-    logUsage("email-qa", response.usage);
+    logUsage("email-qa", FAST_MODEL, response.usage);
     usageDeltas.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(
@@ -468,11 +468,13 @@ async function runQaPass(
           issues: qa.issues,
         };
       } else {
-        console.error("[generate] QA tool input invalid:", parsed.error.issues);
+        logError("pipeline:generate:qa-invalid", parsed.error, {
+          issues: parsed.error.issues,
+        });
       }
     }
   } catch (err) {
-    console.error("QA pass failed (non-fatal):", err);
+    logError("pipeline:generate:qa-pass", err);
   }
 
   // Code-level checks: authoritative regardless of what the model reported.

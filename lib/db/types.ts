@@ -634,3 +634,25 @@ export interface ContentSchedule {
   last_result: string | null;
   created_at: string;
 }
+
+// ── Logs: unified real-time feed for errors/warnings/info + Claude token
+// usage (migration 011). `level` doubles as severity (info/warn/error) and
+// as the usage-row discriminator; usage-only fields are null on log rows and
+// vice versa. See lib/log.ts for the write path, lib/db/queries.ts for reads.
+export type AppLogLevel = "info" | "warn" | "error" | "usage";
+
+export interface AppLog {
+  id: string;
+  created_at: string;
+  level: AppLogLevel;
+  source: string;
+  message: string;
+  context: Record<string, unknown>;
+  model: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  cache_read_input_tokens: number | null;
+  estimated_usd: number | null;
+  draft_id: string | null;
+}

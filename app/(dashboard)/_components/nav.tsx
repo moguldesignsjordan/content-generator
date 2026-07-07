@@ -1,4 +1,5 @@
 import {
+  ActivityIcon,
   BlogIcon,
   GearIcon,
   HomeIcon,
@@ -47,5 +48,11 @@ export const NAV: NavItem[] = [
     label: "Settings",
     Icon: GearIcon,
     match: (p) => p.startsWith("/settings"),
+  },
+  {
+    href: "/logs",
+    label: "Logs",
+    Icon: ActivityIcon,
+    match: (p) => p.startsWith("/logs"),
   },
 ];
