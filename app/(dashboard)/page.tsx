@@ -148,12 +148,8 @@ export default async function DashboardPage() {
         subtitle={`${brand.name} · content engine`}
       />
 
-      {/* Create — leads the page, ringed and lit in the spectrum */}
-      <CreateAgent
-        suggestions={suggestions}
-        initial={createAgentInitial}
-        className="ring-spectrum glow-spectrum"
-      />
+      {/* Create — the work surface. Wears the spectrum as a living ring. */}
+      <CreateAgent suggestions={suggestions} initial={createAgentInitial} />
 
       {/* What's still missing from the brand brain (hides itself when full) */}
       <BrandReadinessCard {...readiness} />

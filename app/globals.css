@@ -258,6 +258,93 @@
   }
 }
 
+/* ── Hero creation surface ──────────────────────────────────────────────
+   The dashboard create agent is the work surface, so it wears the spectrum
+   as a slowly turning hairline ring (the "this is where you work" signal)
+   plus a single restrained halo. Built only from brand tokens: amber,
+   magenta, violet, cyan. Far quieter than the old multi-stop glow. */
+
+@property --hero-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Carbon body with a faint brand wash at the crown — sits behind all
+   content, never under text at a strength that hurts contrast. */
+.hero-surface {
+  background:
+    radial-gradient(
+      125% 72% at 50% -30%,
+      rgba(255, 61, 140, 0.12),
+      rgba(158, 77, 242, 0.07) 36%,
+      transparent 60%
+    ),
+    var(--surface);
+}
+
+/* Rotating spectrum hairline, masked to a 1.5px frame that inherits the
+   host's radius. The conic angle animates via @property above. */
+.hero-ring {
+  position: relative;
+  isolation: isolate;
+}
+.hero-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--hero-angle),
+    var(--amber),
+    var(--magenta),
+    var(--violet),
+    var(--cyan),
+    var(--amber)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.72;
+  animation: hero-ring-spin 9s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* One small, warm halo. Replaces the heavy three-stop spectrum glow. */
+.hero-glow {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 18px 50px -30px rgba(255, 61, 140, 0.34),
+    0 6px 26px -22px rgba(158, 77, 242, 0.2);
+}
+
+/* Empty-state beacon: the sparkle breathes softly to draw the eye. */
+.hero-beacon {
+  animation: hero-beacon 3.6s ease-in-out infinite;
+}
+
+@keyframes hero-ring-spin {
+  to {
+    --hero-angle: 360deg;
+  }
+}
+@keyframes hero-beacon {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

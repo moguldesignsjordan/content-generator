@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Select, useToast } from "@/components/ui";
-import { SendIcon, SparkleIcon } from "@/components/ui/icons";
+import { BlogIcon, MailIcon, SendIcon, SparkleIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { BlogType, EmailType, FunnelStage } from "@/lib/db/types";
 
@@ -211,10 +211,10 @@ export function CreateAgent({
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface",
+        "hero-ring hero-glow hero-surface flex flex-col overflow-hidden rounded-[var(--radius-card)]",
         className,
       )}
-      style={{ height: "clamp(440px, 60vh, 600px)" }}
+      style={{ height: "clamp(464px, 64vh, 640px)" }}
     >
       {/* Thread */}
       <div
@@ -222,17 +222,58 @@ export function CreateAgent({
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
       >
         {empty ? (
-          <div className="flex h-full flex-col items-center justify-center px-4 text-center">
-            <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-2">
-              <SparkleIcon className="text-accent" />
+          <div className="flex min-h-full flex-col items-center justify-center gap-5 px-4 py-8 text-center">
+            <span className="hero-beacon flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface-2 shadow-[0_0_30px_-8px_rgba(255,61,140,0.45)]">
+              <SparkleIcon className="text-accent" size={22} />
             </span>
-            <p className="text-[15px] font-medium text-foreground">
-              What are we creating today?
-            </p>
-            <p className="mt-1 text-[13px] text-muted">
-              Describe the email or blog post you want and I&rsquo;ll draft a
-              brief you can confirm.
-            </p>
+            <div className="space-y-1">
+              <p className="font-display text-[17px] font-semibold text-foreground">
+                What are we creating today?
+              </p>
+              <p className="text-[13px] text-muted">
+                Describe it, or start from a quick action below.
+              </p>
+            </div>
+
+            {/* Primary quick actions — tap before type. Each seeds the
+                conversation except Campaign, which is its own flow. */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <QuickAction
+                icon={<MailIcon size={16} />}
+                label="Email"
+                onClick={() => send("Draft an on-brand email")}
+              />
+              <QuickAction
+                icon={<BlogIcon size={16} />}
+                label="Blog post"
+                onClick={() => send("Draft a blog post")}
+              />
+              <QuickAction
+                icon={<SparkleIcon size={16} />}
+                label="Campaign"
+                onClick={() => router.push("/campaigns/new")}
+              />
+            </div>
+
+            {/* Jump straight from a queued topic in the content plan. */}
+            {suggestions.length > 0 && (
+              <div className="w-full max-w-sm">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  From your plan
+                </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.label}
+                      onClick={() => send(s.text)}
+                      className="rounded-full border border-border bg-surface-2/60 px-3 py-1.5 text-[12.5px] text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -288,21 +329,6 @@ export function CreateAgent({
 
       {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
 
-      {/* Quick suggestions, only before the first message */}
-      {empty && suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 pb-2">
-          {suggestions.map((s) => (
-            <button
-              key={s.label}
-              onClick={() => send(s.text)}
-              className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Composer */}
       <div className="border-t border-border p-3">
         <div className="flex items-end gap-2">
@@ -335,6 +361,29 @@ export function CreateAgent({
         </div>
       </div>
     </div>
+  );
+}
+
+function QuickAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 px-4 py-2 text-[13.5px] font-medium text-foreground transition-colors hover:border-accent/45 hover:bg-surface-3"
+    >
+      <span className="flex h-5 w-5 items-center justify-center text-accent transition-transform group-hover:scale-110">
+        {icon}
+      </span>
+      {label}
+    </button>
   );
 }
 
