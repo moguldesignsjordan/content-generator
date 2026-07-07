@@ -1,9 +1,23 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Button, Select, useToast } from "@/components/ui";
-import { BlogIcon, MailIcon, SendIcon, SparkleIcon } from "@/components/ui/icons";
+import {
+  BlogIcon,
+  MailIcon,
+  PlusIcon,
+  SendIcon,
+  SparkleIcon,
+} from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { BlogType, EmailType, FunnelStage } from "@/lib/db/types";
 
@@ -108,6 +122,9 @@ export function CreateAgent({
   const [options, setOptions] = useState<Option[] | null>(null);
   const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
+  // Quick-action panel open state. Open in the landing; tapping + toggles it.
+  // Closes on send so the conversation reads clean.
+  const [actionsOpen, setActionsOpen] = useState(true);
   // Which pipeline the brief hands off to. Same brief, different renderer:
   // email → the email draft pipeline, blog → the Sanity-bound blog pipeline.
   const [channel, setChannel] = useState<"email" | "blog">("email");
@@ -139,6 +156,7 @@ export function CreateAgent({
     setError(null);
     setHint(false);
     setOptions(null);
+    setActionsOpen(false);
     setMessages((m) => [...m, { role: "user", content: t }]);
     setLoading(true);
     const hintTimer = setTimeout(() => setHint(true), 6000);
@@ -214,27 +232,46 @@ export function CreateAgent({
       )}
       style={{ height: "clamp(464px, 64vh, 640px)" }}
     >
-      {/* Thread */}
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
-      >
-        {empty ? (
-          <div className="flex min-h-full flex-col items-center justify-center gap-4 px-4 py-8 text-center">
-            <span className="hero-beacon flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface-2 shadow-[0_0_30px_-8px_rgba(255,61,140,0.45)]">
-              <SparkleIcon className="text-accent" size={22} />
-            </span>
-            <div className="space-y-1">
-              <p className="font-display text-[17px] font-semibold text-foreground">
-                What are we creating today?
-              </p>
-              <p className="text-[13px] text-muted">
-                Describe it, or tap a quick action.
-              </p>
-            </div>
+      {empty ? (
+        // Landing — a clean, centered prompt (headline + input + actions).
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
+          <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground sm:text-[30px]">
+            What are we creating today?
+          </h2>
+          <div className="w-full max-w-xl">
+            <ComposerBar
+              inputRef={inputRef}
+              input={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              onSend={() => send(input)}
+              onPlus={() => setActionsOpen((v) => !v)}
+              ready={ready}
+              disabled={loading || generating}
+            />
+            {actionsOpen && (
+              <ActionGrid
+                onEmail={() => send("Draft an on-brand email")}
+                onBlog={() => send("Draft a blog post")}
+                onCampaign={() => router.push("/campaigns/new")}
+                disabled={loading || generating}
+                className="mt-3"
+              />
+            )}
           </div>
-        ) : (
-          <>
+        </div>
+      ) : (
+        // Conversation — scrolling thread + docked composer.
+        <>
+          <div
+            ref={scrollRef}
+            className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
+          >
             {messages.map((m, i) => (
               <Bubble key={i} msg={m} />
             ))}
@@ -273,47 +310,33 @@ export function CreateAgent({
                 ))}
               </div>
             )}
-          </>
-        )}
 
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bubble-in rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
-              <Typing hint={hint} />
-            </div>
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bubble-in rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
+                  <Typing hint={hint} />
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
+          {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
 
-      {/* The chat bar — quick actions live inside it (before the first
-          message), and the whole bar wears the animated spectrum ring. */}
-      <div className="p-3 pt-2">
-        <div className="hero-ring rounded-[var(--radius-lg)] bg-surface-2 transition-shadow duration-200 focus-within:shadow-[0_0_30px_-12px_rgba(255,61,140,0.5)]">
-          {empty && (
-            <div className="flex flex-wrap gap-2 p-2.5 pb-0">
-              <QuickAction
-                icon={<MailIcon size={15} />}
-                label="Email"
-                onClick={() => send("Draft an on-brand email")}
-              />
-              <QuickAction
-                icon={<BlogIcon size={15} />}
-                label="Blog post"
-                onClick={() => send("Draft a blog post")}
-              />
-              <QuickAction
-                icon={<SparkleIcon size={15} />}
-                label="Campaign"
-                onClick={() => router.push("/campaigns/new")}
+          {actionsOpen && (
+            <div className="px-3">
+              <ActionGrid
+                onEmail={() => send("Draft an on-brand email")}
+                onBlog={() => send("Draft a blog post")}
+                onCampaign={() => router.push("/campaigns/new")}
+                disabled={loading || generating}
               />
             </div>
           )}
-          <div className="flex items-end gap-2 p-2.5">
-            <textarea
-              ref={inputRef}
-              value={input}
+
+          <div className="p-3 pt-2">
+            <ComposerBar
+              inputRef={inputRef}
+              input={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -321,48 +344,129 @@ export function CreateAgent({
                   send(input);
                 }
               }}
-              rows={1}
-              placeholder={
-                ready ? "Tweak the brief, or hit Generate" : "Describe the email you want…"
-              }
-              className="block max-h-32 min-h-[44px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
+              onSend={() => send(input)}
+              onPlus={() => setActionsOpen((v) => !v)}
+              ready={ready}
+              disabled={loading || generating}
             />
-            <Button
-              variant="gradient"
-              size="md"
-              className="h-11 w-11 shrink-0 !px-0"
-              onClick={() => send(input)}
-              disabled={loading || generating || !input.trim()}
-              aria-label="Send message"
-            >
-              <SendIcon size={18} />
-            </Button>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
-function QuickAction({
+function ComposerBar({
+  inputRef,
+  input,
+  onChange,
+  onKeyDown,
+  onSend,
+  onPlus,
+  ready,
+  disabled,
+}: {
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  input: string;
+  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSend: () => void;
+  onPlus: () => void;
+  ready: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <div className="hero-ring flex items-end gap-1.5 rounded-[26px] border border-border bg-surface-2 p-1.5 pl-2 transition-shadow duration-200 focus-within:shadow-[0_0_30px_-12px_rgba(255,61,140,0.5)]">
+      <button
+        type="button"
+        onClick={onPlus}
+        aria-label="Quick actions"
+        className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+      >
+        <PlusIcon size={20} />
+      </button>
+      <textarea
+        ref={inputRef}
+        value={input}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        rows={1}
+        placeholder={
+          ready ? "Tweak the brief, or hit Generate" : "What do you want to make?"
+        }
+        className="max-h-32 min-h-[40px] flex-1 self-center resize-none bg-transparent py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
+      />
+      <Button
+        variant="gradient"
+        size="md"
+        className="h-10 w-10 shrink-0 self-center !px-0"
+        onClick={onSend}
+        disabled={disabled || !input.trim()}
+        aria-label="Send message"
+      >
+        <SendIcon size={18} />
+      </Button>
+    </div>
+  );
+}
+
+function ActionGrid({
+  onEmail,
+  onBlog,
+  onCampaign,
+  disabled,
+  className,
+}: {
+  onEmail: () => void;
+  onBlog: () => void;
+  onCampaign: () => void;
+  disabled: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid grid-cols-3 gap-2", className)}>
+      <ActionButton
+        icon={<MailIcon size={16} />}
+        label="Email"
+        onClick={onEmail}
+        disabled={disabled}
+      />
+      <ActionButton
+        icon={<BlogIcon size={16} />}
+        label="Blog post"
+        onClick={onBlog}
+        disabled={disabled}
+      />
+      <ActionButton
+        icon={<SparkleIcon size={16} />}
+        label="Campaign"
+        onClick={onCampaign}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
+
+function ActionButton({
   icon,
   label,
   onClick,
+  disabled,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  disabled: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:border-accent/45 hover:bg-surface-3"
+      disabled={disabled}
+      className="flex items-center justify-center gap-1.5 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-colors hover:border-accent/40 hover:bg-surface-3 disabled:opacity-50"
     >
-      <span className="flex h-5 w-5 items-center justify-center text-accent transition-transform group-hover:scale-110">
-        {icon}
-      </span>
-      {label}
+      <span className="shrink-0 text-accent">{icon}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </button>
   );
 }
