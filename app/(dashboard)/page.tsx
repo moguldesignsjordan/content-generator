@@ -125,7 +125,12 @@ export default async function DashboardPage() {
 
   return (
     <div className="relative space-y-6">
-      {/* Ambient brand light behind the top of the screen. */}
+      {/* Ambient stage behind the top of the screen: brand light over a
+          hairline engineering grid that dissolves into the background. */}
+      <div
+        aria-hidden
+        className="tech-grid absolute -inset-x-10 -top-16 -z-10 h-96"
+      />
       <div
         aria-hidden
         className="aura-spectrum absolute -inset-x-10 -top-16 -z-10 h-80"

@@ -184,6 +184,17 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         logError("api:/api/campaigns/chat:forced-action", err);
       }
+
+      // The forced retry is itself just another model call, and can also
+      // fail to call a tool (or throw). Rather than leave the user stuck
+      // narrating with no way forward except sending another message, treat
+      // "brief already complete, two turns in a row with no action" as
+      // terminal: flip readiness ourselves so the client's Generate button
+      // shows up regardless of what the model did.
+      if (!state.readyToGenerate) {
+        state.readyToGenerate = true;
+        reply = "Great, the brief is set. Kicking off your draft now.";
+      }
     }
 
     // A tool-only turn (no text block) leaves the user with nothing to react

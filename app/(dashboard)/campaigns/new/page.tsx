@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandWithIcps } from "@/lib/db/queries";
+import { getBrandWithIcps, getLatestActiveCampaign } from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../../_components/screen-header";
 import { CampaignChat } from "./_components/campaign-chat";
@@ -33,13 +33,35 @@ export default async function NewCampaignPage() {
     );
   }
 
+  // Resume the thread on a hard refresh instead of losing it, but only when
+  // there's an actual conversation to resume (mirrors the dashboard's
+  // create-agent hydration in app/(dashboard)/page.tsx).
+  const activeCampaign = await getLatestActiveCampaign(data.brand.id).catch(
+    () => null,
+  );
+  const activeMessages = activeCampaign?.chat_state?.messages ?? [];
+  const initial =
+    activeCampaign && activeMessages.length > 0
+      ? {
+          campaignId: activeCampaign.id,
+          messages: activeMessages,
+          topicId: activeCampaign.topic_id,
+          brief: activeCampaign.brief,
+          readyToGenerate: !!(
+            activeCampaign.brief.goal &&
+            activeCampaign.brief.key_message &&
+            activeCampaign.topic_id
+          ),
+        }
+      : undefined;
+
   return (
     <>
       <ScreenHeader
         title="New campaign"
         subtitle="A quick strategy conversation, then a designed draft to review."
       />
-      <CampaignChat />
+      <CampaignChat initial={initial} />
     </>
   );
 }

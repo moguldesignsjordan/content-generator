@@ -46,6 +46,17 @@ interface Msg {
   content: string;
 }
 
+/* Concrete things you can type, cycled through the empty composer so the
+   landing teaches by example instead of a static "type here". */
+const PROMPT_IDEAS = [
+  "What do you want to make?",
+  "Draft a win-back email for past clients",
+  "Write a blog post about our latest build",
+  "Announce a new service to the list",
+  "Turn our best email into a blog post",
+  "Plan a launch campaign for this month",
+];
+
 export interface CreateAgentSuggestion {
   label: string;
   text: string;
@@ -115,6 +126,7 @@ export function CreateAgent({
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const [card, setCard] = useState<BriefCard | null>(initial?.card ?? null);
   const [topicId, setTopicId] = useState<string | null>(initial?.topicId ?? null);
@@ -133,13 +145,36 @@ export function CreateAgent({
   const [emailType, setEmailType] = useState<EmailType | "">("");
   const [blogType, setBlogType] = useState<BlogType | "">("");
 
+  // Which example prompt the empty composer is showing (landing only).
+  const [phIndex, setPhIndex] = useState(0);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const empty = messages.length === 0;
+
+  // Cycle the landing placeholder through concrete prompt ideas. Skipped
+  // entirely for reduced-motion users, who keep the first (generic) prompt.
+  useEffect(() => {
+    if (!empty) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(
+      () => setPhIndex((i) => (i + 1) % PROMPT_IDEAS.length),
+      3600,
+    );
+    return () => clearInterval(id);
+  }, [empty]);
 
   useEffect(() => {
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, loading, card, options]);
+
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = setTimeout(() => setConfirmClear(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmClear]);
 
   // Auto-grow the composer.
   useEffect(() => {
@@ -160,12 +195,18 @@ export function CreateAgent({
     setMessages((m) => [...m, { role: "user", content: t }]);
     setLoading(true);
     const hintTimer = setTimeout(() => setHint(true), 6000);
+    const controller = new AbortController();
+    // This route can chain several tool round-trips server-side (up to
+    // maxDuration = 300s); abort a good margin before that so a hung request
+    // surfaces as an error instead of spinning the typing indicator forever.
+    const timeoutTimer = setTimeout(() => controller.abort(), 280_000);
 
     try {
       const res = await fetch("/api/create/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: t, history: messages, campaignId }),
+        signal: controller.signal,
       });
       const data = (await res.json()) as CreateResponse;
       if (!res.ok || !data.reply) {
@@ -183,17 +224,51 @@ export function CreateAgent({
         router.push(`/drafts/${data.draftId}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      setError(
+        timedOut
+          ? "That took too long. Try sending it again."
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong.",
+      );
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "Sorry, I hit a snag. Try sending that again." },
+        {
+          role: "assistant",
+          content: timedOut
+            ? "Sorry, that took too long. Try sending that again."
+            : "Sorry, I hit a snag. Try sending that again.",
+        },
       ]);
     } finally {
       clearTimeout(hintTimer);
+      clearTimeout(timeoutTimer);
       setLoading(false);
       setHint(false);
       inputRef.current?.focus();
     }
+  }
+
+  function clearChat() {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    setConfirmClear(false);
+    if (campaignId) {
+      fetch(`/api/campaigns/${campaignId}/clear`, { method: "POST" }).catch(() => {});
+    }
+    setMessages([]);
+    setInput("");
+    setCard(null);
+    setTopicId(null);
+    setCampaignId(null);
+    setOptions(null);
+    setReady(false);
+    setGenerating(false);
+    setError(null);
+    setActionsOpen(true);
   }
 
   async function generate() {
@@ -222,19 +297,32 @@ export function CreateAgent({
     }
   }
 
-  const empty = messages.length === 0;
-
   return (
     <div
       className={cn("flex flex-col overflow-hidden", className)}
       style={{ height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
     >
       {empty ? (
-        // Landing — a clean, centered prompt (headline + input + actions).
+        // Landing — a centered prompt: beacon, headline, input, actions.
         <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
-          <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground sm:text-[30px]">
-            What are we creating today?
-          </h2>
+          <div className="flex flex-col items-center gap-5">
+            {/* The agent's beacon: the spectrum ring slowly turning around a
+                breathing sparkle. Same identity dot as the chat avatar. */}
+            <span className="hero-ring hero-beacon glow-spectrum-soft flex h-12 w-12 items-center justify-center rounded-full bg-surface-2">
+              <SparkleIcon size={22} className="text-foreground" />
+            </span>
+            <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground [text-wrap:balance] sm:text-[30px]">
+              What are we{" "}
+              <span className="relative inline-block">
+                creating
+                <span
+                  aria-hidden
+                  className="bar-spectrum absolute -bottom-1 left-0 h-[3px] w-full rounded-full"
+                />
+              </span>{" "}
+              today?
+            </h2>
+          </div>
           <div className="w-full max-w-xl">
             <ComposerBar
               inputRef={inputRef}
@@ -250,6 +338,7 @@ export function CreateAgent({
               onPlus={() => setActionsOpen((v) => !v)}
               ready={ready}
               disabled={loading || generating}
+              placeholderCycle={PROMPT_IDEAS[phIndex]}
             />
             {actionsOpen && (
               <ActionGrid
@@ -265,6 +354,15 @@ export function CreateAgent({
       ) : (
         // Conversation — scrolling thread + docked composer.
         <>
+          <div className="flex items-center justify-end border-b border-border px-3 py-1.5">
+            <button
+              type="button"
+              onClick={clearChat}
+              className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+            >
+              {confirmClear ? "Confirm clear?" : "Clear chat"}
+            </button>
+          </div>
           <div
             ref={scrollRef}
             className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
@@ -309,8 +407,9 @@ export function CreateAgent({
             )}
 
             {loading && (
-              <div className="flex justify-start">
-                <div className="bubble-in rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
+              <div className="bubble-in flex items-end gap-2">
+                <AgentDot className="mb-0.5" />
+                <div className="rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
                   <Typing hint={hint} />
                 </div>
               </div>
@@ -362,6 +461,7 @@ function ComposerBar({
   onPlus,
   ready,
   disabled,
+  placeholderCycle,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -371,7 +471,11 @@ function ComposerBar({
   onPlus: () => void;
   ready: boolean;
   disabled: boolean;
+  /** When set (landing), the placeholder cycles through example prompts as a
+   * faded-in overlay; the native placeholder is suppressed in its favor. */
+  placeholderCycle?: string;
 }) {
+  const cycling = placeholderCycle !== undefined && !ready;
   return (
     <div className="hero-ring flex items-end gap-1.5 rounded-[26px] border border-border bg-surface-2 p-1.5 pl-2 transition-shadow duration-200 focus-within:shadow-[0_0_30px_-12px_rgba(255,61,140,0.5)]">
       <button
@@ -382,17 +486,33 @@ function ComposerBar({
       >
         <PlusIcon size={20} />
       </button>
-      <textarea
-        ref={inputRef}
-        value={input}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        rows={1}
-        placeholder={
-          ready ? "Tweak the brief, or hit Generate" : "What do you want to make?"
-        }
-        className="max-h-32 min-h-[40px] flex-1 self-center resize-none bg-transparent py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
-      />
+      <div className="relative min-w-0 flex-1 self-center">
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          rows={1}
+          aria-label="Message the create agent"
+          placeholder={
+            cycling
+              ? undefined
+              : ready
+                ? "Tweak the brief, or hit Generate"
+                : "What do you want to make?"
+          }
+          className="max-h-32 min-h-[40px] w-full resize-none bg-transparent py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
+        />
+        {cycling && !input && (
+          <span
+            key={placeholderCycle}
+            aria-hidden
+            className="ph-cycle pointer-events-none absolute inset-x-0 top-2 truncate text-[15px] leading-relaxed text-muted"
+          >
+            {placeholderCycle}
+          </span>
+        )}
+      </div>
       <Button
         variant="gradient"
         size="md"
@@ -423,63 +543,103 @@ function ActionGrid({
   return (
     <div className={cn("grid grid-cols-3 gap-2", className)}>
       <ActionButton
-        icon={<MailIcon size={16} />}
+        icon={<MailIcon size={15} />}
         label="Email"
         onClick={onEmail}
         disabled={disabled}
+        chipClass="bg-cyan/12 text-cyan"
+        hoverClass="hover:border-cyan/40"
       />
       <ActionButton
-        icon={<BlogIcon size={16} />}
+        icon={<BlogIcon size={15} />}
         label="Blog post"
         onClick={onBlog}
         disabled={disabled}
+        chipClass="bg-violet/12 text-violet"
+        hoverClass="hover:border-violet/45"
       />
       <ActionButton
-        icon={<SparkleIcon size={16} />}
+        icon={<SparkleIcon size={15} />}
         label="Campaign"
         onClick={onCampaign}
         disabled={disabled}
+        chipClass="bg-amber/12 text-amber"
+        hoverClass="hover:border-amber/45"
       />
     </div>
   );
 }
 
+/* Each action carries its own spectral primary (brand badge rule: 12% tint
+   chip, full-value hue) so the three creation paths read as one spectrum. */
 function ActionButton({
   icon,
   label,
   onClick,
   disabled,
+  chipClass,
+  hoverClass,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
   disabled: boolean;
+  chipClass: string;
+  hoverClass: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center justify-center gap-1.5 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-colors hover:border-accent/40 hover:bg-surface-3 disabled:opacity-50"
+      className={cn(
+        "group flex items-center justify-center gap-2 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:bg-surface-3 disabled:opacity-50",
+        hoverClass,
+      )}
     >
-      <span className="shrink-0 text-accent">{icon}</span>
+      <span
+        className={cn(
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px]",
+          chipClass,
+        )}
+      >
+        {icon}
+      </span>
       <span className="min-w-0 truncate">{label}</span>
     </button>
   );
 }
 
+/* The agent's identity dot: a static spectrum ring around a sparkle. Marks
+   assistant turns (and the thinking state) without a heavy avatar. */
+function AgentDot({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "ring-spectrum flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-2",
+        className,
+      )}
+    >
+      <SparkleIcon size={13} className="text-foreground" />
+    </span>
+  );
+}
+
 function Bubble({ msg }: { msg: Msg }) {
   const isUser = msg.role === "user";
+  if (isUser) {
+    return (
+      <div className="bubble-in flex justify-end">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
+          {msg.content}
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={cn("bubble-in flex", isUser ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14.5px] leading-relaxed",
-          isUser
-            ? "rounded-br-sm bg-accent text-white"
-            : "rounded-bl-sm bg-surface-2 text-foreground",
-        )}
-      >
+    <div className="bubble-in flex items-end gap-2">
+      <AgentDot className="mb-0.5" />
+      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground">
         {msg.content}
       </div>
     </div>
@@ -542,10 +702,25 @@ function BriefCardView({
   ];
 
   return (
-    <div className="bubble-in rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
-      <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-        <SparkleIcon size={12} className="text-accent" />
-        Brief
+    <div
+      className={cn(
+        "bubble-in rounded-[var(--radius-lg)] border bg-surface-2 p-3 transition-shadow duration-300",
+        // Ready is the payoff moment: the brief wears the spectrum hairline
+        // and a soft halo, signaling "this is what gets generated".
+        ready ? "ring-spectrum glow-spectrum-soft border-transparent" : "border-border",
+      )}
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+          <SparkleIcon size={12} className="text-accent" />
+          Brief
+        </span>
+        {ready && !generating && (
+          <span className="flex items-center gap-1.5 text-[11px] font-medium text-success">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            Ready
+          </span>
+        )}
       </div>
 
       <div className="divide-y divide-border">
@@ -638,6 +813,16 @@ function BriefCardView({
           </Button>
         </div>
       )}
+
+      {/* Honest progress: a spectrum sweep while the draft is being written. */}
+      {generating && (
+        <div className="mt-3 h-[3px] overflow-hidden rounded-full bg-surface-3">
+          <div
+            className="bg-spectrum h-full w-1/3 rounded-full"
+            style={{ animation: "progress-indeterminate 1.3s ease-in-out infinite" }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -711,23 +896,23 @@ function EditableRow({
   );
 }
 
+/* Thinking state in brand color: the three spectral dots pulse in sequence,
+   amber into magenta into cyan. Reduced motion collapses to steady dots. */
 function Typing({ hint }: { hint: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <span className="inline-flex gap-1">
-        {[0, 1, 2].map((i) => (
+        {(["bg-amber", "bg-magenta", "bg-cyan"] as const).map((tone, i) => (
           <span
-            key={i}
-            className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
-            style={{ animationDelay: `${i * 0.15}s` }}
+            key={tone}
+            className={cn("dot-spectrum h-1.5 w-1.5 rounded-full", tone)}
+            style={{ animationDelay: `${i * 0.18}s` }}
           />
         ))}
       </span>
-      {hint && (
-        <span className="text-[11px] text-muted-2">
-          drafting can take a minute…
-        </span>
-      )}
+      <span className="text-[11px] text-muted-2">
+        {hint ? "drafting can take a minute…" : "thinking"}
+      </span>
     </div>
   );
 }

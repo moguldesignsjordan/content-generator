@@ -20,25 +20,48 @@ type TurnResponse = {
   error?: string;
 };
 
-export function CampaignChat() {
+/** Resumed state from the brand's most recent in-flight campaign, so a hard
+ * refresh of /campaigns/new picks the thread back up instead of losing it. */
+export interface CampaignChatInitialState {
+  campaignId: string;
+  messages: OnboardingMessage[];
+  topicId: string | null;
+  brief: CampaignBrief;
+  readyToGenerate: boolean;
+}
+
+// Requests can chain a couple of retry calls server-side; abort well before
+// the route's own maxDuration (120s) so a hung request surfaces as an error
+// instead of spinning the typing indicator forever.
+const REQUEST_TIMEOUT_MS = 110_000;
+
+export function CampaignChat({ initial }: { initial?: CampaignChatInitialState }) {
   const router = useRouter();
-  const [messages, setMessages] = useState<OnboardingMessage[]>([]);
+  const [messages, setMessages] = useState<OnboardingMessage[]>(initial?.messages ?? []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [campaignId, setCampaignId] = useState<string | null>(null);
-  const [topicId, setTopicId] = useState<string | null>(null);
-  const [brief, setBrief] = useState<CampaignBrief>({});
+  const [hint, setHint] = useState(false);
+  const [campaignId, setCampaignId] = useState<string | null>(initial?.campaignId ?? null);
+  const [topicId, setTopicId] = useState<string | null>(initial?.topicId ?? null);
+  const [brief, setBrief] = useState<CampaignBrief>(initial?.brief ?? {});
   const [proposals, setProposals] = useState<VoiceProposals | null>(null);
   const [options, setOptions] = useState<SuggestedOption[] | null>(null);
   const [savingVoice, setSavingVoice] = useState(false);
-  const [readyToGenerate, setReadyToGenerate] = useState(false);
+  const [readyToGenerate, setReadyToGenerate] = useState(initial?.readyToGenerate ?? false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, proposals, readyToGenerate, generating]);
+
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = setTimeout(() => setConfirmClear(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmClear]);
 
   async function send(override?: string) {
     const text = (override ?? input).trim();
@@ -48,12 +71,16 @@ export function CampaignChat() {
     setError(null);
     setOptions(null);
     setMessages((m) => [...m, { role: "user", content: text }]);
+    const hintTimer = setTimeout(() => setHint(true), 6000);
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
       const res = await fetch("/api/campaigns/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ campaignId, message: text }),
+        signal: controller.signal,
       });
       const data = (await res.json()) as TurnResponse;
       if (!res.ok || !data.reply) {
@@ -67,17 +94,50 @@ export function CampaignChat() {
       if (data.options?.length) setOptions(data.options);
       if (data.readyToGenerate) setReadyToGenerate(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      setError(
+        timedOut
+          ? "That took too long. Try sending it again."
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong.",
+      );
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
-          content: "Sorry, I hit a snag. Try sending that again.",
+          content: timedOut
+            ? "Sorry, that took too long. Try sending that again."
+            : "Sorry, I hit a snag. Try sending that again.",
         },
       ]);
     } finally {
+      clearTimeout(hintTimer);
+      clearTimeout(timeoutTimer);
+      setHint(false);
       setLoading(false);
     }
+  }
+
+  function clearChat() {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    setConfirmClear(false);
+    if (campaignId) {
+      fetch(`/api/campaigns/${campaignId}/clear`, { method: "POST" }).catch(() => {});
+    }
+    setMessages([]);
+    setInput("");
+    setCampaignId(null);
+    setTopicId(null);
+    setBrief({});
+    setProposals(null);
+    setOptions(null);
+    setReadyToGenerate(false);
+    setGenerating(false);
+    setError(null);
   }
 
   async function applyVoice() {
@@ -135,16 +195,27 @@ export function CampaignChat() {
       className="flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface"
       style={{ height: "clamp(440px, 68vh, 640px)" }}
     >
-      {briefChips.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2">
-          {briefChips.map((chip) => (
-            <span
-              key={chip}
-              className="max-w-[260px] truncate rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted"
+      {(briefChips.length > 0 || messages.length > 0) && (
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+          <div className="flex flex-wrap gap-1.5">
+            {briefChips.map((chip) => (
+              <span
+                key={chip}
+                className="max-w-[260px] truncate rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={clearChat}
+              className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
             >
-              {chip}
-            </span>
-          ))}
+              {confirmClear ? "Confirm clear?" : "Clear chat"}
+            </button>
+          )}
         </div>
       )}
 
@@ -210,7 +281,7 @@ export function CampaignChat() {
         {loading && (
           <div className="flex justify-start">
             <div className="rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
-              <Typing />
+              <Typing hint={hint} />
             </div>
           </div>
         )}
@@ -276,16 +347,21 @@ function Bubble({ role, text }: { role: "user" | "assistant"; text: string }) {
   );
 }
 
-function Typing() {
+function Typing({ hint }: { hint: boolean }) {
   return (
-    <span className="inline-flex gap-1">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
-          style={{ animationDelay: `${i * 0.15}s` }}
-        />
-      ))}
-    </span>
+    <div className="flex items-center gap-2">
+      <span className="inline-flex gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
+            style={{ animationDelay: `${i * 0.15}s` }}
+          />
+        ))}
+      </span>
+      {hint && (
+        <span className="text-[11px] text-muted-2">still thinking…</span>
+      )}
+    </div>
   );
 }

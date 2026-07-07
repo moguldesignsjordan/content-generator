@@ -222,6 +222,22 @@
       radial-gradient(460px 280px at 92% 6%, rgba(30, 180, 255, 0.1), transparent 65%);
   }
 
+  /* Hairline engineering grid, radially masked so it dissolves into Ink.
+     Sits behind the hero with the aura; texture, never a competing layer. */
+  .tech-grid {
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(
+      72% 95% at 50% 0%,
+      #000 0%,
+      transparent 80%
+    );
+    mask-image: radial-gradient(72% 95% at 50% 0%, #000 0%, transparent 80%);
+  }
+
   /* Native-feeling surfaces with a hairline + subtle inner lift on dark. */
   .surface-card {
     background: var(--surface);
@@ -351,6 +367,40 @@
   }
 }
 
+/* Agent "thinking" state: three dots in the spectral primaries, pulsing in
+   sequence. State feedback in brand color, not a generic gray bounce. */
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.dot-spectrum {
+  animation: dot-pulse 1.15s ease-in-out infinite;
+}
+
+/* Cycling composer placeholder: each example fades up as it swaps in.
+   Rendered as an overlay span (never blocks the caret); base opacity is 1
+   so reduced-motion users simply see the current example. */
+@keyframes ph-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ph-cycle {
+  animation: ph-in 0.45s ease-out;
+}
+
 /* Chat elements rise in on appearance — new messages, the typing block,
    the brief card, suggested options. One-shot; base opacity stays 1 so the
    content is visible even if the animation is skipped (reduced motion). */
@@ -395,6 +445,11 @@ html.light .aura-spectrum {
     radial-gradient(420px 260px at 12% 0%, rgba(255, 174, 60, 0.12), transparent 65%),
     radial-gradient(560px 320px at 55% -8%, rgba(255, 61, 140, 0.08), transparent 65%),
     radial-gradient(460px 280px at 92% 6%, rgba(30, 180, 255, 0.1), transparent 65%);
+}
+html.light .tech-grid {
+  background-image:
+    linear-gradient(rgba(8, 8, 10, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(8, 8, 10, 0.055) 1px, transparent 1px);
 }
 html.light .hero-surface {
   background: var(--surface);

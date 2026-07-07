@@ -168,6 +168,18 @@ export async function POST(req: NextRequest) {
     };
     const dispatchCtx = { brand, strategy, topics, campaignId: campaign.id };
 
+    // Snapshot readiness BEFORE this turn: if the brief was already complete
+    // walking in and the whole turn produces zero tool calls, the model
+    // narrated ("let me put that together...") instead of acting, the same
+    // stall this loop otherwise has no way to recover from (it just breaks on
+    // the first text-only step and leaves the user to nudge with another
+    // message).
+    const briefWasReady = !!(
+      campaign.brief?.goal &&
+      campaign.brief?.key_message &&
+      campaign.topic_id
+    );
+
     const call = () =>
       getAnthropic().messages.create({
         model: DRAFT_MODEL,
@@ -179,6 +191,7 @@ export async function POST(req: NextRequest) {
       });
 
     let reply = "";
+    let calledAnyTool = false;
     for (let step = 0; step < MAX_STEPS; step++) {
       let response;
       try {
@@ -199,10 +212,42 @@ export async function POST(req: NextRequest) {
       const toolResults: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
+        calledAnyTool = true;
         const content = await dispatchTool(block, state, dispatchCtx);
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content });
       }
       messages.push({ role: "user", content: toolResults });
+    }
+
+    // Stall recovery, mirroring /api/campaigns/chat: brief was already ready
+    // going into this turn but nothing happened. Force one more step; if that
+    // still doesn't produce a tool call, at least readyToGenerate (computed
+    // below from state.brief/topicId, unaffected by whether a tool fired)
+    // will be true so the client's manual Generate button is there instead of
+    // requiring another message.
+    if (briefWasReady && !calledAnyTool && !state.draftId) {
+      try {
+        const forced = await getAnthropic().messages.create({
+          model: DRAFT_MODEL,
+          max_tokens: 1024,
+          system,
+          messages,
+          tools: CREATE_TOOLS,
+          tool_choice: { type: "any" },
+        });
+        logUsage("create-chat-forced", DRAFT_MODEL, forced.usage);
+        messages.push({ role: "assistant", content: forced.content });
+        let forcedReply = "";
+        for (const block of forced.content) {
+          if (block.type === "text") forcedReply += block.text;
+          if (block.type === "tool_use") {
+            await dispatchTool(block, state, dispatchCtx);
+          }
+        }
+        if (forcedReply.trim()) reply = forcedReply;
+      } catch (err) {
+        logError("api:/api/create/chat:forced-action", err);
+      }
     }
 
     if (!reply.trim()) {
