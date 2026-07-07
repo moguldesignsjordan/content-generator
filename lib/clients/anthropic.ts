@@ -27,7 +27,10 @@ export function getAnthropic(): Anthropic {
     throw new Error("ANTHROPIC_API_KEY is not set in .env.local.");
   }
   if (!client) {
-    client = new Anthropic({ apiKey });
+    // The SDK already retries 429/529/5xx with exponential backoff and
+    // honors retry-after headers; 4 attempts rides out a normal rate-limit
+    // burst without failing a 60s generation the user is watching.
+    client = new Anthropic({ apiKey, maxRetries: 4 });
   }
   return client;
 }

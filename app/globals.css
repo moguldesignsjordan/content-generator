@@ -170,6 +170,58 @@
     border: 1px solid var(--border);
   }
 
+  /* ── Spectrum glow vocabulary ──────────────────────────────────────────
+     Three intensities of the same brand light. The gradient stays the one
+     spectrum; these only let it bleed into the dark around key surfaces. */
+
+  /* Hairline ring drawn in the spectrum gradient (border-image-free trick:
+     a gradient layer masked to just the 1px frame). Pair with a rounded
+     element; the ring inherits its radius. */
+  .ring-spectrum {
+    position: relative;
+  }
+  .ring-spectrum::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--spectrum);
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  /* Soft brand-colored halo bleeding out of a surface. */
+  .glow-spectrum {
+    box-shadow:
+      0 0 44px -10px rgba(255, 61, 140, 0.28),
+      0 0 90px -18px rgba(158, 77, 242, 0.22),
+      0 0 70px -24px rgba(30, 180, 255, 0.16);
+  }
+  .glow-spectrum-soft {
+    box-shadow:
+      0 0 28px -14px rgba(255, 61, 140, 0.18),
+      0 0 56px -22px rgba(158, 77, 242, 0.14);
+  }
+
+  /* Ambient aura for the top of a screen: three offset pools of brand light
+     on the Ink background. Position absolutely behind the lead content. */
+  .aura-spectrum {
+    pointer-events: none;
+    background:
+      radial-gradient(420px 260px at 12% 0%, rgba(255, 174, 60, 0.1), transparent 65%),
+      radial-gradient(560px 320px at 55% -8%, rgba(255, 61, 140, 0.13), transparent 65%),
+      radial-gradient(460px 280px at 92% 6%, rgba(30, 180, 255, 0.1), transparent 65%);
+  }
+
   /* Native-feeling surfaces with a hairline + subtle inner lift on dark. */
   .surface-card {
     background: var(--surface);

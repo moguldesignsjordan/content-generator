@@ -11,12 +11,18 @@ import { getAdminClient } from "@/lib/db/client";
 import { optimizeEmailImage } from "@/lib/images/optimize";
 import {
   IMAGE_PROMPT_TOOL,
+  REFERENCE_DIRECTIVES,
   buildFinalImagePrompt,
   buildImagePromptMessages,
   type ImagePromptOutput,
 } from "@/prompts/generate-image";
 import { stripEmDashes } from "@/lib/text";
-import type { ContentImage, ContentImageStyle, ReferenceUse } from "@/lib/db/types";
+import type {
+  ContentImage,
+  ContentImageStyle,
+  ImagePromptMode,
+  ReferenceUse,
+} from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
 import { logError } from "@/lib/log";
@@ -41,6 +47,18 @@ export interface GenerateContentImageArgs {
   style: ContentImageStyle;
   /** Optional user-typed subject for the scene. */
   subject?: string;
+  /**
+   * "auto" (default): FAST_MODEL sharpens the subject into a scene.
+   * "exact": the subject is used verbatim as the scene, no model call at all,
+   * for when the generator "doesn't listen" and the user wants full control.
+   */
+  promptMode?: ImagePromptMode;
+  /**
+   * Full final prompt override (the tweak-and-regenerate path): skips both
+   * the scene-crafting call AND the style scaffold; sent to the image model
+   * as-is. Wins over subject/promptMode when present.
+   */
+  exactPrompt?: string;
   /** Optional user-attached reference image (base64 JPEG, already downscaled). */
   reference?: { data: string; mimeType: string };
   /** How the reference steers generation. Defaults to "style" when a reference is present. */
@@ -72,59 +90,86 @@ export async function generateContentImage(
   const referenceUse: ReferenceUse | undefined = reference
     ? (args.referenceUse ?? "style")
     : undefined;
+  const exactPrompt = args.exactPrompt?.trim();
+  const subject = args.subject?.trim();
+  const wantsExact = args.promptMode === "exact" && Boolean(subject);
 
-  // 1. Cheap scene-crafting call. When a reference is attached, FAST_MODEL
-  // sees it too, so the scene it writes actually relates to the reference.
-  const { system, user } = buildImagePromptMessages({
-    brandName: args.brandName,
-    topicTitle: args.topicTitle,
-    headline: args.headline,
-    style: args.style,
-    subject: args.subject,
-    referenceUse,
-  });
-  const userContent: Anthropic.ContentBlockParam[] = [
-    { type: "text", text: user },
-  ];
-  if (reference) {
-    userContent.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: reference.mimeType as "image/jpeg",
-        data: reference.data,
-      },
+  // 1. Decide the final prompt. Three paths, cheapest first:
+  //    - exactPrompt: the user edited the full prompt; send it verbatim.
+  //    - exact mode: the user's subject IS the scene; scaffold only. Both of
+  //      these skip the FAST_MODEL call entirely (zero Claude tokens).
+  //    - auto (default): a cheap scene-crafting call sharpens the subject or
+  //      invents one from the topic. When a reference is attached, FAST_MODEL
+  //      sees it too, so the scene it writes actually relates to the reference.
+  let finalPrompt: string;
+  let alt: string;
+
+  if (exactPrompt) {
+    finalPrompt = referenceUse
+      ? `${exactPrompt} ${REFERENCE_DIRECTIVES[referenceUse]}`
+      : exactPrompt;
+    alt = subject || args.headline || args.topicTitle;
+  } else if (wantsExact) {
+    finalPrompt = buildFinalImagePrompt(
+      args.style,
+      subject!,
+      args.tokens,
+      referenceUse,
+    );
+    alt = subject!;
+  } else {
+    const { system, user } = buildImagePromptMessages({
+      brandName: args.brandName,
+      topicTitle: args.topicTitle,
+      headline: args.headline,
+      style: args.style,
+      subject,
+      referenceUse,
     });
-  }
-  const response = await getAnthropic().messages.create({
-    model: FAST_MODEL,
-    max_tokens: 512,
-    system: cacheableSystem(system),
-    messages: [{ role: "user", content: userContent }],
-    tools: [IMAGE_PROMPT_TOOL],
-    tool_choice: { type: "tool", name: "save_image_prompt" },
-  });
-  logUsage("image-prompt", FAST_MODEL, response.usage);
-  usage.push({ model: FAST_MODEL, ...response.usage });
+    const userContent: Anthropic.ContentBlockParam[] = [
+      { type: "text", text: user },
+    ];
+    if (reference) {
+      userContent.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: reference.mimeType as "image/jpeg",
+          data: reference.data,
+        },
+      });
+    }
+    const response = await getAnthropic().messages.create({
+      model: FAST_MODEL,
+      max_tokens: 512,
+      system: cacheableSystem(system),
+      messages: [{ role: "user", content: userContent }],
+      tools: [IMAGE_PROMPT_TOOL],
+      tool_choice: { type: "tool", name: "save_image_prompt" },
+    });
+    logUsage("image-prompt", FAST_MODEL, response.usage);
+    usage.push({ model: FAST_MODEL, ...response.usage });
 
-  const tu = response.content.find(
-    (b) => b.type === "tool_use" && b.name === "save_image_prompt",
-  );
-  if (!tu || tu.type !== "tool_use") {
-    throw new Error("Couldn't come up with an image concept. Try again.");
-  }
-  const promptOut = tu.input as ImagePromptOutput;
-  if (!promptOut.scene || !promptOut.alt) {
-    throw new Error("Couldn't come up with an image concept. Try again.");
+    const tu = response.content.find(
+      (b) => b.type === "tool_use" && b.name === "save_image_prompt",
+    );
+    if (!tu || tu.type !== "tool_use") {
+      throw new Error("Couldn't come up with an image concept. Try again.");
+    }
+    const promptOut = tu.input as ImagePromptOutput;
+    if (!promptOut.scene || !promptOut.alt) {
+      throw new Error("Couldn't come up with an image concept. Try again.");
+    }
+    finalPrompt = buildFinalImagePrompt(
+      args.style,
+      promptOut.scene,
+      args.tokens,
+      referenceUse,
+    );
+    alt = promptOut.alt;
   }
 
   // 2. Render. 16:9 fits the 600px email column as a wide hero.
-  const finalPrompt = buildFinalImagePrompt(
-    args.style,
-    promptOut.scene,
-    args.tokens,
-    referenceUse,
-  );
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: "16:9",
@@ -141,10 +186,11 @@ export async function generateContentImage(
   return {
     image: {
       url,
-      alt: stripEmDashes(promptOut.alt.trim()).slice(0, 160),
+      alt: stripEmDashes(alt.trim()).slice(0, 160),
       width: optimized.width,
       height: optimized.height,
       style: args.style,
+      prompt: finalPrompt,
     },
     usage,
   };

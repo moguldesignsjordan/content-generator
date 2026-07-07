@@ -422,7 +422,14 @@ export interface ContentImage {
   style: ContentImageStyle | "uploaded";
   // Undefined on images placed before placement existed; treated as "top".
   placement?: HeroPlacement;
+  // The final prompt sent to the image model (absent on uploads and on
+  // images generated before this existed). Shown in the image sheet so the
+  // user can see exactly what produced the render, tweak it, and regenerate.
+  prompt?: string;
 }
+
+/** How the user's typed subject is treated when generating an image. */
+export type ImagePromptMode = "auto" | "exact";
 
 // Rolled-up token/image spend for one draft, persisted on drafts.meta so the
 // review screen can show "This draft cost ~$0.0X". Estimates for display, not

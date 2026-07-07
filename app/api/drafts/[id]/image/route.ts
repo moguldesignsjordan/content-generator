@@ -22,11 +22,13 @@ import type {
   DraftJobContext,
   DraftMeta,
   HeroPlacement,
+  ImagePromptMode,
   ReferenceUse,
   TopicContext,
 } from "@/lib/db/types";
 import type { UsageDelta } from "@/lib/pipeline/cost";
 import { logError } from "@/lib/log";
+import { guardAiRoute } from "@/lib/ai-guard";
 
 // A Gemini render + Haiku prompt-craft + optimize + upload usually lands in
 // 10-25s, but leave headroom for retries and cold storage buckets.
@@ -88,9 +90,11 @@ async function commitBlogHero(
 
 /**
  * POST multipart/form-data:
- *  - mode "generate" (default): { style, subject?, placement?, reference?,
- *    referenceUse? } generates a brand-grounded hero image, optionally steered
- *    by an attached reference image.
+ *  - mode "generate" (default): { style, subject?, promptMode?, exactPrompt?,
+ *    placement?, reference?, referenceUse? } generates a brand-grounded hero
+ *    image, optionally steered by an attached reference image. promptMode
+ *    "exact" uses the subject verbatim as the scene (no AI rewrite);
+ *    exactPrompt sends the full prompt as-is (the tweak-and-regenerate path).
  *  - mode "upload": { file, alt?, placement? } places the user's own image as
  *    the hero. No AI involved.
  *  - mode "move": { placement } re-places the existing hero instantly, no
@@ -169,7 +173,19 @@ export async function POST(
         reference && rawUse && REFERENCE_USES.includes(rawUse as ReferenceUse)
           ? (rawUse as ReferenceUse)
           : undefined;
+      // Only the generate mode spends AI money; move/upload stay unguarded.
+      const guard = await guardAiRoute("image", { limit: 6 });
+      if (!guard.ok) {
+        return NextResponse.json({ error: guard.error }, { status: guard.status });
+      }
+
       const subject = (form.get("subject") as string | null)?.trim() || undefined;
+      const rawMode = form.get("promptMode") as string | null;
+      const promptMode: ImagePromptMode =
+        rawMode === "exact" && subject ? "exact" : "auto";
+      const exactPrompt =
+        (form.get("exactPrompt") as string | null)?.trim().slice(0, 2000) ||
+        undefined;
 
       const generated = await generateContentImage({
         tokens: resolveBrandTokens(topicCtx.brand),
@@ -180,6 +196,8 @@ export async function POST(
           : draftCtx.meta.email_copy?.headline,
         style,
         subject,
+        promptMode,
+        exactPrompt,
         reference,
         referenceUse,
       });

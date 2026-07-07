@@ -621,6 +621,34 @@ original intent of "pick up an incomplete brief where you left off."
 live in the browser (no test credentials in this repo) — Jordan should
 confirm the dashboard chat now starts blank after logging back in.
 
+## Session 2026-07-06 (later): image control, cost guards, dashboard glow
+
+- **Image prompt control:** subject toggle "AI sharpens it" vs "Use my words
+  exactly" (exact mode skips the Haiku call entirely); every generated image
+  now stores its final prompt (`ContentImage.prompt`), shown in the image
+  sheet as an editable "Prompt behind the current image" with "Regenerate
+  with this prompt" (sent verbatim via `exactPrompt`). Auto mode's scene-
+  crafting prompt now treats a typed subject as a hard constraint (keep every
+  named element). Addresses "the generator doesn't listen to my prompt."
+- **Rate + cost guards:** new `lib/ai-guard.ts` — per-instance sliding-window
+  rate limit (8/min generate, 6/min image) + optional global daily budget
+  `DAILY_SPEND_LIMIT_USD` read from app_logs usage rows; wired into
+  `/api/generate` and the image route's generate mode; degrades open.
+  Anthropic client now `maxRetries: 4`; Gemini render gets one spaced retry
+  on transient errors (429/503/network).
+- **Dashboard glow:** new spectrum glow vocabulary in `globals.css`
+  (`ring-spectrum`, `glow-spectrum`, `glow-spectrum-soft`, `aura-spectrum`);
+  Home gets an ambient aura, ringed/lit create-agent card, softly lit stat
+  tiles.
+- **Docs:** `content-engine-rundown.html` updated for all of the above;
+  new `multi-tenancy-roadmap.md` (concrete 6-step path to multi-user:
+  brand_members → session-scoped brand resolution → RLS → per-brand budgets
+  → unshared storage/creds — nothing blocks single-tenant production today).
+- Gate: `npm run typecheck` + `npx vitest run` (86) + `npm run build` all
+  pass. **Not yet verified in the browser:** the new image-sheet controls and
+  the dashboard glow (needs Jordan's logged-in session or a Playwright MCP
+  session).
+
 ## Next step (backlog, still open)
 
 1. Click through `/logs` logged in as Jordan: confirm the stat tiles and feed

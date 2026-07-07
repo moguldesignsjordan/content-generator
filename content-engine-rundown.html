@@ -1,0 +1,693 @@
+<title>How the Content Engine Works</title>
+<style>
+  :root {
+    --ink: #08080a;
+    --carbon: #161618;
+    --carbon-2: #1d1d21;
+    --carbon-3: #242429;
+    --paper: #fafaf8;
+    --ash: #8a8a94;
+    --ash-2: #5a5a62;
+    --hair: rgba(255,255,255,.08);
+    --hair-strong: rgba(255,255,255,.14);
+
+    --amber: #ffae3c;
+    --magenta: #ff3d8c;
+    --violet: #9e4df2;
+    --cyan: #1eb4ff;
+    --accent: var(--magenta);
+    --accent-press: #e2327d;
+    --spectrum: linear-gradient(115deg, #ffae3c 0%, #ff3d8c 38%, #9e4df2 68%, #1eb4ff 100%);
+
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #fb7185;
+
+    --r-card: 20px;
+    --r-lg: 16px;
+    --r-md: 12px;
+    --r-sm: 8px;
+    --r-pill: 999px;
+
+    --display: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+
+  /* This page deliberately stays single-theme: it's documenting a product
+     whose own UI is Ink-black with no light mode at all, so a faithful
+     rendering commits to that same dark world rather than inventing a
+     light variant the real app doesn't have. */
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--body);
+    font-size: 15.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(255,61,140,.28); color: #fff; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-press); text-decoration: underline; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--display);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    color: var(--paper);
+    margin: 0;
+  }
+
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--carbon-2);
+    border: 1px solid var(--hair);
+    border-radius: 5px;
+    padding: 0.1em 0.42em;
+    color: #ffd9a8;
+  }
+
+  .layout {
+    display: flex;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+
+  /* ---------- TOC rail (mirrors the app's own sidebar) ---------- */
+  .rail {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    width: 258px;
+    flex: none;
+    padding: 28px 14px 28px 28px;
+    overflow-y: auto;
+    border-right: 1px solid var(--hair);
+  }
+  .rail-brand {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 22px;
+    padding: 0 10px;
+  }
+  .rail-brand .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--spectrum);
+    flex: none;
+  }
+  .rail-brand b { font-family: var(--display); font-size: 14.5px; letter-spacing: -0.01em; }
+  .rail-brand span { font-size: 11.5px; color: var(--ash-2); }
+
+  .rail nav a {
+    display: block;
+    padding: 7px 10px;
+    border-radius: var(--r-md);
+    font-size: 13.3px;
+    font-weight: 500;
+    color: var(--ash);
+    position: relative;
+    transition: background-color .12s, color .12s;
+  }
+  .rail nav a:hover { background: var(--carbon-3); color: var(--paper); text-decoration: none; }
+  .rail nav a.active {
+    background: var(--carbon-2);
+    color: var(--paper);
+  }
+  .rail nav a.active::before {
+    content: "";
+    position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 16px; border-radius: 3px;
+    background: var(--accent);
+  }
+  .rail .group-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    color: var(--ash-2);
+    padding: 14px 10px 4px;
+    font-weight: 600;
+  }
+  .rail .group-label:first-of-type { padding-top: 2px; }
+
+  /* ---------- Main content ---------- */
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: 56px 56px 120px;
+    max-width: 900px;
+  }
+
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ash);
+    margin-bottom: 14px;
+  }
+  .hero-eyebrow .bar { width: 22px; height: 3px; border-radius: 2px; background: var(--spectrum); }
+  h1.title { font-size: 34px; font-weight: 700; margin-bottom: 12px; }
+  .subtitle { font-size: 16.5px; color: var(--ash); max-width: 62ch; margin-bottom: 26px; }
+
+  .pillrow { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 44px; }
+  .pill {
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: var(--r-pill);
+    background: var(--carbon-2); border: 1px solid var(--hair); color: var(--ash);
+  }
+
+  section.block { margin-bottom: 64px; scroll-margin-top: 24px; }
+  section.block > .barhead { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  section.block > .barhead .rule { width: 28px; height: 3px; border-radius: 2px; background: var(--spectrum); flex: none; }
+  section.block h2 { font-size: 23px; font-weight: 700; }
+  section.block > .kicker { font-size: 13px; color: var(--ash-2); margin: 6px 0 22px; max-width: 68ch; }
+
+  h3 { font-size: 16.5px; font-weight: 650; margin: 26px 0 8px; }
+  h4 { font-size: 13.5px; font-weight: 650; color: var(--ash); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
+
+  p { margin: 0 0 12px; max-width: 72ch; }
+  p:last-child { margin-bottom: 0; }
+  ul, ol { margin: 0 0 12px; padding-left: 1.3em; max-width: 70ch; }
+  li { margin-bottom: 5px; }
+  li:last-child { margin-bottom: 0; }
+  strong { color: var(--paper); font-weight: 650; }
+
+  .card {
+    background: var(--carbon);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    padding: 22px 24px;
+    margin-bottom: 16px;
+  }
+  .card + .card { margin-top: -4px; }
+  .card h3:first-child { margin-top: 0; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* badges, matching the app's own Badge tone system */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 650;
+    padding: 3px 9px; border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .badge .dot { width: 5px; height: 5px; border-radius: 50%; }
+  .badge.success { background: rgba(52,211,153,.12); color: var(--success); }
+  .badge.success .dot { background: var(--success); }
+  .badge.warning { background: rgba(251,191,36,.12); color: var(--warning); }
+  .badge.warning .dot { background: var(--warning); }
+  .badge.danger { background: rgba(251,113,133,.12); color: var(--danger); }
+  .badge.danger .dot { background: var(--danger); }
+  .badge.cyan { background: rgba(30,180,255,.12); color: var(--cyan); }
+  .badge.violet { background: rgba(158,77,242,.12); color: var(--violet); }
+  .badge.neutral { background: var(--carbon-2); color: var(--ash); border: 1px solid var(--hair); }
+
+  /* flow steps for the pipeline */
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 18px 0 22px; }
+  .flow-step {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 13px 0;
+    border-top: 1px solid var(--hair);
+  }
+  .flow-step:first-child { border-top: none; }
+  .flow-num {
+    flex: none; width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+    background: var(--carbon-2); border: 1px solid var(--hair-strong); color: var(--ash);
+    margin-top: 1px;
+  }
+  .flow-step.gate .flow-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .flow-body b { display: block; font-size: 14px; color: var(--paper); margin-bottom: 2px; }
+  .flow-body span { font-size: 13.3px; color: var(--ash); }
+
+  /* tables */
+  .twrap { overflow-x: auto; margin-bottom: 16px; border-radius: var(--r-lg); border: 1px solid var(--hair); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.3px; min-width: 560px; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--ash-2); font-weight: 650; background: var(--carbon-2);
+    padding: 10px 14px; border-bottom: 1px solid var(--hair);
+    white-space: nowrap;
+  }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--hair); vertical-align: top; color: var(--ash); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child, tbody th:first-child { color: var(--paper); font-weight: 550; }
+  tbody tr:hover td { background: rgba(255,255,255,.015); }
+  .num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
+
+  /* nav map / data model list */
+  .dmodel { display: flex; flex-direction: column; }
+  .dmodel-row {
+    display: grid; grid-template-columns: 150px 1fr; gap: 16px;
+    padding: 11px 0; border-top: 1px solid var(--hair);
+    font-size: 13.3px;
+  }
+  .dmodel-row:first-child { border-top: none; }
+  .dmodel-row .t { font-family: var(--mono); color: var(--cyan); font-size: 12.5px; padding-top: 1px; }
+  .dmodel-row .d { color: var(--ash); }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: rgba(255,61,140,.06);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    padding: 14px 18px;
+    font-size: 13.6px;
+    color: var(--ash);
+    margin: 16px 0;
+  }
+  .callout strong { color: var(--paper); }
+
+  .gapnote {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 13px 0; border-top: 1px solid var(--hair);
+  }
+  .gapnote:first-child { border-top: none; }
+  .gapnote .badge { margin-top: 2px; flex: none; }
+
+  footer.pagefoot {
+    max-width: 900px;
+    padding: 0 56px 60px;
+    color: var(--ash-2);
+    font-size: 12.5px;
+  }
+
+  /* mobile: TOC becomes a horizontal chip strip */
+  .mobiletoc { display: none; }
+  @media (max-width: 900px) {
+    .rail { display: none; }
+    .mobiletoc {
+      display: flex; gap: 8px; overflow-x: auto;
+      padding: 14px 16px; position: sticky; top: 0; z-index: 5;
+      background: rgba(8,8,10,.9); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--hair);
+    }
+    .mobiletoc a {
+      flex: none; font-size: 12.5px; font-weight: 600; color: var(--ash);
+      background: var(--carbon-2); border: 1px solid var(--hair);
+      padding: 6px 12px; border-radius: var(--r-pill); white-space: nowrap;
+    }
+    main { padding: 32px 20px 100px; }
+    footer.pagefoot { padding: 0 20px 60px; }
+    h1.title { font-size: 27px; }
+  }
+</style>
+
+<div class="layout">
+  <aside class="rail" id="rail">
+    <div class="rail-brand"><span class="dot"></span><b>Content Engine</b><span>— full rundown</span></div>
+    <nav id="railnav">
+      <a href="#overview">Overview</a>
+      <a href="#together">How it fits together</a>
+      <a href="#starting">Ways to start a draft</a>
+
+      <div class="group-label">Brand</div>
+      <a href="#brand-brain">The brand brain</a>
+      <a href="#branding-look">Getting your look</a>
+
+      <div class="group-label">Content</div>
+      <a href="#email">Email generation &amp; editing</a>
+      <a href="#blog">Blog generation &amp; editing</a>
+      <a href="#seo">SEO &amp; keyword research</a>
+
+      <div class="group-label">Delivery</div>
+      <a href="#publishing">Publishing</a>
+      <a href="#analytics">Performance</a>
+      <a href="#automation">Recurring automation</a>
+
+      <div class="group-label">Under the hood</div>
+      <a href="#models">Every AI model used</a>
+      <a href="#ui">The UI itself</a>
+      <a href="#data-model">Data model</a>
+      <a href="#tested">What's tested</a>
+      <a href="#gaps">Known gaps</a>
+    </nav>
+  </aside>
+
+  <div style="flex:1; min-width:0;">
+    <div class="mobiletoc">
+      <a href="#overview">Overview</a>
+      <a href="#together">Pipeline</a>
+      <a href="#brand-brain">Brand brain</a>
+      <a href="#email">Email</a>
+      <a href="#blog">Blog</a>
+      <a href="#seo">SEO</a>
+      <a href="#publishing">Publishing</a>
+      <a href="#models">Models</a>
+      <a href="#ui">UI</a>
+      <a href="#gaps">Gaps</a>
+    </div>
+
+    <main>
+      <section id="overview">
+        <p class="hero-eyebrow"><span class="bar"></span>Full technical rundown</p>
+        <h1 class="title">How the Content Engine actually works</h1>
+        <p class="subtitle">Everything you've built, end to end: what it does, how each piece works, what it uses, and how it all ties together. Written from what's actually in the code today, not the original plan docs — a few things have drifted from the spec (called out in <a href="#gaps">Known gaps</a>).</p>
+        <div class="pillrow">
+          <span class="pill">Next.js 15 · React 19</span>
+          <span class="pill">Supabase (Postgres + Auth)</span>
+          <span class="pill">Claude Sonnet 4.6 + Haiku 4.5</span>
+          <span class="pill">Gemini 3.1 Flash Image</span>
+          <span class="pill">MailerLite</span>
+          <span class="pill">Sanity</span>
+          <span class="pill">DataForSEO</span>
+          <span class="pill">Tailwind v4</span>
+        </div>
+
+        <div class="card">
+          <p>In one sentence: it's an <strong>automated content engine for Mogul Design Agency</strong> that picks a topic from a stored brand strategy, has Claude draft an on-brand email or blog post in your voice, routes every draft through a mandatory human approval gate, then publishes to MailerLite (email) and Sanity (blog) — with SEO research, editing tools, images, analytics, and now recurring schedules layered on top. One brand today, built so a second brand is a config change, not a rewrite.</p>
+        </div>
+      </section>
+
+      <section class="block" id="together">
+        <div class="barhead"><span class="rule"></span><h2>How it all fits together</h2></div>
+        <p class="kicker">One spine of data, one pipeline every piece of content walks through.</p>
+
+        <p>Everything hangs off one chain of foreign keys in Postgres. Each table is one link between "what the brand believes" and "what got published":</p>
+
+        <div class="card dmodel">
+          <div class="dmodel-row"><div class="t">brands</div><div class="d">One row today (Mogul). Voice, positioning, visual identity, guidelines, SEO defaults, MailerLite/Sanity config — the whole brand brain lives here.</div></div>
+          <div class="dmodel-row"><div class="t">strategies</div><div class="d">The current funnel definition for the brand (which CTA type fires at which stage).</div></div>
+          <div class="dmodel-row"><div class="t">icps</div><div class="d">Ideal customer profiles: who you're writing for, their pains, objections, vocabulary.</div></div>
+          <div class="dmodel-row"><div class="t">pillars → clusters</div><div class="d">The themes you want to own, each expanded into a hub-and-spoke set of topics (the "topic cluster" SEO model).</div></div>
+          <div class="dmodel-row"><div class="t">topics</div><div class="d">The actual spokes — one row per piece of content, carrying its keyword, intent, funnel stage, and status. <strong>The handoff point</strong>: the pipeline reads a topic and writes its status back.</div></div>
+          <div class="dmodel-row"><div class="t">content_jobs → drafts</div><div class="d">One job per generation request; one draft row per version (v1, v2 after a rejection, etc.).</div></div>
+          <div class="dmodel-row"><div class="t">approvals</div><div class="d">The audit trail of every approve/reject decision.</div></div>
+          <div class="dmodel-row"><div class="t">publications</div><div class="d">One row per (job, target) — the record that makes publishing idempotent.</div></div>
+          <div class="dmodel-row"><div class="t">performance</div><div class="d">A time series of stats pulled back from MailerLite after send.</div></div>
+        </div>
+
+        <p>And the pipeline that walks that chain, for every single piece of content:</p>
+
+        <div class="card">
+          <div class="flow">
+            <div class="flow-step">
+              <div class="flow-num">1</div>
+              <div class="flow-body"><b>Pick or research a topic</b><span>From the Content Plan tree, a quick-chat, or a full campaign interview — see <a href="#starting">Ways to start a draft</a>.</span></div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-num">2</div>
+              <div class="flow-body"><b>Assemble the brief</b><span>Brand voice, positioning, approved guidelines, the topic's (optionally DataForSEO-validated) keyword, and the resolved CTA all get stitched into one prompt.</span></div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-num">3</div>
+              <div class="flow-body"><b>Claude drafts it</b><span>Sonnet 4.6, extended thinking, streamed — full copy plus a complete designed HTML document, in one call.</span></div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-num">4</div>
+              <div class="flow-body"><b>Automatic quality checks</b><span>Banned terms, keyword placement, contrast, length — some by a second cheap Claude pass, some by plain code. Never blocks generation, only flags issues.</span></div>
+            </div>
+            <div class="flow-step gate">
+              <div class="flow-num">✓</div>
+              <div class="flow-body"><b>You review it</b><span>Approve, click-to-edit anything, or reject with feedback for a redo. <strong>Nothing ever skips this.</strong> It is enforced in code, not just the UI.</span></div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-num">5</div>
+              <div class="flow-body"><b>Publish</b><span>One click sends the approved draft to MailerLite or creates a Sanity draft document. Safe to retry — it can never double-post.</span></div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-num">6</div>
+              <div class="flow-body"><b>Measure</b><span>Pull real open/click stats back whenever you want. (Feeding this back into topic selection is the one piece not built yet.)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout"><strong>The one rule that never bends:</strong> nothing publishes without you explicitly clicking Approve, then explicitly clicking Publish/Send. There is no auto-publish path anywhere in the code — even the new recurring schedules (§ Automation) only auto-<em>generate</em>, never auto-send.</div>
+      </section>
+
+      <section class="block" id="starting">
+        <div class="barhead"><span class="rule"></span><h2>Three ways to start a draft</h2></div>
+        <p class="kicker">Different front doors, same pipeline underneath.</p>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>Quick chat on Home <span class="badge cyan">fastest</span></h3>
+            <p>The chat embedded right on your Home screen. Say what you want in plain language ("let's create an email for retractable banners"); it locks in a goal/key message/angle, spins up a topic if needed, and generates on your go-ahead. Backed by <code>/api/create/chat</code>.</p>
+          </div>
+          <div class="card">
+            <h3>New Campaign <span class="badge violet">most thorough</span></h3>
+            <p>Create → a dedicated strategic interview (<code>/campaigns/new</code>). Can also notice things you say about your voice mid-conversation and propose adding them to your brand profile — you explicitly confirm before anything saves. Backed by <code>/api/campaigns/chat</code>.</p>
+          </div>
+          <div class="card">
+            <h3>Content Plan <span class="badge neutral">browse &amp; pick</span></h3>
+            <p>Create → the actual pillar → cluster → topic tree you're building topical authority around. Tap Generate on any topic directly, or use <strong>Suggest topics</strong> — Claude proposes 5–8 new topic ideas from everything it knows about the brand, shown with checkboxes, saved only for the ones you pick.</p>
+          </div>
+          <div class="card">
+            <h3>Reject &amp; regenerate <span class="badge warning">mid-flight</span></h3>
+            <p>Not a new draft, but the fourth way content gets (re)written: on any draft awaiting review, reject with specific feedback and Claude writes a meaningfully different version addressing it — capped at 3 versions per topic before it's time to start fresh.</p>
+          </div>
+        </div>
+        <p style="margin-top:6px; font-size:13.3px; color:var(--ash-2);">All four ultimately call the same <code>/api/generate</code> pipeline — nothing about quality or the approval gate changes based on which door you walked in through.</p>
+      </section>
+
+      <section class="block" id="brand-brain">
+        <div class="barhead"><span class="rule"></span><h2>The brand brain</h2></div>
+        <p class="kicker">Everything downstream — every email, every blog post — is checked against this. It's the single biggest quality lever in the whole app.</p>
+
+        <h3>Setting it up</h3>
+        <div class="grid2">
+          <div class="card">
+            <h4>Onboarding chat</h4>
+            <p>First-run conversation, one question at a time: brand name → description → tagline → 3 differentiators → competitors → your ideal customer → voice &amp; tone → sender name/email → whether to auto-generate a hero image on every draft. It never asks about colors, fonts, or logo — those live in the other two setup paths below. Each answer writes straight to your brand profile as you go.</p>
+          </div>
+          <div class="card">
+            <h4>Import from your website</h4>
+            <p>Paste a URL (onboarding or Settings). It reads your homepage plus up to 7 linked pages (about, services, pricing, contact, portfolio — prioritized in that order), falling back to a full headless-browser render if the site is JS-only. Colors, fonts, and logo candidates are extracted with plain code, never guessed by AI; Claude can only choose <em>from</em> those real candidates for voice, positioning, and products — never invent a color it didn't actually see on your site. Nothing saves until you review and approve it field by field.</p>
+          </div>
+        </div>
+
+        <h3>The Settings forms</h3>
+        <p>Nine focused forms, each independent, none auto-saving: <strong>Brand basics</strong> (name, sender identity, SEO geography), <strong>Voice</strong> (voice, tone, example posts — the single biggest lever, banned terms, and your 3-slot CTA library), <strong>Positioning</strong> (description, tagline, differentiators, competitors — has a "✨ Suggest with AI" assist), <strong>Visual identity</strong> (logo, 6 brand colors, fonts, footer/legal info, social links, the auto-image toggle + style), <strong>Brand guidelines</strong>, <strong>Primary ICP</strong>, and <strong>Funnel</strong> (maps each buyer-journey stage to a CTA type).</p>
+
+        <h3>The brand guidelines document</h3>
+        <p>Two things share this name, worth separating:</p>
+        <ul>
+          <li><strong>The guidelines data</strong> — voice &amp; tone, messaging pillars, do/don't language, CTA philosophy. Claude synthesizes a first draft from everything else on file; you edit it in a form and explicitly Save, which is the only thing that stamps it "approved" and starts injecting it into every generation prompt as the default creative direction.</li>
+          <li><strong>The guidelines document</strong> (Settings → Generate brand identity) — a polished, downloadable brand deck rendered <em>from</em> that data plus your positioning and visual identity. This is <strong>not</strong> a new AI call — it's a pure template render, in two swappable looks: <span class="badge violet">Bold Spectrum</span> (dark, gradient-forward) or <span class="badge neutral">Clean Minimal</span> (light, editorial). Download as a standalone <code>.html</code> file any time.</li>
+        </ul>
+
+        <h3>No website yet? A from-scratch identity generator</h3>
+        <p>One cheap AI call picks 6 colors plus a font pairing from a curated list of 6 email-safe combinations — it can't invent an arbitrary font, only choose a key. Code then force-corrects the result for accessibility afterward: if the model's text/background pairing fails contrast, it's fixed automatically; the accent color is darkened step by step until white button text clears a safe contrast ratio.</p>
+
+        <h3>How a topic picks its call-to-action</h3>
+        <p>A short, deterministic chain, run for every single draft:</p>
+        <div class="card" style="font-family:var(--mono); font-size:12.8px; color:var(--ash); line-height:2;">
+          topic.funnel_stage <span style="color:var(--accent)">→</span> strategy.funnel_definition[stage].cta_type <span style="color:var(--accent)">→</span> voice_profile.cta_library[cta_type]
+        </div>
+        <p>A topic tagged <em>consideration</em>, say, resolves to the <code>cta_type</code> your Funnel settings assigned that stage (e.g. <code>portfolio</code>), which resolves to whatever CTA copy you wrote for that slot in Voice settings (e.g. "See the work →"). Claude gets that as an <em>intent</em>, not a literal string to paste — it writes the actual button text in your voice. Missing a link in the chain just falls back to a soft "reply or learn more" invitation.</p>
+      </section>
+
+      <section class="block" id="branding-look">
+        <div class="barhead"><span class="rule"></span><h2>Getting your brand's look into every draft</h2></div>
+        <p class="kicker">Visual identity isn't decorative metadata — it's rendered directly into the HTML of every email and blog post.</p>
+        <p>Your logo, 6 named colors, and heading/body font strings (set in Settings → Visual identity, or extracted from your site, or generated from scratch — see above) are deterministic tokens: the templates and the AI-designed HTML both read them directly, so a color change in Settings shows up in the very next draft with no other step. Dark mode is built the same way on both paths — a single style block with a <code>prefers-color-scheme: dark</code> override on classed elements, so a draft still looks right if a mail client strips the rest of the CSS. The review screen's Auto/Light/Dark toggle previews (and can force) either mode without ever touching the saved draft.</p>
+      </section>
+
+      <section class="block" id="email">
+        <div class="barhead"><span class="rule"></span><h2>Email generation &amp; editing</h2></div>
+        <p class="kicker">One Claude call designs the whole email — copy and layout together — then three separate editing tools let you change any of it afterward.</p>
+
+        <h3>Generating a draft</h3>
+        <p>Claude (Sonnet 4.6, extended "adaptive" thinking) gets one job: return structured copy — subject, preheader, headline, 1–8 body sections, CTA — <em>and</em> a complete, ready-to-send HTML document, in a single forced tool call. It's designing the layout itself, not filling in a template; it's told to build an Outlook-safe table layout, tag every region (<code>header</code>/<code>eyebrow</code>/<code>headline</code>/<code>body</code>/<code>cta</code>/<code>footer</code>) so it can be click-edited later, and bake in the dark-mode CSS. Length and section count are held to a target range that varies by email type (a promotional blast: 120–250 words; a full newsletter: 300–700) — enforced both in the prompt and by a code check that will re-ask Claude once if it comes in short.</p>
+        <p>If the model's HTML fails a sanity check (missing structure, no dark-mode CSS, or contains something it shouldn't like a script tag), the app quietly falls back to one of 3 hand-built code templates for that email's type instead — so a bad design pass never ships a broken email.</p>
+
+        <h3>Editing a draft — three tools, one hotspot system</h3>
+        <p>The preview <em>is</em> the editor. Every tagged region gets an invisible hotspot; tap one and a sheet opens with three tabs:</p>
+        <div class="twrap"><table>
+          <thead><tr><th>Tool</th><th>What it does</th><th>Model used</th></tr></thead>
+          <tbody>
+            <tr><td>Wording</td><td>Type exact replacement text, or ask Claude to rephrase this one spot</td><td>Haiku, retried once, escalates to Sonnet only if both attempts fail to find a safe match</td></tr>
+            <tr><td>Design</td><td>Color, background, spacing, font size, alignment, bold — instant, native controls</td><td class="num">none — pure code</td></tr>
+            <tr><td>Style</td><td>Fuzzy free-text asks like "make it bolder" or a suggestion chip</td><td>same Haiku → retry → Sonnet ladder</td></tr>
+          </tbody>
+        </table></div>
+        <p>Every AI-assisted edit works by find-and-replace on the actual HTML: the model returns the exact text to find and what to put instead, and the code refuses to apply anything ambiguous — if that text appears more than once in the email and the model didn't say "replace all of them" on purpose, it errors instead of guessing which one you meant. One shared, server-saved Undo stack (10 steps deep) covers every edit type, so undo survives a page reload.</p>
+        <p><strong>Redesign</strong> is the bigger hammer: regenerate the entire visual design from your existing copy in one shot — useful when a color change is baked into fifty little spots at once. Optionally steer it first ("darker, purple accent"). It never touches your words, only the design.</p>
+
+        <h3>Hero images</h3>
+        <p>Opt in per draft, or set a brand-wide preference to auto-generate one on every first draft. By default Haiku writes the actual image scene description first (seeing any reference image you attached), then Google's Gemini 3.1 Flash Image renders it, and the result is compressed and stored in your own image bucket. Three placement choices — above the headline, below the headline, or above the button — and regenerating a draft never re-triggers a fresh image or brings back one you deliberately removed.</p>
+        <p><strong>You control how literally the model takes you.</strong> When you type a subject, a toggle picks between <em>AI sharpens it</em> (Haiku adds visual detail around your description, but everything you named is a hard constraint it can't drop or swap) and <em>Use my words exactly</em> (your text goes to the image model word for word — only the chosen style scaffold and brand palette are added, and the Haiku call is skipped entirely, so it's also cheaper). Every generated image also saves the exact final prompt that produced it: open the image sheet and "Prompt behind the current image" shows it, editable, with a one-tap "Regenerate with this prompt" that sends your edited version verbatim.</p>
+
+        <h3>Quality gate before it can publish</h3>
+        <p>Two independent layers. First, a cheap Claude pass flags banned words, checks where your target keyword actually landed, and writes the SEO meta title/description — informational only. Second, and this is the part that actually can't be bypassed: the instant you hit Approve, the server re-scans the exact HTML you're approving (edits included) for any word on your banned list, using your live list, not a stale snapshot. If it finds one, approval is refused with a 409 until you either fix the wording or explicitly click "Approve anyway" — a genuine code-level block, not a UI suggestion.</p>
+      </section>
+
+      <section class="block" id="blog">
+        <div class="barhead"><span class="rule"></span><h2>Blog generation &amp; editing</h2></div>
+        <p class="kicker">Same pipeline shape as email, one real difference: the editor is the article itself, and SEO checks are pure code, not a second AI call.</p>
+
+        <h3>Generating a post</h3>
+        <p>One Claude call returns title, URL slug, meta title/description, intro, 2 or more sections (heading + body), conclusion, and a call-to-action — no separate QA pass the way email gets. The post's format is auto-detected from its title and intent (no extra step, no model call):</p>
+        <div class="twrap"><table>
+          <thead><tr><th>Format</th><th>Length</th><th>Job</th></tr></thead>
+          <tbody>
+            <tr><td>Pillar</td><td class="num">2,500–4,000 words</td><td>The definitive piece someone bookmarks</td></tr>
+            <tr><td>How-to</td><td class="num">1,500–2,500 words</td><td>Numbered, actually actionable steps</td></tr>
+            <tr><td>Listicle</td><td class="num">1,500–2,500 words</td><td>Real depth per item, not filler</td></tr>
+            <tr><td>Case study</td><td class="num">1,500–2,500 words</td><td>Problem → approach → results (numbers) → takeaway</td></tr>
+            <tr><td>Thought leadership</td><td class="num">1,000–1,800 words</td><td>A clear stance, argued, voice-forward</td></tr>
+            <tr><td>Landing</td><td class="num">800–1,500 words</td><td>Outcome-led page for one specific offer</td></tr>
+          </tbody>
+        </table></div>
+        <p>Titles starting "How to…", numbered listicle patterns ("7 Signs…"), the words "case study," and topics tagged for the top of your funnel each nudge the format automatically — or you can force one directly when generating.</p>
+
+        <h3>Editing — click directly on the article</h3>
+        <p>Unlike email, there's no separate form: the rendered preview itself is the editor. Every part of the article — headline, slug, intro, each section's heading and body, the conclusion, the call-to-action — has an invisible edit hotspot right on the live preview. Tap one, a small sheet opens pre-filled with that exact text, save, and the whole preview re-renders from the updated copy so what you see is always exactly what would publish. Page title and meta description live in a separate small "SEO details" sheet, since they're search-engine metadata, not part of the visible article.</p>
+        <p>Reject-and-regenerate works identically to email: specific feedback, capped at 3 versions, generation continues in the background while you keep working.</p>
+
+        <h3>Why it converts to something called "Portable Text"</h3>
+        <p>Sanity — your CMS — doesn't store rich content as HTML or Markdown; it needs a structured format called Portable Text. The app has its own small, hand-built converter (deliberately not Sanity's own tool, so it can be tested in isolation) that turns the constrained Markdown your posts are written in — headings, bullets, numbered lists, quotes, bold, italic, links — into that structure at publish time. Nothing more exotic than that subset is supported, by design, since that's also all the generation prompt itself is allowed to produce.</p>
+      </section>
+
+      <section class="block" id="seo">
+        <div class="barhead"><span class="rule"></span><h2>SEO &amp; keyword research</h2></div>
+        <p class="kicker">This part isn't AI at all — it's a straight data lookup that makes the AI's brief sharper.</p>
+        <p>Every topic starts with a keyword you (or the topic-suggestion feature) typed in as a guess. Tap <strong>Research</strong> and the app fires four real-time calls to DataForSEO — search volume, difficulty score, buyer intent, and related keywords — all in parallel, in about a second. From that point on, every generation brief for that topic upgrades from a guessed keyword to something like:</p>
+        <div class="callout">"TARGET KEYWORD (DataForSEO-validated): email marketing automation (~2,400/mo searches, difficulty 34/100, commercial intent)" — plus up to 4 secondary keywords to work in naturally.</div>
+        <p>The same upgrade feeds both email and blog generation identically — one lookup, both channels benefit. Once researched, the topic shows a colored badge (green if the difficulty is comfortably within your target range, amber if it's a harder climb) right on the Content Plan.</p>
+        <p>Separately, every draft — email or blog — gets checked for whether the keyword actually landed somewhere that matters (subject/title, first paragraph, a heading) and for text-contrast accessibility (WCAG AA, 4.5:1) wherever the design sets an explicit text/background color pair.</p>
+      </section>
+
+      <section class="block" id="publishing">
+        <div class="barhead"><span class="rule"></span><h2>Publishing</h2></div>
+        <p class="kicker">One approve click, one publish click. Retrying can never send it twice.</p>
+
+        <div class="grid2">
+          <div class="card">
+            <h4>Email → MailerLite</h4>
+            <p>Publish creates a real campaign, then either sends it instantly or schedules it for later (using your MailerLite account's own timezone). Every email is guaranteed to carry the required <code>{$unsubscribe}</code> tag — enforced three separate times before it can ever leave, at generation, at every edit, and one final hard check right at send.</p>
+          </div>
+          <div class="card">
+            <h4>Blog → Sanity</h4>
+            <p>Publish creates a <strong>draft</strong> document in your Sanity studio — never live — with the hero image uploaded as a real, referenced asset. Making it live is still your call, inside Sanity itself.</p>
+          </div>
+        </div>
+
+        <p>You can use your own MailerLite/Sanity account (Settings → Connections, credentials encrypted at rest) or fall back to the ones in the server's own configuration — whichever you've connected wins automatically, and nothing about a saved credential is ever shown back to you, only whether one is set. Every publish is checked against a record of what's already gone out before it ever calls MailerLite or Sanity again, so a retried click, a slow connection, or a double-tap can never post the same thing twice.</p>
+      </section>
+
+      <section class="block" id="analytics">
+        <div class="barhead"><span class="rule"></span><h2>Performance</h2></div>
+        <p class="kicker">A tap, not a poll — you decide when to check.</p>
+        <p>Once an email has been sent, a "Refresh stats" button on that draft pulls real numbers straight from MailerLite: sent, opens, open rate, clicks, click rate. Each refresh is appended as a new snapshot, never overwriting the last one, so you're building a real history rather than just a live number that resets. Blog posts don't have this yet — Sanity has no analytics of its own; that's designed to come from Google Search Console later, not built yet.</p>
+      </section>
+
+      <section class="block" id="automation">
+        <div class="barhead"><span class="rule"></span><h2>Recurring automation <span class="badge violet">new</span></h2></div>
+        <p class="kicker">Set a cadence once; a draft shows up for you to review on schedule, forever.</p>
+        <p>Settings → Recurring schedules lets you set a channel (email or blog), a cadence (daily/weekly/every-2-weeks/monthly), and optionally force a specific type. A daily check picks up anything due, generates a real draft for your oldest topic that hasn't been touched yet, and leaves it awaiting review — <strong>exactly</strong> like a manually triggered draft, with the same approval gate, same editing tools, same everything. A small badge on Home tells you when a scheduled draft is sitting there waiting. If there's genuinely nothing left to write about, it skips that tick cleanly and tries again next time rather than erroring.</p>
+        <p>This never sends or publishes anything by itself — it only ever gets you to "ready for your review," the same finish line every other path in this app stops at.</p>
+      </section>
+
+      <section class="block" id="models">
+        <div class="barhead"><span class="rule"></span><h2>Every AI model actually in use</h2></div>
+        <p class="kicker">Two Claude models do all the writing; one Gemini model does all the images.</p>
+
+        <div class="twrap"><table>
+          <thead><tr><th>Model</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td><code>claude-sonnet-4-6</code></td><td>Every full draft (email &amp; blog), redesigns, brand guidelines synthesis, website-import extraction, topic suggestions, all 3 chat flows (onboarding/campaign/quick-create), "Suggest with AI." The one model doing all the substantial writing.</td></tr>
+            <tr><td><code>claude-haiku-4-5-20251001</code></td><td>Cheap, fast, mechanical work: the email QA pass, first attempts at click-to-edit wording/style changes, crafting the hero-image scene description, and the from-scratch color/font generator.</td></tr>
+            <tr><td><code>gemini-3.1-flash-image</code></td><td>The only non-Anthropic model — actually renders every hero image, after Haiku writes the scene prompt.</td></tr>
+          </tbody>
+        </table></div>
+
+        <p style="font-size:13.3px; color:var(--ash-2);">On-screen cost estimates use Sonnet at $3 in / $15 out per million tokens, Haiku at $1 in / $5 out, and a flat ~$0.04 per generated image — a display estimate, not your real bill.</p>
+
+        <h3>Cost &amp; rate protection</h3>
+        <p>Three layers keep spend boring: <strong>prompt caching</strong> marks every large reusable system prompt (brand voice, guidelines, design system) cacheable, so repeat generations pay ~10% of the input price for that prefix; a <strong>per-route rate brake</strong> stops runaway loops (8 new drafts or 6 image generations per minute, with a friendly "slow down" message rather than a crash); and an optional <strong>daily budget</strong> (<code>DAILY_SPEND_LIMIT_USD</code>) blocks new AI work once the last 24 hours of estimated spend — the same numbers the /logs page shows — crosses your cap. Anthropic calls also retry rate-limit and overload errors automatically with backoff (4 attempts), and each Gemini image render gets one spaced retry on a transient failure, so a busy minute degrades to "slightly slower," not "failed."</p>
+      </section>
+
+      <section class="block" id="ui">
+        <div class="barhead"><span class="rule"></span><h2>The UI itself</h2></div>
+        <p class="kicker">One native-feeling shell, one design language, reused on every single screen — nothing here is one-off.</p>
+
+        <h3>The shell</h3>
+        <p>Five destinations, always in the same order: <strong>Home, Emails, Blogs, Create, Settings</strong> — a left sidebar on a wide screen, a sticky top bar and bottom tab bar on a phone, same routes either way. Home leads with the quick-create chat, then a brand-readiness checklist (only shows up while something's still missing), your at-a-glance stats, the scheduled-draft nudge when there is one, and your 5 most recent emails.</p>
+
+        <h3>The look — "Bold spectrum"</h3>
+        <p>Deliberately dark, deliberately loud in exactly one place: an ink-black canvas, raised "carbon" surfaces for every card, and a single four-color spectrum (amber → magenta → violet → cyan) that only ever appears as one accent per screen — a thin rule under a heading, a left-edge marker on the active nav item — never as a flat wash across the whole page. Home adds the one permitted exception: a soft ambient <em>aura</em> of the same spectrum bleeding into the black behind the top of the screen, a gradient hairline ring and halo around the create chat, and a faint brand glow under the stat tiles — light from the gradient, not the gradient itself. Hot magenta is the one interactive/focus color everywhere: buttons, links, the caret in every text field. This page you're reading right now is built in that exact same palette, on purpose.</p>
+
+        <h3>One shared component vocabulary</h3>
+        <p>Every edit surface in the app is the same sliding <strong>Sheet</strong>; every status is the same colored <strong>Badge</strong> (amber = in review, green = approved, red = rejected); every destructive action goes through the same confirm dialog; every list — topics, drafts, connections, schedules — is the same grouped row style. The draft review screen renders your actual final HTML live inside a sandboxed preview, so what you're looking at while you edit is genuinely what would publish, not an approximation of it.</p>
+      </section>
+
+      <section class="block" id="data-model">
+        <div class="barhead"><span class="rule"></span><h2>Data model, at a glance</h2></div>
+        <p class="kicker">The full chain, spelled out once more for reference.</p>
+        <div class="twrap"><table>
+          <thead><tr><th>Table</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td>brands</td><td>Voice, positioning, visual identity, guidelines, SEO defaults, publishing config</td></tr>
+            <tr><td>strategies / icps</td><td>Funnel-to-CTA map; audience profiles</td></tr>
+            <tr><td>pillars / clusters / topics</td><td>The content plan: themes → hub-and-spoke topic clusters → individual pieces</td></tr>
+            <tr><td>content_jobs / drafts</td><td>One job per generation request; one row per draft version</td></tr>
+            <tr><td>approvals</td><td>Every approve/reject decision, with feedback</td></tr>
+            <tr><td>publications</td><td>What's actually gone out, and where — the idempotency record</td></tr>
+            <tr><td>performance</td><td>Time-series of pulled-back email stats</td></tr>
+            <tr><td>content_schedules</td><td>Recurring auto-generation cadences (new)</td></tr>
+            <tr><td>brand_integrations</td><td>Your own encrypted MailerLite/Sanity credentials, per brand</td></tr>
+            <tr><td>products / brand_memory</td><td>Real offers content can pitch; durable facts the create-chat has learned</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="block" id="tested">
+        <div class="barhead"><span class="rule"></span><h2>What's actually tested</h2></div>
+        <p>86 automated tests across the parts of the app that are pure logic and therefore safe to test without a real database: the blog Markdown → Portable Text converter, credential encryption, hero-image placement math, the email dark/light preview toggle, DataForSEO response normalization, the recurring-schedule cadence math, and both generation prompts' pure helper functions. Everything that touches Supabase directly is instead verified live, by hand, against the real database — which is exactly how every feature in this document got checked before shipping.</p>
+      </section>
+
+      <section class="block" id="gaps">
+        <div class="barhead"><span class="rule"></span><h2>Known gaps</h2></div>
+        <p class="kicker">Small, honest, non-urgent — nothing here blocks anything you're using today.</p>
+        <div class="card">
+          <div class="gapnote"><span class="badge neutral">no UI yet</span><div><strong>Keyword difficulty comfort range</strong> has no Settings field — it's usable today, just only changeable by editing the database directly.</div></div>
+          <div class="gapnote"><span class="badge neutral">by design</span><div><strong>Blog quality checks are pure code</strong>, not a second Claude pass the way email gets — cheaper, but it means no AI-written readability note for blog posts.</div></div>
+          <div class="gapnote"><span class="badge neutral">docs vs. code</span><div>The original build plan mentions using <strong>Opus for harder pieces</strong> — that never got wired in. Every draft, in practice, uses Sonnet 4.6.</div></div>
+          <div class="gapnote"><span class="badge neutral">stale doc</span><div>The README references a separate "content assistant" chat component — it's since been folded entirely into the quick-create chat on Home; there's no separate component anymore.</div></div>
+          <div class="gapnote"><span class="badge neutral">cosmetic</span><div>A schedule's "Run now" button doesn't refresh its own row's last-run text until you reload the page (Pause/Resume and Delete update instantly).</div></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="pagefoot">Generated from a direct, section-by-section read of the actual codebase — not the original planning docs — so it reflects what's really running today.</footer>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('#railnav a'));
+    var sections = links.map(function (a) {
+      return document.getElementById(a.getAttribute('href').slice(1));
+    });
+    function onScroll() {
+      var y = window.scrollY + 120;
+      var current = sections[0];
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i] && sections[i].offsetTop <= y) current = sections[i];
+      }
+      links.forEach(function (a) {
+        a.classList.toggle('active', current && a.getAttribute('href') === '#' + current.id);
+      });
+    }
+    document.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>

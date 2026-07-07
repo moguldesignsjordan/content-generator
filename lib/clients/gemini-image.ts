@@ -37,6 +37,25 @@ function getGenAI(): GoogleGenAI {
   return client;
 }
 
+/**
+ * One retry on transient failures (rate limit / overload / flaky network).
+ * Image renders are ~20s user-visible waits; a single spaced retry rides out
+ * a 429 or 503 without doubling the worst-case wait the way a chain would.
+ */
+async function withTransientRetry<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const transient = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded|fetch failed|ECONNRESET/i.test(
+      msg,
+    );
+    if (!transient) throw err;
+    await new Promise((r) => setTimeout(r, 4000));
+    return call();
+  }
+}
+
 export interface GeminiImageArgs {
   /** The full image-generation prompt (already style-scaffolded). */
   prompt: string;
@@ -69,18 +88,20 @@ export async function generateGeminiImage(
       ]
     : prompt;
 
-  const interaction = await getGenAI().interactions.create({
-    model: IMAGE_MODEL,
-    input,
-    // Don't retain requests/responses server-side; we host the result ourselves.
-    store: false,
-    response_format: {
-      type: "image",
-      mime_type: "image/jpeg",
-      aspect_ratio: aspectRatio,
-      image_size: "1K",
-    },
-  });
+  const interaction = await withTransientRetry(() =>
+    getGenAI().interactions.create({
+      model: IMAGE_MODEL,
+      input,
+      // Don't retain requests/responses server-side; we host the result ourselves.
+      store: false,
+      response_format: {
+        type: "image",
+        mime_type: "image/jpeg",
+        aspect_ratio: aspectRatio,
+        image_size: "1K",
+      },
+    }),
+  );
 
   const image = interaction.output_image;
   if (!image?.data) {

@@ -66,8 +66,9 @@ const STYLE_SCAFFOLDS: Record<ContentImageStyle, string> = {
 };
 
 // Appended to the final render prompt when the user attached a reference
-// image, telling the image model how to use it.
-const REFERENCE_DIRECTIVES: Record<ReferenceUse, string> = {
+// image, telling the image model how to use it. Exported so the pipeline's
+// exact-prompt path can append the same directive without the scaffold.
+export const REFERENCE_DIRECTIVES: Record<ReferenceUse, string> = {
   style:
     "A reference image is attached: match its visual style, mood, lighting, " +
     "and treatment, but keep the scene described above (ignore the " +
@@ -148,6 +149,10 @@ export function buildImagePromptMessages(args: {
     "You write scene descriptions for marketing hero images (emails and blog",
     "posts). Given the piece's topic and headline, describe ONE concrete,",
     "visually interesting scene that represents the idea. Rules:",
+    "- If the user asked for a specific subject, that request is a hard",
+    "  constraint: keep EVERY element they named, in the role they gave it.",
+    "  You may add composition detail around their elements, but never remove,",
+    "  replace, or reinterpret them into something else.",
     "- Concrete and specific: objects, settings, actions. Never abstract nouns alone.",
     "- No style, palette, lighting, or quality words; a fixed scaffold adds those.",
     "- No text, letters, numbers, screens with readable UI, or logos in the scene.",
@@ -174,7 +179,7 @@ export function buildImagePromptMessages(args: {
     `CHOSEN STYLE: ${style}`,
     referenceLine,
     subject
-      ? `THE USER ASKED FOR THIS SUBJECT (honor it, sharpen it visually): ${subject}`
+      ? `THE USER ASKED FOR THIS SUBJECT (hard constraint, keep every element they named): ${subject}`
       : "No subject given: infer the strongest visual from the topic and headline.",
     "",
     "Call save_image_prompt with the scene and alt text.",

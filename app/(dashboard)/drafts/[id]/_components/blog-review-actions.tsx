@@ -426,6 +426,7 @@ export function BlogReviewActions({
         draftId={draftId}
         kind="blog"
         hasImage={!!heroImage}
+        promptUsed={heroImage?.prompt}
         onApplied={(newHtml, newImage) => {
           setHtml(newHtml);
           setHeroImage(newImage);

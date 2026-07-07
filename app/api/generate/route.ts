@@ -6,6 +6,7 @@ import type { BlogType, EmailType } from "@/lib/db/types";
 import { EMAIL_LENGTH_TARGETS } from "@/prompts/generate-email";
 import { BLOG_LENGTH_TARGETS } from "@/prompts/generate-blog";
 import { logError } from "@/lib/log";
+import { guardAiRoute } from "@/lib/ai-guard";
 
 // Only creates the draft shell here (fast DB writes) and returns immediately.
 // The actual generation runs when the draft page opens the generate-stream
@@ -20,6 +21,12 @@ export async function POST(request: Request) {
       },
       { status: 503 },
     );
+  }
+
+  // Rate + daily-budget brake before any DB write or downstream model spend.
+  const guard = await guardAiRoute("generate", { limit: 8 });
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
 
   let topicId: string | undefined;

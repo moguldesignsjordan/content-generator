@@ -402,6 +402,7 @@ export function EmailPreview({
         kind="email"
         hasImage={hasImage}
         placement={image?.placement}
+        promptUsed={image?.prompt}
         onApplied={(newHtml, newImage) => {
           onHtmlChange(newHtml);
           setImage(newImage);

@@ -134,7 +134,13 @@ export default async function DashboardPage() {
   }));
 
   return (
-    <div className="space-y-8">
+    <div className="relative space-y-8">
+      {/* Ambient brand light behind the top of the screen. */}
+      <div
+        aria-hidden
+        className="aura-spectrum absolute -inset-x-10 -top-16 -z-10 h-80"
+      />
+
       {brand.onboarding_state?.completed !== true && <FinishSetupBanner />}
 
       <ScreenHeader
@@ -142,17 +148,36 @@ export default async function DashboardPage() {
         subtitle={`${brand.name} · content engine`}
       />
 
-      {/* Create — leads the page */}
-      <CreateAgent suggestions={suggestions} initial={createAgentInitial} />
+      {/* Create — leads the page, ringed and lit in the spectrum */}
+      <CreateAgent
+        suggestions={suggestions}
+        initial={createAgentInitial}
+        className="ring-spectrum glow-spectrum"
+      />
 
       {/* What's still missing from the brand brain (hides itself when full) */}
       <BrandReadinessCard {...readiness} />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2.5">
-        <StatCard label="In review" value={inReview} sub="drafts" />
-        <StatCard label="Approved" value={approved} sub="ready to ship" />
-        <StatCard label="Topics" value={allTopics.length} sub={`${queued} queued`} />
+        <StatCard
+          label="In review"
+          value={inReview}
+          sub="drafts"
+          className="glow-spectrum-soft"
+        />
+        <StatCard
+          label="Approved"
+          value={approved}
+          sub="ready to ship"
+          className="glow-spectrum-soft"
+        />
+        <StatCard
+          label="Topics"
+          value={allTopics.length}
+          sub={`${queued} queued`}
+          className="glow-spectrum-soft"
+        />
       </div>
 
       {/* Scheduled drafts awaiting review (Settings → Schedules). Never

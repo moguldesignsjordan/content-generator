@@ -156,6 +156,8 @@ export interface ImageSheetProps {
   hasImage: boolean;
   /** Where the current image sits (emails; undefined reads as "top"). */
   placement?: HeroPlacement;
+  /** The prompt that produced the current image, if it was generated. */
+  promptUsed?: string;
   /** Fresh HTML after any successful change; image is null after a remove. */
   onApplied: (html: string, image: ContentImage | null) => void;
   /** Fires alongside onApplied so sibling UI (the undo history) can refresh. */
@@ -169,12 +171,16 @@ export function ImageSheet({
   kind,
   hasImage,
   placement: currentPlacement,
+  promptUsed,
   onApplied,
   onEdited,
 }: ImageSheetProps) {
   const [tab, setTab] = useState<"generate" | "upload">("generate");
   const [style, setStyle] = useState<string>("illustration");
   const [subject, setSubject] = useState("");
+  const [promptMode, setPromptMode] = useState<"auto" | "exact">("auto");
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState("");
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [referenceUse, setReferenceUse] = useState<string>("style");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -188,15 +194,22 @@ export function ImageSheet({
     if (!open) return;
     setTab("generate");
     setSubject("");
+    setPromptMode("auto");
+    setShowPrompt(false);
+    setEditedPrompt(promptUsed ?? "");
     setReferenceFile(null);
     setReferenceUse("style");
     setUploadFile(null);
     setUploadAlt("");
     setError(null);
     setPlacement(currentPlacement ?? "top");
-  }, [open, currentPlacement]);
+  }, [open, currentPlacement, promptUsed]);
 
-  async function run(action: "generate" | "upload" | "remove" | "move", moveTo?: HeroPlacement) {
+  async function run(
+    action: "generate" | "upload" | "remove" | "move",
+    moveTo?: HeroPlacement,
+    opts?: { exactPrompt?: string },
+  ) {
     if (busy) return;
     if (action === "upload" && !uploadFile) {
       setError("Choose an image to upload first.");
@@ -218,6 +231,8 @@ export function ImageSheet({
         } else if (action === "generate") {
           form.set("style", style);
           if (subject.trim()) form.set("subject", subject.trim());
+          if (promptMode === "exact") form.set("promptMode", "exact");
+          if (opts?.exactPrompt) form.set("exactPrompt", opts.exactPrompt);
           if (referenceFile) {
             form.set("reference", referenceFile);
             form.set("referenceUse", referenceUse);
@@ -337,6 +352,31 @@ export function ImageSheet({
               disabled={busy}
               className="mt-1.5"
             />
+            {subject.trim() && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Chip
+                  active={promptMode === "auto"}
+                  disabled={busy}
+                  onClick={() => setPromptMode("auto")}
+                >
+                  AI sharpens it
+                </Chip>
+                <Chip
+                  active={promptMode === "exact"}
+                  disabled={busy}
+                  onClick={() => setPromptMode("exact")}
+                >
+                  Use my words exactly
+                </Chip>
+              </div>
+            )}
+            {subject.trim() && (
+              <p className="mt-1.5 text-[11px] text-muted">
+                {promptMode === "exact"
+                  ? "Your description goes to the image model word for word, only the style and brand colors are added."
+                  : "AI adds visual detail around your description; everything you named stays in."}
+              </p>
+            )}
           </div>
           <div className="mt-3">
             <p className="text-xs font-medium text-muted">Reference image (optional)</p>
@@ -364,6 +404,45 @@ export function ImageSheet({
             )}
           </div>
           {placementRow}
+          {hasImage && promptUsed && (
+            <div className="mt-4 rounded-xl border border-border bg-surface-2 p-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowPrompt((v) => !v)}
+                className="flex w-full items-center justify-between text-left text-xs font-medium text-muted transition-colors hover:text-foreground"
+              >
+                <span>Prompt behind the current image</span>
+                <span>{showPrompt ? "Hide" : "View & edit"}</span>
+              </button>
+              {showPrompt && (
+                <>
+                  <textarea
+                    value={editedPrompt}
+                    onChange={(e) => setEditedPrompt(e.target.value)}
+                    disabled={busy}
+                    rows={5}
+                    className="mt-2 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-[12.5px] leading-relaxed text-foreground focus:border-accent"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    loading={busy}
+                    disabled={busy || !editedPrompt.trim()}
+                    onClick={() =>
+                      run("generate", undefined, { exactPrompt: editedPrompt.trim() })
+                    }
+                  >
+                    Regenerate with this prompt
+                  </Button>
+                  <p className="mt-1.5 text-[11px] text-muted">
+                    Sent to the image model exactly as written, no AI rewrite.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           <div className="mt-4 flex items-center gap-2">
             <Button
               variant="gradient"
