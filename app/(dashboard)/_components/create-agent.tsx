@@ -259,7 +259,7 @@ export function CreateAgent({
             )}
 
             {options && options.length > 0 && !loading && (
-              <div className="flex flex-wrap gap-2">
+              <div className="bubble-in flex flex-wrap gap-2">
                 {options.map((opt) => (
                   <button
                     key={opt.id}
@@ -278,7 +278,7 @@ export function CreateAgent({
 
         {loading && (
           <div className="flex justify-start">
-            <div className="rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
+            <div className="bubble-in rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
               <Typing hint={hint} />
             </div>
           </div>
@@ -287,33 +287,30 @@ export function CreateAgent({
 
       {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
 
-      {/* Quick actions — sit just above the type box, before the first
-          message. Each seeds the conversation except Campaign, which is
-          its own flow. */}
-      {empty && (
-        <div className="flex flex-wrap items-center justify-center gap-2 px-4 pb-1">
-          <QuickAction
-            icon={<MailIcon size={16} />}
-            label="Email"
-            onClick={() => send("Draft an on-brand email")}
-          />
-          <QuickAction
-            icon={<BlogIcon size={16} />}
-            label="Blog post"
-            onClick={() => send("Draft a blog post")}
-          />
-          <QuickAction
-            icon={<SparkleIcon size={16} />}
-            label="Campaign"
-            onClick={() => router.push("/campaigns/new")}
-          />
-        </div>
-      )}
-
-      {/* Composer — the type box wears the animated spectrum ring. */}
+      {/* The chat bar — quick actions live inside it (before the first
+          message), and the whole bar wears the animated spectrum ring. */}
       <div className="p-3 pt-2">
-        <div className="flex items-end gap-2">
-          <div className="hero-ring flex-1 rounded-[var(--radius-md)] bg-surface-2 transition-shadow duration-200 focus-within:shadow-[0_0_28px_-10px_rgba(255,61,140,0.55)]">
+        <div className="hero-ring rounded-[var(--radius-lg)] bg-surface-2 transition-shadow duration-200 focus-within:shadow-[0_0_30px_-12px_rgba(255,61,140,0.5)]">
+          {empty && (
+            <div className="flex flex-wrap gap-2 p-2.5 pb-0">
+              <QuickAction
+                icon={<MailIcon size={15} />}
+                label="Email"
+                onClick={() => send("Draft an on-brand email")}
+              />
+              <QuickAction
+                icon={<BlogIcon size={15} />}
+                label="Blog post"
+                onClick={() => send("Draft a blog post")}
+              />
+              <QuickAction
+                icon={<SparkleIcon size={15} />}
+                label="Campaign"
+                onClick={() => router.push("/campaigns/new")}
+              />
+            </div>
+          )}
+          <div className="flex items-end gap-2 p-2.5">
             <textarea
               ref={inputRef}
               value={input}
@@ -328,19 +325,19 @@ export function CreateAgent({
               placeholder={
                 ready ? "Tweak the brief, or hit Generate" : "Describe the email you want…"
               }
-              className="block max-h-32 min-h-[44px] w-full resize-none rounded-[var(--radius-md)] bg-transparent px-3.5 py-2.5 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
+              className="block max-h-32 min-h-[44px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
             />
+            <Button
+              variant="gradient"
+              size="md"
+              className="h-11 w-11 shrink-0 !px-0"
+              onClick={() => send(input)}
+              disabled={loading || generating || !input.trim()}
+              aria-label="Send message"
+            >
+              <SendIcon size={18} />
+            </Button>
           </div>
-          <Button
-            variant="gradient"
-            size="md"
-            className="h-11 w-11 shrink-0 !px-0"
-            onClick={() => send(input)}
-            disabled={loading || generating || !input.trim()}
-            aria-label="Send message"
-          >
-            <SendIcon size={18} />
-          </Button>
         </div>
       </div>
     </div>
@@ -360,7 +357,7 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className="group inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 px-4 py-2 text-[13.5px] font-medium text-foreground transition-colors hover:border-accent/45 hover:bg-surface-3"
+      className="group inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:border-accent/45 hover:bg-surface-3"
     >
       <span className="flex h-5 w-5 items-center justify-center text-accent transition-transform group-hover:scale-110">
         {icon}
@@ -373,7 +370,7 @@ function QuickAction({
 function Bubble({ msg }: { msg: Msg }) {
   const isUser = msg.role === "user";
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("bubble-in flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
           "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14.5px] leading-relaxed",
@@ -444,7 +441,7 @@ function BriefCardView({
   ];
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
+    <div className="bubble-in rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
       <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
         <SparkleIcon size={12} className="text-accent" />
         Brief

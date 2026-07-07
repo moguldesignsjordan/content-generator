@@ -17,18 +17,18 @@ export function BrandReadinessCard({
   if (missing.length === 0) return null;
 
   return (
-    <Card className="p-5">
+    <Card className="p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-[15px] font-semibold text-foreground">
+        <h2 className="text-[14px] font-semibold text-foreground">
           Brand readiness
         </h2>
         <span className="text-[13px] text-muted">
           {done}/{total} complete
         </span>
       </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
+      <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-border">
         <div
-          className="h-full rounded-full bg-amber transition-[width]"
+          className="h-full rounded-full bg-amber/55 transition-[width]"
           style={{ width: `${Math.round((done / total) * 100)}%` }}
         />
       </div>
