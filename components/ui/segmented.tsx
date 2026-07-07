@@ -45,7 +45,7 @@ export function SegmentedControl<T extends string>({
               opt.disabled
                 ? "cursor-not-allowed text-muted/40"
                 : active
-                  ? "bg-surface text-foreground shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_4px_12px_-6px_rgba(0,0,0,0.6)]"
+                  ? "bg-surface text-foreground ring-1 ring-border-strong shadow-[0_1px_3px_rgba(0,0,0,0.10)]"
                   : "text-muted hover:text-foreground",
             )}
           >

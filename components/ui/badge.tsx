@@ -12,7 +12,7 @@ export type BadgeTone =
   | "danger";
 
 const TONES: Record<BadgeTone, string> = {
-  neutral: "bg-white/[0.06] text-muted border-white/[0.06]",
+  neutral: "bg-foreground/[0.06] text-muted border-foreground/[0.06]",
   amber: "bg-amber/15 text-amber border-amber/20",
   magenta: "bg-magenta/15 text-magenta border-magenta/25",
   violet: "bg-violet/15 text-violet border-violet/25",

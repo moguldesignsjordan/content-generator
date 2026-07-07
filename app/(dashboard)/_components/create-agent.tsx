@@ -227,7 +227,7 @@ export function CreateAgent({
   return (
     <div
       className={cn("flex flex-col overflow-hidden", className)}
-      style={{ height: "clamp(464px, 64vh, 640px)" }}
+      style={{ height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
     >
       {empty ? (
         // Landing — a clean, centered prompt (headline + input + actions).

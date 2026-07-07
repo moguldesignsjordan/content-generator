@@ -91,7 +91,7 @@ export function Sheet({
       >
         {/* grabber (mobile) */}
         <div className="flex justify-center pt-2.5 md:hidden">
-          <span className="h-1 w-9 rounded-full bg-white/15" />
+          <span className="h-1 w-9 rounded-full bg-foreground/15" />
         </div>
 
         {(title || description) && (

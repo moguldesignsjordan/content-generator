@@ -124,7 +124,7 @@ export default async function DashboardPage() {
   const queued = allTopics.filter((t) => t.status === "queued").length;
 
   return (
-    <div className="relative space-y-8">
+    <div className="relative space-y-6">
       {/* Ambient brand light behind the top of the screen. */}
       <div
         aria-hidden
@@ -142,19 +142,16 @@ export default async function DashboardPage() {
           label="In review"
           value={inReview}
           sub="drafts"
-          className="glow-spectrum-soft"
         />
         <StatCard
           label="Approved"
           value={approved}
           sub="ready to ship"
-          className="glow-spectrum-soft"
         />
         <StatCard
           label="Topics"
           value={allTopics.length}
           sub={`${queued} queued`}
-          className="glow-spectrum-soft"
         />
       </div>
 

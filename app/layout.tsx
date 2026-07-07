@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk } from "next/font/google";
+import { ThemeProvider } from "next-themes";
 import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
@@ -33,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={hanken.variable}>
+    <html lang="en" className={hanken.variable} suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://api.fontshare.com" />
         <link
@@ -42,7 +43,9 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+          <ToastProvider>{children}</ToastProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

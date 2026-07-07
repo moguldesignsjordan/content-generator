@@ -6,6 +6,7 @@ import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
 import { cn } from "@/lib/cn";
 import { NAV } from "./nav";
+import { ThemeToggle } from "./theme-toggle";
 
 /** Desktop left sidebar: logo, nav, account + sign-out. */
 export function Sidebar({
@@ -60,6 +61,7 @@ export function Sidebar({
             </p>
             <p className="text-[11px] text-muted-2">Mogul account</p>
           </div>
+          <ThemeToggle />
           <form action={signOut}>
             <button
               type="submit"

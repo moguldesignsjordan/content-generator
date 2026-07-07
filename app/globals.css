@@ -368,6 +368,41 @@
   animation: bubble-in 0.26s ease-out;
 }
 
+/* ── Light theme (opt-in; the toggle sets html.light) ───────────────────
+   Dark is the :root default — this only flips color tokens. Spectrum
+   accents stay vivid. Because @theme inline utilities reference these
+   vars, the override cascades app-wide. The dark-tuned glow/aura halos
+   swap to neutral elevation so they read on Paper instead of muddy. */
+html.light {
+  --background: #fafaf8; /* Paper */
+  --surface: #ffffff;
+  --surface-2: #f4f4f0;
+  --surface-3: #ecece6;
+  --border: rgba(8, 8, 10, 0.08);
+  --border-strong: rgba(8, 8, 10, 0.14);
+  --foreground: #08080a; /* Ink */
+  --muted: #5a5a62;
+  --muted-2: #8a8a94;
+}
+html.light .glow-spectrum {
+  box-shadow: 0 10px 30px -12px rgba(8, 8, 10, 0.12);
+}
+html.light .glow-spectrum-soft {
+  box-shadow: 0 6px 18px -10px rgba(8, 8, 10, 0.08);
+}
+html.light .aura-spectrum {
+  background:
+    radial-gradient(420px 260px at 12% 0%, rgba(255, 174, 60, 0.12), transparent 65%),
+    radial-gradient(560px 320px at 55% -8%, rgba(255, 61, 140, 0.08), transparent 65%),
+    radial-gradient(460px 280px at 92% 6%, rgba(30, 180, 255, 0.1), transparent 65%);
+}
+html.light .hero-surface {
+  background: var(--surface);
+}
+html.light .hero-glow {
+  box-shadow: 0 12px 34px -22px rgba(8, 8, 10, 0.18);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
