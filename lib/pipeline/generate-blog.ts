@@ -14,6 +14,7 @@ import {
   persistRegeneratedDraft,
   populateDraft,
   rejectDraftRecord,
+  updateCampaign,
 } from "@/lib/db/queries";
 import {
   BLOG_TOOL,
@@ -106,6 +107,14 @@ export async function generateBlogForTopicStreamed(
       seoData,
       blogType,
     });
+
+    if (opts.campaignId) {
+      // Mirrors generateEmailForTopicStreamed: once a draft exists the
+      // campaign's job is done, so the dashboard chat doesn't resurrect this
+      // same thread on the next reload (getLatestActiveCampaign only
+      // excludes "done"). Blog generation never set this at all before.
+      await updateCampaign(opts.campaignId, { status: "done" });
+    }
 
     onEvent({ type: "done" });
   } catch (err) {

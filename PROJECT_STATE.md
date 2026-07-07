@@ -540,7 +540,7 @@ app's own delete/archive flows, not raw DB deletes.
    the page is reloaded (Pause/Resume and Delete do update immediately). Not
    fixed this session, cheap to pick up later.
 
-## Logging & observability (app_logs) — new, not yet committed, migration NOT yet applied
+## Logging & observability (app_logs) — done, committed (`dd73be5`), migration applied
 
 Started in an earlier session that got cut off mid-build; picked back up and
 finished the page this session. Every error/warning/info line across all
@@ -600,6 +600,26 @@ UI** (filter tabs switching, live polling picking up a new row within the
 poll interval, stat tiles reflecting real data) — needs Jordan's own logged-in
 session since there are no test credentials in this repo for a browser
 click-through.
+
+## Bug fix: create-chat never actually cleared after generating (2026-07-06)
+
+Jordan reported the dashboard's create-agent chat kept resuming the same old
+conversation on every login instead of starting fresh after a draft was
+generated. Root cause: `getLatestActiveCampaign` (`lib/db/queries.ts`) resumes
+any campaign whose `status` isn't `"done"`, but `lib/pipeline/generate.ts`
+only ever advanced a campaign to `"drafted"` on completion, and
+`lib/pipeline/generate-blog.ts` never touched campaign status at all — so
+every campaign you ever finished stayed "active" forever. Fixed both to set
+`status: "done"` once the draft actually finishes generating (email and
+blog). Also patched the 3 existing live campaign rows stuck at `"drafted"`
+to `"done"` directly via the Supabase REST API (one-time data fix, done with
+Jordan's explicit go-ahead since it touches production data). One older
+campaign is intentionally left at `"briefing"` (an unfinished brief, never
+generated) — that will still resume on next login, which matches the
+original intent of "pick up an incomplete brief where you left off."
+`npm run typecheck` + `npx vitest run` (86 tests) pass. Not yet re-verified
+live in the browser (no test credentials in this repo) — Jordan should
+confirm the dashboard chat now starts blank after logging back in.
 
 ## Next step (backlog, still open)
 

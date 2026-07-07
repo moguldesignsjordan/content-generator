@@ -135,7 +135,11 @@ export async function generateEmailForTopicStreamed(
     await populateDraft(draftId, { content, meta, seoData, emailType });
 
     if (opts.campaignId) {
-      await updateCampaign(opts.campaignId, { status: "drafted" });
+      // "done", not "drafted": once a draft exists, the chat's job is
+      // finished (review happens on the drafts page, not back in the
+      // thread). getLatestActiveCampaign only excludes "done", so anything
+      // else here would keep resurrecting this same chat on every reload.
+      await updateCampaign(opts.campaignId, { status: "done" });
     }
 
     onEvent({ type: "done" });
