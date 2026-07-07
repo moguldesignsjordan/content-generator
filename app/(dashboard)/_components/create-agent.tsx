@@ -226,10 +226,7 @@ export function CreateAgent({
 
   return (
     <div
-      className={cn(
-        "flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface",
-        className,
-      )}
+      className={cn("flex flex-col overflow-hidden", className)}
       style={{ height: "clamp(464px, 64vh, 640px)" }}
     >
       {empty ? (
