@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import {
   DRAFT_MODEL,
+  FAST_MODEL,
   cacheableSystem,
   getAnthropic,
   isAnthropicConfigured,
@@ -228,14 +229,14 @@ export async function POST(req: NextRequest) {
     if (briefWasReady && !calledAnyTool && !state.draftId) {
       try {
         const forced = await getAnthropic().messages.create({
-          model: DRAFT_MODEL,
+          model: FAST_MODEL,
           max_tokens: 1024,
           system,
           messages,
           tools: CREATE_TOOLS,
           tool_choice: { type: "any" },
         });
-        logUsage("create-chat-forced", DRAFT_MODEL, forced.usage);
+        logUsage("create-chat-forced", FAST_MODEL, forced.usage);
         messages.push({ role: "assistant", content: forced.content });
         let forcedReply = "";
         for (const block of forced.content) {

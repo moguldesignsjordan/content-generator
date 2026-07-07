@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import {
   DRAFT_MODEL,
+  FAST_MODEL,
   cacheableSystem,
   getAnthropic,
   logUsage,
@@ -79,8 +80,10 @@ export async function POST(req: NextRequest) {
 
     const history: OnboardingMessage[] = campaign.chat_state?.messages ?? [];
     // Cache the prefix through the end of the prior turn so each new message
-    // only costs full price on the small bit that's actually new.
-    const priorTurns: Anthropic.MessageParam[] = history.map((m) => ({
+    // only costs full price on the small bit that's actually new. Bounded to
+    // the last 10 turns (mirrors /api/create/chat) so a long campaign brief
+    // conversation doesn't keep growing the per-turn input/cache-read cost.
+    const priorTurns: Anthropic.MessageParam[] = history.slice(-10).map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -167,14 +170,14 @@ export async function POST(req: NextRequest) {
     if (briefWasReady && !calledAnyTool && !state.readyToGenerate) {
       try {
         const forced = await getAnthropic().messages.create({
-          model: DRAFT_MODEL,
+          model: FAST_MODEL,
           max_tokens: 1024,
           system,
           messages,
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "any" },
         });
-        logUsage("campaigns-chat-forced", DRAFT_MODEL, forced.usage);
+        logUsage("campaigns-chat-forced", FAST_MODEL, forced.usage);
         const forcedResult = await applyContentBlocks(forced.content, state, {
           brand,
           strategy,
@@ -212,7 +215,7 @@ export async function POST(req: NextRequest) {
             content: "Saved.",
           }));
         const followUp = await getAnthropic().messages.create({
-          model: DRAFT_MODEL,
+          model: FAST_MODEL,
           max_tokens: 512,
           system,
           messages: [
@@ -223,7 +226,7 @@ export async function POST(req: NextRequest) {
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "none" },
         });
-        logUsage("campaigns-chat-followup", DRAFT_MODEL, followUp.usage);
+        logUsage("campaigns-chat-followup", FAST_MODEL, followUp.usage);
         for (const block of followUp.content) {
           if (block.type === "text") reply += block.text;
         }
