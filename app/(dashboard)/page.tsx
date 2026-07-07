@@ -20,7 +20,6 @@ import {
 import { ChevronRightIcon } from "@/components/ui/icons";
 import { BrandReadinessCard } from "./_components/brand-readiness-card";
 import { CreateAgent } from "./_components/create-agent";
-import { ScreenHeader } from "./_components/screen-header";
 import { DraftStateBadge } from "./_components/topic-badges";
 
 // Always read fresh from the DB; topics/drafts change as you work.
@@ -124,10 +123,6 @@ export default async function DashboardPage() {
   const approved = drafts.filter((d) => d.state === "approved").length;
   const queued = allTopics.filter((t) => t.status === "queued").length;
 
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-
   return (
     <div className="relative space-y-8">
       {/* Ambient brand light behind the top of the screen. */}
@@ -137,11 +132,6 @@ export default async function DashboardPage() {
       />
 
       {brand.onboarding_state?.completed !== true && <FinishSetupBanner />}
-
-      <ScreenHeader
-        title={greeting}
-        subtitle={`${brand.name} · content engine`}
-      />
 
       {/* Create — the work surface. Quick actions + an animated type box. */}
       <CreateAgent initial={createAgentInitial} />
