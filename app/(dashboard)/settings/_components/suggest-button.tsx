@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button, Sheet, Textarea } from "@/components/ui";
-import { SparkleIcon } from "@/components/ui/icons";
+import { LightbulbIcon } from "@/components/ui/icons";
 import type { SuggestField } from "@/prompts/suggest";
 
 interface SuggestButtonProps {
@@ -67,7 +67,7 @@ export function SuggestButton({
         disabled={loading || open}
         className="inline-flex items-center gap-1.5 text-[12px] font-medium text-accent transition-colors hover:text-accent-press disabled:opacity-50"
       >
-        <SparkleIcon size={13} />
+        <LightbulbIcon size={13} />
         {loading ? "Thinking…" : label}
       </button>
 

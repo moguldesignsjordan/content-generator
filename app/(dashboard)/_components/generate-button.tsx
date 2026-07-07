@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, useToast } from "@/components/ui";
-import { SparkleIcon } from "@/components/ui/icons";
+import { BoltIcon } from "@/components/ui/icons";
 
 // Triggers email generation for a topic, then navigates to the review screen.
 export function GenerateButton({ topicId }: { topicId: string }) {
@@ -36,7 +36,7 @@ export function GenerateButton({ topicId }: { topicId: string }) {
       loading={busy}
       disabled={busy}
     >
-      <SparkleIcon size={14} />
+      <BoltIcon size={14} />
       {busy ? "Generating…" : "Generate"}
     </Button>
   );

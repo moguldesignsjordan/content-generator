@@ -69,19 +69,39 @@ export default async function CreatePage() {
   const hasTopics = allTopics.length > 0;
 
   return (
-    <>
+    <div className="relative">
+      {/* Same ambient stage as the dashboard: brand light over a hairline
+          grid, dissolving into the background. */}
+      <div
+        aria-hidden
+        className="tech-grid absolute -inset-x-10 -top-16 -z-10 h-96"
+      />
+      <div
+        aria-hidden
+        className="aura-spectrum absolute -inset-x-10 -top-16 -z-10 h-80"
+      />
+
       <ScreenHeader
         title="Create"
         subtitle="Tell it what you want to send, or pick from your content plan."
       />
 
-      {/* Hero: the campaign conversation is the main way to create. */}
-      <Card className="mb-6 flex flex-col items-start justify-between gap-4 p-7 sm:flex-row sm:items-center">
+      {/* Hero: the campaign conversation is the main way to create. Wears the
+          same living ring as the dashboard chat bar — one system. */}
+      <div className="hero-ring hero-surface mb-6 flex flex-col items-start justify-between gap-4 rounded-[var(--radius-card)] border border-border p-7 sm:flex-row sm:items-center">
         <div>
           <h2 className="font-display text-[19px] font-semibold text-foreground">
-            What do you want to send?
+            What do you want to{" "}
+            <span className="relative inline-block">
+              send
+              <span
+                aria-hidden
+                className="bar-spectrum bar-live absolute -bottom-0.5 left-0 h-[2.5px] w-full rounded-full"
+              />
+            </span>
+            ?
           </h2>
-          <p className="mt-1.5 max-w-md text-[14px] leading-relaxed text-muted">
+          <p className="mt-2 max-w-md text-[14px] leading-relaxed text-muted">
             A short conversation about the goal, the audience, and the message.
             Then your email is drafted from your brand brain.
           </p>
@@ -89,7 +109,7 @@ export default async function CreatePage() {
         <LinkButton href="/campaigns/new" variant="gradient">
           Start a campaign
         </LinkButton>
-      </Card>
+      </div>
 
       {hasTopics && (
         <div className="mb-9">
@@ -124,6 +144,6 @@ export default async function CreatePage() {
           <SuggestTopics />
         </Card>
       )}
-    </>
+    </div>
   );
 }

@@ -347,24 +347,78 @@
     0 6px 26px -22px rgba(158, 77, 242, 0.2);
 }
 
-/* Empty-state beacon: the sparkle breathes softly to draw the eye. */
-.hero-beacon {
-  animation: hero-beacon 3.6s ease-in-out infinite;
-}
-
 @keyframes hero-ring-spin {
   to {
     --hero-angle: 360deg;
   }
 }
-@keyframes hero-beacon {
+/* ── The chat bar is the instrument ─────────────────────────────────────
+   Idle: the spectrum halo breathes slowly around the composer. Focus: the
+   breathing stops and the light holds steady and bright (the bar is live).
+   Both layers sit under the rotating hero-ring hairline. */
+@keyframes composer-breathe {
   0%,
   100% {
-    transform: scale(1);
+    box-shadow:
+      0 0 26px -14px rgba(255, 61, 140, 0.24),
+      0 0 52px -22px rgba(158, 77, 242, 0.16);
   }
   50% {
+    box-shadow:
+      0 0 38px -12px rgba(255, 61, 140, 0.42),
+      0 0 70px -20px rgba(30, 180, 255, 0.24);
+  }
+}
+.composer-glow {
+  animation: composer-breathe 5.5s ease-in-out infinite;
+}
+.composer-glow:focus-within {
+  animation: none;
+  box-shadow:
+    0 0 34px -10px rgba(255, 61, 140, 0.5),
+    0 0 70px -18px rgba(158, 77, 242, 0.3);
+}
+html.light .composer-glow {
+  animation: none;
+  box-shadow: 0 8px 26px -18px rgba(8, 8, 10, 0.16);
+}
+html.light .composer-glow:focus-within {
+  box-shadow:
+    0 8px 26px -16px rgba(8, 8, 10, 0.18),
+    0 0 30px -14px rgba(255, 61, 140, 0.28);
+}
+
+/* Send button pops in when there's something to send. */
+@keyframes send-pop {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.4;
+  }
+  60% {
     transform: scale(1.07);
   }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.send-pop {
+  animation: send-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* A spectrum bar that slowly pans its gradient — the underline is alive. */
+@keyframes bar-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+.bar-live {
+  background-size: 220% 100%;
+  animation: bar-pan 6s ease-in-out infinite;
 }
 
 /* Agent "thinking" state: three dots in the spectral primaries, pulsing in

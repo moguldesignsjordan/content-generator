@@ -59,10 +59,25 @@ export const GearIcon = (p: IconProps) => (
   </Svg>
 );
 
-export const SparkleIcon = (p: IconProps) => (
+/* The Mogul mark is a lightbulb; this is the "idea" icon of the app. */
+export const LightbulbIcon = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7 10.2 7.9z" />
-    <path d="M19 14l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z" />
+    <path d="M9 18h6" />
+    <path d="M10 21h4" />
+    <path d="M15.1 14c.18-.98.65-1.74 1.4-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5.76.76 1.23 1.52 1.4 2.5" />
+  </Svg>
+);
+
+export const BoltIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M13 2 3.5 14H10l-1 8 10.5-12H13z" />
+  </Svg>
+);
+
+export const MegaphoneIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m3 11 18-5v12L3 14v-3z" />
+    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
   </Svg>
 );
 

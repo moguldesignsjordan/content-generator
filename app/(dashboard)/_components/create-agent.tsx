@@ -10,13 +10,13 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Select, useToast } from "@/components/ui";
+import { Button, Logo, Select, useToast } from "@/components/ui";
 import {
   BlogIcon,
   MailIcon,
+  MegaphoneIcon,
   PlusIcon,
   SendIcon,
-  SparkleIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { BlogType, EmailType, FunnelStage } from "@/lib/db/types";
@@ -304,25 +304,18 @@ export function CreateAgent({
     >
       {empty ? (
         // Landing — a centered prompt: beacon, headline, input, actions.
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
-          <div className="flex flex-col items-center gap-5">
-            {/* The agent's beacon: the spectrum ring slowly turning around a
-                breathing sparkle. Same identity dot as the chat avatar. */}
-            <span className="hero-ring hero-beacon glow-spectrum-soft flex h-12 w-12 items-center justify-center rounded-full bg-surface-2">
-              <SparkleIcon size={22} className="text-foreground" />
-            </span>
-            <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground [text-wrap:balance] sm:text-[30px]">
-              What are we{" "}
-              <span className="relative inline-block">
-                creating
-                <span
-                  aria-hidden
-                  className="bar-spectrum absolute -bottom-1 left-0 h-[3px] w-full rounded-full"
-                />
-              </span>{" "}
-              today?
-            </h2>
-          </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-7 px-4 py-10">
+          <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground [text-wrap:balance] sm:text-[30px]">
+            What are we{" "}
+            <span className="relative inline-block">
+              creating
+              <span
+                aria-hidden
+                className="bar-spectrum bar-live absolute -bottom-1 left-0 h-[3px] w-full rounded-full"
+              />
+            </span>{" "}
+            today?
+          </h2>
           <div className="w-full max-w-xl">
             <ComposerBar
               inputRef={inputRef}
@@ -476,8 +469,9 @@ function ComposerBar({
   placeholderCycle?: string;
 }) {
   const cycling = placeholderCycle !== undefined && !ready;
+  const hasText = Boolean(input.trim());
   return (
-    <div className="hero-ring flex items-end gap-1.5 rounded-[26px] border border-border bg-surface-2 p-1.5 pl-2 transition-shadow duration-200 focus-within:shadow-[0_0_30px_-12px_rgba(255,61,140,0.5)]">
+    <div className="hero-ring composer-glow flex items-end gap-1.5 rounded-[28px] border border-border bg-surface-2 p-2 pl-2.5">
       <button
         type="button"
         onClick={onPlus}
@@ -516,9 +510,12 @@ function ComposerBar({
       <Button
         variant="gradient"
         size="md"
-        className="h-10 w-10 shrink-0 self-center !px-0"
+        className={cn(
+          "h-10 w-10 shrink-0 self-center !px-0",
+          hasText && "send-pop",
+        )}
         onClick={onSend}
-        disabled={disabled || !input.trim()}
+        disabled={disabled || !hasText}
         aria-label="Send message"
       >
         <SendIcon size={18} />
@@ -547,62 +544,44 @@ function ActionGrid({
         label="Email"
         onClick={onEmail}
         disabled={disabled}
-        chipClass="bg-cyan/12 text-cyan"
-        hoverClass="hover:border-cyan/40"
       />
       <ActionButton
         icon={<BlogIcon size={15} />}
         label="Blog post"
         onClick={onBlog}
         disabled={disabled}
-        chipClass="bg-violet/12 text-violet"
-        hoverClass="hover:border-violet/45"
       />
       <ActionButton
-        icon={<SparkleIcon size={15} />}
+        icon={<MegaphoneIcon size={15} />}
         label="Campaign"
         onClick={onCampaign}
         disabled={disabled}
-        chipClass="bg-amber/12 text-amber"
-        hoverClass="hover:border-amber/45"
       />
     </div>
   );
 }
 
-/* Each action carries its own spectral primary (brand badge rule: 12% tint
-   chip, full-value hue) so the three creation paths read as one spectrum. */
+/* Quiet, uniform tiles: muted icon that wakes to foreground on hover. The
+   color in this view belongs to the chat bar, not the shortcuts. */
 function ActionButton({
   icon,
   label,
   onClick,
   disabled,
-  chipClass,
-  hoverClass,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
   disabled: boolean;
-  chipClass: string;
-  hoverClass: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={cn(
-        "group flex items-center justify-center gap-2 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:bg-surface-3 disabled:opacity-50",
-        hoverClass,
-      )}
+      className="group flex items-center justify-center gap-2 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-border-strong hover:bg-surface-3 disabled:opacity-50"
     >
-      <span
-        className={cn(
-          "flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px]",
-          chipClass,
-        )}
-      >
+      <span className="shrink-0 text-muted transition-colors duration-150 group-hover:text-foreground">
         {icon}
       </span>
       <span className="min-w-0 truncate">{label}</span>
@@ -610,17 +589,17 @@ function ActionButton({
   );
 }
 
-/* The agent's identity dot: a static spectrum ring around a sparkle. Marks
-   assistant turns (and the thinking state) without a heavy avatar. */
+/* The agent's identity dot: the Mogul mark inside a static spectrum ring.
+   Marks assistant turns (and the thinking state) without a heavy avatar. */
 function AgentDot({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "ring-spectrum flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-2",
+        "ring-spectrum flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2",
         className,
       )}
     >
-      <SparkleIcon size={13} className="text-foreground" />
+      <Logo height={15} alt="" className="!rounded-none" />
     </span>
   );
 }
@@ -711,8 +690,8 @@ function BriefCardView({
       )}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-          <SparkleIcon size={12} className="text-accent" />
+        <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+          <span className="bar-spectrum h-1 w-4 rounded-full" />
           Brief
         </span>
         {ready && !generating && (
@@ -804,7 +783,6 @@ function BriefCardView({
             loading={generating}
             disabled={disabled}
           >
-            <SparkleIcon size={14} />
             {generating
               ? "Generating…"
               : channel === "blog"
