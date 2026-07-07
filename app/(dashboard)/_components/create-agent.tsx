@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, Logo, Select, useToast } from "@/components/ui";
 import {
@@ -19,7 +20,7 @@ import {
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-import type { BlogType, EmailType, FunnelStage } from "@/lib/db/types";
+import type { BlogType, EmailType, FunnelStage, SeriesDraftRef } from "@/lib/db/types";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
 // unset, generation derives the type from the topic as before; picking one
@@ -89,6 +90,7 @@ interface CreateResponse {
   options?: Option[] | null;
   readyToGenerate?: boolean;
   draftId?: string | null;
+  series?: SeriesDraftRef[] | null;
   error?: string;
 }
 
@@ -100,6 +102,7 @@ export interface CreateAgentInitialState {
   card: BriefCard | null;
   topicId: string | null;
   ready: boolean;
+  series: SeriesDraftRef[] | null;
 }
 
 /**
@@ -132,6 +135,7 @@ export function CreateAgent({
   const [topicId, setTopicId] = useState<string | null>(initial?.topicId ?? null);
   const [campaignId, setCampaignId] = useState<string | null>(initial?.campaignId ?? null);
   const [options, setOptions] = useState<Option[] | null>(null);
+  const [series, setSeries] = useState<SeriesDraftRef[] | null>(initial?.series ?? null);
   const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
   // Quick-action panel open state. Open in the landing; tapping + toggles it.
@@ -168,7 +172,7 @@ export function CreateAgent({
   useEffect(() => {
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, card, options]);
+  }, [messages, loading, card, options, series]);
 
   useEffect(() => {
     if (!confirmClear) return;
@@ -217,6 +221,7 @@ export function CreateAgent({
       setTopicId(data.topicId ?? null);
       setCard(data.card ?? null);
       setOptions(data.options ?? null);
+      if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
       // The agent already generated (or reused) a draft this turn; skip the
       // manual Generate fallback and open it directly.
@@ -265,6 +270,7 @@ export function CreateAgent({
     setTopicId(null);
     setCampaignId(null);
     setOptions(null);
+    setSeries(null);
     setReady(false);
     setGenerating(false);
     setError(null);
@@ -337,7 +343,9 @@ export function CreateAgent({
               <ActionGrid
                 onEmail={() => send("Draft an on-brand email")}
                 onBlog={() => send("Draft a blog post")}
-                onCampaign={() => router.push("/campaigns/new")}
+                onCampaign={() =>
+                  send("I want to plan a campaign: a series of emails")
+                }
                 disabled={loading || generating}
                 className="mt-3"
               />
@@ -383,6 +391,8 @@ export function CreateAgent({
               />
             )}
 
+            {series && series.length > 0 && <SeriesCardView items={series} />}
+
             {options && options.length > 0 && !loading && (
               <div className="bubble-in flex flex-wrap gap-2">
                 {options.map((opt) => (
@@ -416,7 +426,9 @@ export function CreateAgent({
               <ActionGrid
                 onEmail={() => send("Draft an on-brand email")}
                 onBlog={() => send("Draft a blog post")}
-                onCampaign={() => router.push("/campaigns/new")}
+                onCampaign={() =>
+                  send("I want to plan a campaign: a series of emails")
+                }
                 disabled={loading || generating}
               />
             </div>
@@ -801,6 +813,57 @@ function BriefCardView({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * The deliverable card for a multi-email campaign: one row per created draft,
+ * each linking to its review screen. Drafts are shells at this point; each
+ * email generates itself when its page is opened, so the series can be
+ * reviewed and scheduled one by one.
+ */
+function SeriesCardView({ items }: { items: SeriesDraftRef[] }) {
+  return (
+    <div className="bubble-in rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
+      <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+        <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+          <span className="bar-spectrum h-1 w-4 rounded-full" />
+          Campaign series
+        </span>
+        <span className="text-[11px] font-medium text-muted">
+          {items.length} emails
+        </span>
+      </div>
+      <div className="divide-y divide-border">
+        {items.map((item, i) => (
+          <Link
+            key={item.draft_id}
+            href={`/drafts/${item.draft_id}`}
+            className="group flex items-center gap-3 px-1 py-2.5 text-[13.5px]"
+          >
+            <span className="w-5 shrink-0 text-right tabular-nums text-muted-2">
+              {i + 1}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-foreground group-hover:text-accent">
+              {item.title}
+            </span>
+            {item.email_type && (
+              <span className="shrink-0 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] capitalize text-muted">
+                {item.email_type}
+              </span>
+            )}
+            <span className="shrink-0 text-[12px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100">
+              Open
+            </span>
+          </Link>
+        ))}
+      </div>
+      <p className="mt-2 px-1 text-[12px] text-muted-2">
+        Each email writes itself when you open it. Review, approve, and
+        schedule them one at a time.
+      </p>
     </div>
   );
 }

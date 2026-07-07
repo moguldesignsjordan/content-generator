@@ -305,8 +305,17 @@ export interface CampaignBrief {
   constraints?: string;
 }
 
+/** One draft created as part of a multi-email series (plan_series), kept in
+ * chat_state so the chat can re-render the series card on reload. */
+export interface SeriesDraftRef {
+  draft_id: string;
+  title: string;
+  email_type?: string | null;
+}
+
 export interface CampaignChatState {
   messages?: OnboardingMessage[];
+  series?: SeriesDraftRef[];
 }
 
 export interface Campaign {
@@ -522,6 +531,11 @@ export interface DraftMeta {
   // populateDraft merges meta rather than replacing it, so this needs no
   // migration.
   source_draft_id?: string;
+  // Per-email brief for a draft created as part of a multi-email series
+  // (plan_series): overrides the shared campaign brief at generation time so
+  // each email in the series keeps its own angle/message/offer. Lives in meta
+  // (jsonb) and survives generation because populateDraft merges meta.
+  series_brief?: CampaignBrief;
 }
 
 // One row in the Emails / Blogs dashboard lists. source_draft_id and

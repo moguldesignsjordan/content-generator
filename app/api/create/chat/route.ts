@@ -30,7 +30,13 @@ import {
   listTopics,
   updateCampaign,
 } from "@/lib/db/queries";
-import type { Brand, CampaignBrief, FunnelStage, Strategy } from "@/lib/db/types";
+import type {
+  Brand,
+  CampaignBrief,
+  FunnelStage,
+  SeriesDraftRef,
+  Strategy,
+} from "@/lib/db/types";
 import {
   CREATE_TOOLS,
   buildCreateAgentSystem,
@@ -41,6 +47,7 @@ import {
   type GenerateContentInput,
   type GetContentInput,
   type ListRecentContentInput,
+  type PlanSeriesInput,
   type RememberInput,
   type SelectTopicInput,
   type SuggestedOption,
@@ -78,6 +85,9 @@ interface TurnState {
   // exists; the client auto-navigates to /drafts/[draftId] when present.
   draftId: string | null;
   channel: "email" | "blog" | null;
+  // Set by plan_series: every draft created for a multi-email campaign, in
+  // order. The client renders these as a series card instead of navigating.
+  series: SeriesDraftRef[] | null;
 }
 
 /**
@@ -166,6 +176,7 @@ export async function POST(req: NextRequest) {
       options: null,
       draftId: null,
       channel: null,
+      series: null,
     };
     const dispatchCtx = { brand, strategy, topics, campaignId: campaign.id };
 
@@ -184,7 +195,9 @@ export async function POST(req: NextRequest) {
     const call = () =>
       getAnthropic().messages.create({
         model: DRAFT_MODEL,
-        max_tokens: 1024,
+        // 2048, not 1024: a plan_series call carries up to 10 items of
+        // title/angle/key_message JSON alongside the reply text.
+        max_tokens: 2048,
         system,
         messages,
         tools: CREATE_TOOLS,
@@ -254,7 +267,9 @@ export async function POST(req: NextRequest) {
     if (!reply.trim()) {
       reply = state.draftId
         ? "Done, opening your draft now."
-        : "Got it. What's the one thing this email needs to land?";
+        : state.series
+          ? "Your series is ready below. Open each email to review it."
+          : "Got it. What's the one thing this email needs to land?";
     }
     reply = stripEmDashes(reply);
 
@@ -276,11 +291,17 @@ export async function POST(req: NextRequest) {
       { role: "assistant" as const, content: reply },
     ].slice(-40);
 
+    // series persists across turns (a follow-up message must not wipe the
+    // card): keep whatever this turn produced, else what the campaign had.
+    const series = state.series ?? campaign.chat_state?.series ?? null;
+
     await updateCampaign(campaign.id, {
       brief: state.brief,
       topic_id: state.topicId,
-      chat_state: { messages: transcript },
-      ...(state.draftId ? { status: "generating" as const } : {}),
+      chat_state: { messages: transcript, ...(series ? { series } : {}) },
+      ...(state.draftId || state.series
+        ? { status: "generating" as const }
+        : {}),
     });
 
     const card = buildBriefCard({
@@ -303,6 +324,7 @@ export async function POST(req: NextRequest) {
       readyToGenerate,
       draftId: state.draftId,
       channel: state.channel,
+      series,
     });
   } catch (err) {
     logError("api:/api/create/chat", err);
@@ -396,6 +418,78 @@ async function dispatchTool(
       state.draftId = draftId;
       state.channel = input.channel;
       return JSON.stringify({ draftId, channel: input.channel });
+    }
+    case "plan_series": {
+      const input = block.input as PlanSeriesInput;
+      // Titles/angles/messages land in topics and prompts verbatim, so the
+      // em-dash ban has to be enforced here too, not just on reply text.
+      const items = (input.items ?? [])
+        .filter((i) => typeof i.title === "string" && i.title.trim())
+        .slice(0, 10)
+        .map((i) => ({
+          ...i,
+          title: stripEmDashes(i.title.trim()),
+          angle: i.angle ? stripEmDashes(i.angle) : undefined,
+          key_message: i.key_message ? stripEmDashes(i.key_message) : undefined,
+        }));
+      if (items.length < 2) {
+        return "plan_series needs 2 to 10 emails, each with a title.";
+      }
+      const strategyId =
+        ctx.strategy?.id ??
+        (await ensureStrategyAndPrimaryIcp(ctx.brand.id)).strategy.id;
+      const clusterId = await ensureDefaultCluster(strategyId);
+
+      const created: SeriesDraftRef[] = [];
+      for (const item of items) {
+        let topicId =
+          item.topic_id && ctx.topics.some((t) => t.id === item.topic_id)
+            ? item.topic_id
+            : null;
+        if (!topicId) {
+          const topic = await createTopic(clusterId, {
+            title: item.title,
+            target_keyword: "",
+            intent: "",
+            funnel_stage: item.funnel_stage ?? "",
+            maps_to_product: item.offer_slug ?? "",
+          });
+          topicId = topic.id;
+        }
+        const topicCtx = await getTopicContext(topicId);
+        if (!topicCtx) continue;
+        // Campaign-level context (goal, audience, constraints) carries over;
+        // message, angle, and offer are per email so the series doesn't
+        // flatten onto one shared brief.
+        const draftId = await createDraftShell({
+          ctx: topicCtx,
+          campaignId: ctx.campaignId,
+          type: "email",
+          emailType: item.email_type,
+          seriesBrief: {
+            ...(state.brief.goal ? { goal: state.brief.goal } : {}),
+            ...(state.brief.audience_notes
+              ? { audience_notes: state.brief.audience_notes }
+              : {}),
+            ...(state.brief.constraints
+              ? { constraints: state.brief.constraints }
+              : {}),
+            ...(item.key_message ? { key_message: item.key_message } : {}),
+            ...(item.angle ? { angle: item.angle } : {}),
+            ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
+          },
+        });
+        created.push({
+          draft_id: draftId,
+          title: item.title.trim(),
+          email_type: item.email_type ?? null,
+        });
+      }
+      if (created.length === 0) return "No drafts could be created.";
+      state.series = created;
+      return JSON.stringify({
+        created: created.map((c) => ({ draftId: c.draft_id, title: c.title })),
+      });
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;

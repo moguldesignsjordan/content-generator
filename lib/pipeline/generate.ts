@@ -75,7 +75,13 @@ export type GenerationEvent =
 export async function generateEmailForTopicStreamed(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string; emailTypeOverride?: EmailType },
+  opts: {
+    campaignId?: string;
+    emailTypeOverride?: EmailType;
+    /** Per-email brief from a plan_series draft (meta.series_brief); wins
+     * over the shared campaign brief so series emails keep their own angle. */
+    briefOverride?: CampaignBrief;
+  },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
   try {
@@ -83,7 +89,7 @@ export async function generateEmailForTopicStreamed(
     await patchDraftGeneration(draftId, writing);
     onEvent({ type: "phase", ...writing });
 
-    const brief = await loadCampaignBrief(opts.campaignId);
+    const brief = opts.briefOverride ?? (await loadCampaignBrief(opts.campaignId));
     const tokens = resolveBrandTokens(ctx.brand);
     const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
       brief,
@@ -555,7 +561,8 @@ export async function regenerateEmailDraft(
   const ctx = await getTopicContext(draftCtx.topicId);
   if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
 
-  const brief = await loadCampaignBrief(draftCtx.campaignId);
+  const brief =
+    draftCtx.meta.series_brief ?? (await loadCampaignBrief(draftCtx.campaignId));
   const tokens = resolveBrandTokens(ctx.brand);
   const heroImage = draftCtx.meta.hero_image;
   const { system, user, emailType } = buildEmailMessages(ctx, tokens, {

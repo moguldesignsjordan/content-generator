@@ -232,10 +232,22 @@ export async function createDraftShell(args: {
    * path (lib/pipeline/run-schedule.ts) so scheduled drafts are attributable
    * and countable (see countScheduledAwaitingReview) without a schema enum. */
   triggerSource?: "schedule";
+  /** Per-email brief for a draft created as one item of a multi-email series
+   * (plan_series); stored in meta.series_brief and preferred over the shared
+   * campaign brief at generation time. */
+  seriesBrief?: CampaignBrief;
 }): Promise<string> {
   const db = getAdminClient();
-  const { ctx, campaignId, type = "email", sourceDraftId, emailType, blogType, triggerSource } =
-    args;
+  const {
+    ctx,
+    campaignId,
+    type = "email",
+    sourceDraftId,
+    emailType,
+    blogType,
+    triggerSource,
+    seriesBrief,
+  } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -265,6 +277,7 @@ export async function createDraftShell(args: {
   const meta: DraftMeta = {
     generation,
     ...(sourceDraftId ? { source_draft_id: sourceDraftId } : {}),
+    ...(seriesBrief ? { series_brief: seriesBrief } : {}),
   };
 
   const { data: draft, error: draftErr } = await db

@@ -6,7 +6,13 @@ import {
   getDraftGenerationState,
   releaseGenerationLock,
 } from "@/lib/db/queries";
-import type { BlogType, ContentJobType, EmailType, TopicContext } from "@/lib/db/types";
+import type {
+  BlogType,
+  CampaignBrief,
+  ContentJobType,
+  EmailType,
+  TopicContext,
+} from "@/lib/db/types";
 
 type Listener = (event: GenerationEvent) => void;
 
@@ -45,6 +51,7 @@ export function joinRun(
     jobType?: ContentJobType;
     emailTypeOverride?: EmailType;
     blogTypeOverride?: BlogType;
+    briefOverride?: CampaignBrief;
   },
   listener: Listener,
 ): () => void {
@@ -87,6 +94,7 @@ async function startRun(
     jobType?: ContentJobType;
     emailTypeOverride?: EmailType;
     blogTypeOverride?: BlogType;
+    briefOverride?: CampaignBrief;
   },
   emit: (event: GenerationEvent) => void,
 ): Promise<void> {

@@ -51,6 +51,89 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface PlanSeriesItem {
+  title: string;
+  topic_id?: string;
+  angle?: string;
+  key_message?: string;
+  offer_slug?: string;
+  email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
+  funnel_stage?: "awareness" | "consideration" | "decision" | "brand";
+}
+
+export interface PlanSeriesInput {
+  items: PlanSeriesItem[];
+}
+
+/**
+ * The multi-email counterpart to generate_content: creates every draft in a
+ * campaign series (one per item) as instant shells that each write themselves
+ * when opened. Per-item angle/message/offer land in meta.series_brief so the
+ * emails don't all flatten onto the one shared campaign brief.
+ */
+export const PLAN_SERIES_TOOL: Anthropic.Tool = {
+  name: "plan_series",
+  description:
+    "Create a whole multi-email campaign series at once (2 to 10 emails), e.g. " +
+    "one email per product, or a run of newsletters on different topics. Call " +
+    "it ONCE with every email in the series, and only after the user has agreed " +
+    "to the plan you proposed in a reply. Each item becomes its own draft that " +
+    "the user reviews, approves, and schedules individually; drafts appear " +
+    "instantly and each one writes itself when opened.",
+  input_schema: {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        minItems: 2,
+        maxItems: 10,
+        items: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Working title / subject direction for this email.",
+            },
+            topic_id: {
+              type: "string",
+              description:
+                "Exact id of an existing topic from the TOPICS list to reuse. " +
+                "Omit to create a new topic from the title.",
+            },
+            angle: {
+              type: "string",
+              description: "The hook or angle for THIS email specifically.",
+            },
+            key_message: {
+              type: "string",
+              description: "The one thing THIS email must land.",
+            },
+            offer_slug: {
+              type: "string",
+              description:
+                "Slug of the product/offer THIS email promotes, from the " +
+                "PRODUCTS list. Product campaigns: one per email.",
+            },
+            email_type: {
+              type: "string",
+              enum: ["newsletter", "product", "service", "promotional", "announcement"],
+              description:
+                "Optional purpose/length override for this email. Omit to derive it.",
+            },
+            funnel_stage: {
+              type: "string",
+              enum: ["awareness", "consideration", "decision", "brand"],
+              description: "Funnel stage this email serves, if a new topic is created.",
+            },
+          },
+          required: ["title"],
+        },
+      },
+    },
+    required: ["items"],
+  },
+};
+
 export interface ListRecentContentInput {
   job_type?: "email" | "blog";
 }
@@ -165,6 +248,7 @@ export const FORGET_TOOL: Anthropic.Tool = {
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   GENERATE_CONTENT_TOOL,
+  PLAN_SERIES_TOOL,
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,
