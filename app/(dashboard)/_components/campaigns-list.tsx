@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Card, ListGroup, SegmentedControl } from "@/components/ui";
-import { ChevronRightIcon } from "@/components/ui/icons";
+import { useRouter } from "next/navigation";
+import { Card, ConfirmDialog, ListGroup, SegmentedControl, Spinner, useToast } from "@/components/ui";
+import { ChevronRightIcon, TrashIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { CampaignSummary } from "@/lib/db/types";
 import { CampaignStatusBadge } from "./topic-badges";
@@ -15,9 +16,35 @@ type Filter = "all" | "active" | "done";
  * progress and an expandable row to jump straight into any of its series
  * emails without a separate detail page.
  */
-export function CampaignsList({ campaigns }: { campaigns: CampaignSummary[] }) {
+export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: CampaignSummary[] }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/campaigns/${confirmDeleteId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to delete campaign.");
+      }
+      setCampaigns((cs) => cs.filter((c) => c.id !== confirmDeleteId));
+      if (expanded === confirmDeleteId) setExpanded(null);
+      toast.success("Campaign deleted.");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete campaign.");
+    } finally {
+      setDeleting(false);
+      setConfirmDeleteId(null);
+    }
+  }
 
   const counts = {
     all: campaigns.length,
@@ -77,28 +104,38 @@ export function CampaignsList({ campaigns }: { campaigns: CampaignSummary[] }) {
 
             return (
               <div key={c.id}>
-                <button
-                  type="button"
-                  onClick={() => setExpanded(isOpen ? null : c.id)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2 active:bg-surface-3"
-                >
-                  <ChevronRightIcon
-                    size={16}
-                    className={cn(
-                      "shrink-0 text-muted-2 transition-transform",
-                      isOpen && "rotate-90",
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-medium text-foreground">
-                      {title}
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(isOpen ? null : c.id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2 active:bg-surface-3"
+                  >
+                    <ChevronRightIcon
+                      size={16}
+                      className={cn(
+                        "shrink-0 text-muted-2 transition-transform",
+                        isOpen && "rotate-90",
+                      )}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-medium text-foreground">
+                        {title}
+                      </div>
+                      <div className="mt-0.5 truncate text-[13px] text-muted">
+                        {subtitleParts.join(" · ")}
+                      </div>
                     </div>
-                    <div className="mt-0.5 truncate text-[13px] text-muted">
-                      {subtitleParts.join(" · ")}
-                    </div>
-                  </div>
-                  <CampaignStatusBadge status={c.status} />
-                </button>
+                    <CampaignStatusBadge status={c.status} />
+                  </button>
+                  <RowIconButton
+                    label="Delete campaign"
+                    danger
+                    className="mr-2"
+                    onClick={() => setConfirmDeleteId(c.id)}
+                  >
+                    <TrashIcon size={18} />
+                  </RowIconButton>
+                </div>
 
                 {isOpen && (
                   <div className="border-t border-border bg-surface-2/40 px-4 py-2">
@@ -146,6 +183,52 @@ export function CampaignsList({ campaigns }: { campaigns: CampaignSummary[] }) {
           })}
         </ListGroup>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={() => void handleDelete()}
+        tone="danger"
+        title="Delete this campaign?"
+        description="This removes the campaign and its chat thread. Emails already created stay in Emails, just no longer grouped under this campaign. This can't be undone."
+        confirmLabel="Delete"
+        loading={deleting}
+      />
     </div>
+  );
+}
+
+function RowIconButton({
+  label,
+  onClick,
+  disabled,
+  loading,
+  danger,
+  className,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  danger?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled || loading}
+      className={cn(
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+        danger && "hover:bg-danger/10 hover:text-danger",
+        className,
+      )}
+    >
+      {loading ? <Spinner size={16} /> : children}
+    </button>
   );
 }

@@ -1573,6 +1573,19 @@ export async function getCampaignPublishProgress(
   return progress;
 }
 
+/**
+ * Hard-deletes a campaign row. content_jobs.campaign_id is `on delete set
+ * null`, so the campaign's emails/blogs (and anything already published)
+ * survive untouched, just detached from this campaign; call sites should
+ * still block the delete when the campaign has sent/scheduled emails so that
+ * history isn't orphaned from a campaign the user can no longer find.
+ */
+export async function deleteCampaign(campaignId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("campaigns").delete().eq("id", campaignId);
+  if (error) throw error;
+}
+
 /** Patches a campaign (brief, topic, transcript, status) and bumps updated_at. */
 export async function updateCampaign(
   campaignId: string,
