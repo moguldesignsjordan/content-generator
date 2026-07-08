@@ -12,6 +12,7 @@ import type {
   Campaign,
   CampaignBrief,
   CampaignChatState,
+  CampaignPublishProgress,
   CampaignStatus,
   ContentJobType,
   ContentSchedule,
@@ -1509,6 +1510,67 @@ export async function getLatestActiveCampaign(
     .maybeSingle();
   if (error) throw error;
   return (data as Campaign) ?? null;
+}
+
+/** Every campaign for the brand, newest-updated first, for the Campaigns list page. */
+export async function listCampaigns(brandId: string): Promise<Campaign[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("campaigns")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data as Campaign[]) ?? [];
+}
+
+/**
+ * Per-campaign email/sent/scheduled counts for the Campaigns list page, keyed
+ * by campaign id. Two round-trips (jobs, then their publications) instead of
+ * a nested select: content_jobs has several relationships (topic, campaign),
+ * so an inferred join risks an ambiguous-relationship error, and this is the
+ * same stitching style listDrafts already uses for source-email subjects.
+ */
+export async function getCampaignPublishProgress(
+  campaignIds: string[],
+): Promise<Map<string, CampaignPublishProgress>> {
+  const progress = new Map<string, CampaignPublishProgress>();
+  if (campaignIds.length === 0) return progress;
+
+  const db = getAdminClient();
+  const { data: jobs, error: jobsErr } = await db
+    .from("content_jobs")
+    .select("id, campaign_id, type")
+    .in("campaign_id", campaignIds)
+    .eq("type", "email");
+  if (jobsErr) throw jobsErr;
+
+  const emailJobs = (jobs ?? []) as { id: string; campaign_id: string }[];
+  for (const job of emailJobs) {
+    const entry = progress.get(job.campaign_id) ?? { emails: 0, sent: 0, scheduled: 0 };
+    entry.emails += 1;
+    progress.set(job.campaign_id, entry);
+  }
+
+  const jobIds = emailJobs.map((j) => j.id);
+  if (jobIds.length === 0) return progress;
+
+  const { data: pubs, error: pubsErr } = await db
+    .from("publications")
+    .select("job_id, status")
+    .in("job_id", jobIds);
+  if (pubsErr) throw pubsErr;
+
+  const campaignByJobId = new Map(emailJobs.map((j) => [j.id, j.campaign_id]));
+  for (const pub of (pubs ?? []) as { job_id: string; status: string }[]) {
+    const campaignId = campaignByJobId.get(pub.job_id);
+    const entry = campaignId ? progress.get(campaignId) : undefined;
+    if (!entry) continue;
+    if (pub.status === "sent") entry.sent += 1;
+    else if (pub.status === "scheduled") entry.scheduled += 1;
+  }
+
+  return progress;
 }
 
 /** Patches a campaign (brief, topic, transcript, status) and bumps updated_at. */

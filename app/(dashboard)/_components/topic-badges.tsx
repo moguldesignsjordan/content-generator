@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, type BadgeTone } from "@/components/ui";
-import type { FunnelStage, KeywordMetric, TopicStatus } from "@/lib/db/types";
+import type { CampaignStatus, FunnelStage, KeywordMetric, TopicStatus } from "@/lib/db/types";
 
 const STATUS_TONES: Record<TopicStatus, BadgeTone> = {
   idea: "neutral",
@@ -81,6 +81,27 @@ export function KeywordBadge({
     data.difficulty != null ? `diff ${data.difficulty}` : null,
   ].filter(Boolean);
   return <Badge tone={tone}>{parts.length ? parts.join(" · ") : "Researched"}</Badge>;
+}
+
+const CAMPAIGN_TONES: Record<CampaignStatus, BadgeTone> = {
+  briefing: "neutral",
+  generating: "amber",
+  drafted: "cyan",
+  done: "success",
+};
+const CAMPAIGN_LABELS: Record<CampaignStatus, string> = {
+  briefing: "Briefing",
+  generating: "Generating",
+  drafted: "Drafted",
+  done: "Done",
+};
+
+export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
+  return (
+    <Badge tone={CAMPAIGN_TONES[status]} dot>
+      {CAMPAIGN_LABELS[status]}
+    </Badge>
+  );
 }
 
 export function DraftLink({

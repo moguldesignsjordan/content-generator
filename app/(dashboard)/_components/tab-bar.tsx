@@ -20,7 +20,7 @@ export function TabBar({
       )}
       style={{ paddingBottom: "var(--sab)" }}
     >
-      <div className="mx-auto flex max-w-md items-stretch justify-around px-2">
+      <div className="flex items-stretch justify-around px-1">
         {NAV.map(({ href, label, Icon, match }) => {
           const active = match(pathname);
           return (
@@ -28,15 +28,15 @@ export function TabBar({
               key={href}
               href={href}
               className={cn(
-                "relative flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors",
+                "relative flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors",
                 active ? "text-accent" : "text-muted hover:text-foreground",
               )}
             >
               {active && (
-                <span className="absolute top-0 h-[2.5px] w-8 rounded-full bg-accent" />
+                <span className="absolute top-0 h-[2.5px] w-6 rounded-full bg-accent" />
               )}
-              <Icon size={22} />
-              <span className="text-[10.5px] font-medium tracking-tight">
+              <Icon size={20} />
+              <span className="whitespace-nowrap text-[9.5px] font-medium tracking-tight">
                 {label}
               </span>
             </Link>

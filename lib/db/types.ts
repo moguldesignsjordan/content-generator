@@ -329,6 +329,17 @@ export interface Campaign {
   updated_at: string;
 }
 
+/** How far a campaign's emails have gotten toward MailerLite, for the
+ * Campaigns list page. Counts only "email" content_jobs (blogs publish to
+ * Sanity, which has no send/schedule concept). */
+export interface CampaignPublishProgress {
+  emails: number;
+  sent: number;
+  scheduled: number;
+}
+
+export type CampaignSummary = Campaign & CampaignPublishProgress;
+
 // Everything the generate pipeline needs to draft an on-strategy email for one
 // topic (assembled by getTopicContext). product resolves the topic's
 // maps_to_product slug to a real offer (null when the slug has no row).

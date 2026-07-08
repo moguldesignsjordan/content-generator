@@ -4,6 +4,7 @@ import {
   GearIcon,
   HomeIcon,
   MailIcon,
+  MegaphoneIcon,
   PlusIcon,
   type IconProps,
 } from "@/components/ui/icons";
@@ -36,6 +37,12 @@ export const NAV: NavItem[] = [
     label: "Blogs",
     Icon: BlogIcon,
     match: (p) => p.startsWith("/blogs"),
+  },
+  {
+    href: "/campaigns",
+    label: "Campaigns",
+    Icon: MegaphoneIcon,
+    match: (p) => p.startsWith("/campaigns"),
   },
   {
     href: "/create",
