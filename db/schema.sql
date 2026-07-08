@@ -157,6 +157,7 @@
     chat_state  jsonb not null default '{}'::jsonb,  -- { messages: [{role,content}] }
     status      text not null default 'briefing'
       check (status in ('briefing', 'generating', 'drafted', 'done')),
+    archived    boolean not null default false,  -- hides from the default Campaigns list
     created_at  timestamptz not null default now(),
     updated_at  timestamptz not null default now()
   );
@@ -297,6 +298,7 @@
   create index idx_products_brand   on products(brand_id);
   create index idx_brand_memory_brand on brand_memory(brand_id);
   create index idx_campaigns_brand  on campaigns(brand_id);
+  create index idx_campaigns_archived on campaigns(archived);
   create index idx_topics_archived  on topics(archived);
   create index idx_drafts_archived  on drafts(archived);
   create index idx_content_schedules_due   on content_schedules(next_run_at) where active;

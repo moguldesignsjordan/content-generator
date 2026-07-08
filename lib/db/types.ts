@@ -325,6 +325,7 @@ export interface Campaign {
   brief: CampaignBrief;
   chat_state: CampaignChatState;
   status: CampaignStatus;
+  archived: boolean;
   created_at: string;
   updated_at: string;
 }

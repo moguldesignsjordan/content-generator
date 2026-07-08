@@ -1586,6 +1586,17 @@ export async function deleteCampaign(campaignId: string): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Archives (or unarchives) a campaign: hides it from the default Campaigns
+ * list without touching its emails or publish history. Unlike hard delete,
+ * always safe regardless of sent/scheduled state.
+ */
+export async function archiveCampaign(campaignId: string, archived: boolean): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("campaigns").update({ archived }).eq("id", campaignId);
+  if (error) throw error;
+}
+
 /** Patches a campaign (brief, topic, transcript, status) and bumps updated_at. */
 export async function updateCampaign(
   campaignId: string,

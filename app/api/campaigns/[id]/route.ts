@@ -31,7 +31,7 @@ export async function DELETE(
     return NextResponse.json(
       {
         error:
-          "This campaign has emails that were sent or scheduled, so it can't be deleted.",
+          "This campaign has emails that were sent or scheduled, so it can't be deleted. Archive it instead.",
       },
       { status: 409 },
     );

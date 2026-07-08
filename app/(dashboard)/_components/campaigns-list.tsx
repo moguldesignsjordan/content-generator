@@ -4,12 +4,12 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, ConfirmDialog, ListGroup, SegmentedControl, Spinner, useToast } from "@/components/ui";
-import { ChevronRightIcon, TrashIcon } from "@/components/ui/icons";
+import { ArchiveIcon, ChevronRightIcon, TrashIcon, UnarchiveIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { CampaignSummary } from "@/lib/db/types";
 import { CampaignStatusBadge } from "./topic-badges";
 
-type Filter = "all" | "active" | "done";
+type Filter = "all" | "active" | "done" | "archived";
 
 /**
  * The Campaigns list: every campaign, newest-updated first, with its send
@@ -24,6 +24,27 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  async function handleArchive(campaignId: string, archive: boolean) {
+    setActingId(campaignId);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/archive`, {
+        method: archive ? "POST" : "DELETE",
+      });
+      if (!res.ok) throw new Error();
+      setCampaigns((cs) =>
+        cs.map((c) => (c.id === campaignId ? { ...c, archived: archive } : c)),
+      );
+      if (archive && expanded === campaignId) setExpanded(null);
+      toast.success(archive ? "Archived." : "Unarchived.");
+      router.refresh();
+    } catch {
+      toast.error(`Failed to ${archive ? "archive" : "unarchive"}.`);
+    } finally {
+      setActingId(null);
+    }
+  }
 
   async function handleDelete() {
     if (!confirmDeleteId) return;
@@ -46,17 +67,23 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
     }
   }
 
+  // Archived campaigns are hidden from all/active/done (tucked away by
+  // design); the Archived tab is the only place they show.
+  const active = campaigns.filter((c) => !c.archived);
   const counts = {
-    all: campaigns.length,
-    active: campaigns.filter((c) => c.status !== "done").length,
-    done: campaigns.filter((c) => c.status === "done").length,
+    all: active.length,
+    active: active.filter((c) => c.status !== "done").length,
+    done: active.filter((c) => c.status === "done").length,
+    archived: campaigns.filter((c) => c.archived).length,
   };
   const filtered =
-    filter === "all"
-      ? campaigns
-      : filter === "done"
-        ? campaigns.filter((c) => c.status === "done")
-        : campaigns.filter((c) => c.status !== "done");
+    filter === "archived"
+      ? campaigns.filter((c) => c.archived)
+      : filter === "all"
+        ? active
+        : filter === "done"
+          ? active.filter((c) => c.status === "done")
+          : active.filter((c) => c.status !== "done");
 
   if (campaigns.length === 0) {
     return (
@@ -82,6 +109,9 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
           { value: "all", label: `All ${counts.all}` },
           { value: "active", label: `Active ${counts.active}` },
           { value: "done", label: `Done ${counts.done}` },
+          ...(counts.archived > 0
+            ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
+            : []),
         ]}
       />
 
@@ -103,7 +133,7 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
             ].filter(Boolean);
 
             return (
-              <div key={c.id}>
+              <div key={c.id} className={cn(c.archived && "opacity-60")}>
                 <div className="flex items-center">
                   <button
                     type="button"
@@ -127,6 +157,14 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                     </div>
                     <CampaignStatusBadge status={c.status} />
                   </button>
+                  <RowIconButton
+                    label={c.archived ? "Unarchive campaign" : "Archive campaign"}
+                    loading={actingId === c.id}
+                    disabled={!!actingId}
+                    onClick={() => handleArchive(c.id, !c.archived)}
+                  >
+                    {c.archived ? <UnarchiveIcon size={18} /> : <ArchiveIcon size={18} />}
+                  </RowIconButton>
                   <RowIconButton
                     label="Delete campaign"
                     danger
