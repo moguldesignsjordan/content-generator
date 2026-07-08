@@ -110,9 +110,14 @@ export async function generateEmailForTopicStreamed(
     // image on FIRST generation only. Regenerations keep whatever image the
     // draft already has, so a deliberately removed image never comes back.
     // Non-fatal by design: an image hiccup must never cost the whole draft.
+    // Series emails skip auto imaging by default: a 10-email campaign would
+    // otherwise spend 10 Gemini calls up front. Single emails and blogs keep
+    // the on-by-default behavior (see maybeAutoHeroImage).
+    const isSeriesEmail = Boolean(opts.briefOverride);
     const heroImage = await maybeAutoHeroImage(ctx, copy.headline, usageDeltas, {
       draftId,
       onEvent,
+      skip: isSeriesEmail,
     });
     if (heroImage) {
       content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
@@ -160,11 +165,14 @@ export async function generateEmailForTopicStreamed(
 }
 
 /**
- * Auto-generates a hero image when the brand opted in
- * (visual_identity.image_gen.auto) and Gemini is configured. Returns
- * undefined (and just logs) on any failure or when the pref is off: the
- * approval gate still covers the image, and the reviewer can always
- * regenerate, replace, move, or remove it on the review screen.
+ * Auto-generates a hero image on by default for single emails and blogs,
+ * unless the brand explicitly opted out (visual_identity.image_gen.auto ===
+ * false) or the caller passes skip (series emails, to keep a multi-email
+ * campaign from spending one Gemini call per email up front). Returns
+ * undefined (and just logs) on any failure, when Gemini isn't configured, or
+ * when skipped: the approval gate still covers the image, and the reviewer
+ * can always generate, regenerate, replace, move, or remove it on the review
+ * screen.
  */
 export async function maybeAutoHeroImage(
   ctx: TopicContext,
@@ -173,10 +181,13 @@ export async function maybeAutoHeroImage(
   progress?: {
     draftId: string;
     onEvent: (event: GenerationEvent) => void;
+    skip?: boolean;
   },
 ): Promise<ContentImage | undefined> {
   const prefs = ctx.brand.visual_identity?.image_gen;
-  if (!prefs?.auto || !isGeminiConfigured()) return undefined;
+  if (progress?.skip || prefs?.auto === false || !isGeminiConfigured()) {
+    return undefined;
+  }
 
   if (progress) {
     const imaging = { phase: "imaging", label: "Creating your image" };
@@ -189,7 +200,7 @@ export async function maybeAutoHeroImage(
       brandName: ctx.brand.name,
       topicTitle: ctx.topic.title,
       headline,
-      style: prefs.style ?? "illustration",
+      style: prefs?.style ?? "illustration",
     });
     usageDeltas.push(...generated.usage);
     return { ...generated.image, placement: "top" };

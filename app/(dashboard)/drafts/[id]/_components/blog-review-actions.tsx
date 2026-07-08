@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AccentSpinner,
   Badge,
   Button,
   Card,
@@ -69,6 +70,7 @@ export function BlogReviewActions({
     initialMeta.hero_image ?? null,
   );
   const [imageOpen, setImageOpen] = useState(false);
+  const [regeneratingImage, setRegeneratingImage] = useState(false);
   const [archived, setArchived] = useState(initialArchived);
   const [archiving, setArchiving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -160,6 +162,32 @@ export function BlogReviewActions({
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /** One-tap re-roll: same style, a fresh AI-crafted take. The full
+   * ImageSheet still covers style changes, subject, and exact-prompt. */
+  async function regenerateImage() {
+    if (regeneratingImage || !heroImage || heroImage.style === "uploaded") return;
+    setRegeneratingImage(true);
+    try {
+      const form = new FormData();
+      form.set("mode", "generate");
+      form.set("style", heroImage.style);
+      const res = await fetch(`/api/drafts/${draftId}/image`, {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as { html?: string; image?: ContentImage; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't regenerate the image.");
+      }
+      setHtml(data.html);
+      setHeroImage(data.image ?? null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't regenerate the image.");
+    } finally {
+      setRegeneratingImage(false);
+    }
   }
 
   function openSeo() {
@@ -391,12 +419,23 @@ export function BlogReviewActions({
             Article preview: click any part of the text to edit it
           </p>
           <div className="flex shrink-0 items-center gap-3">
+            {heroImage && heroImage.style !== "uploaded" && (
+              <button
+                type="button"
+                onClick={regenerateImage}
+                disabled={regeneratingImage}
+                className="flex items-center gap-1.5 text-[12px] font-medium text-accent transition-colors hover:text-accent-press disabled:opacity-60"
+              >
+                {regeneratingImage ? <AccentSpinner size={12} /> : "↻"} Regenerate
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setImageOpen(true)}
-              className="text-[12px] font-medium text-accent transition-colors hover:text-accent-press"
+              disabled={regeneratingImage}
+              className="text-[12px] font-medium text-accent transition-colors hover:text-accent-press disabled:opacity-60"
             >
-              {heroImage ? "Change image" : "+ Add image"}
+              {heroImage ? "Edit image" : "+ Add image"}
             </button>
             <button
               type="button"

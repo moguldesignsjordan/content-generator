@@ -11,7 +11,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button, Logo, Select, useToast } from "@/components/ui";
+import { AccentSpinner, Button, Logo, Select, useToast } from "@/components/ui";
 import {
   BlogIcon,
   MailIcon,
@@ -20,6 +20,7 @@ import {
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { useGenerationStream } from "@/lib/use-generation-stream";
 import type { BlogType, EmailType, FunnelStage, SeriesDraftRef } from "@/lib/db/types";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
@@ -818,13 +819,29 @@ function BriefCardView({
 }
 
 
+/** How many series emails generate at once; keeps a 10-email series from
+ * firing 10 concurrent Claude calls at once. */
+const SERIES_CONCURRENCY = 3;
+
 /**
- * The deliverable card for a multi-email campaign: one row per created draft,
- * each linking to its review screen. Drafts are shells at this point; each
- * email generates itself when its page is opened, so the series can be
- * reviewed and scheduled one by one.
+ * The deliverable card for a multi-email campaign: one row per created draft.
+ * All emails start writing themselves as soon as the card appears (a few at a
+ * time, via the same SSE stream the draft review page uses), so the whole
+ * series is ready to review without opening each draft first.
  */
 function SeriesCardView({ items }: { items: SeriesDraftRef[] }) {
+  const ids = items.map((item) => item.draft_id);
+  const [settled, setSettled] = useState<Record<string, "ready" | "error">>({});
+
+  // The first SERIES_CONCURRENCY not-yet-settled drafts are "active" (mounted,
+  // streaming); the rest wait their turn. A settled slot frees up immediately
+  // since it drops out of this filter on the next render.
+  const active = new Set<string>();
+  for (const id of ids) {
+    if (active.size >= SERIES_CONCURRENCY) break;
+    if (!settled[id]) active.add(id);
+  }
+
   return (
     <div className="bubble-in rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
       <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
@@ -838,32 +855,140 @@ function SeriesCardView({ items }: { items: SeriesDraftRef[] }) {
       </div>
       <div className="divide-y divide-border">
         {items.map((item, i) => (
-          <Link
+          <SeriesRow
             key={item.draft_id}
-            href={`/drafts/${item.draft_id}`}
-            className="group flex items-center gap-3 px-1 py-2.5 text-[13.5px]"
-          >
-            <span className="w-5 shrink-0 text-right tabular-nums text-muted-2">
-              {i + 1}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground group-hover:text-accent">
-              {item.title}
-            </span>
-            {item.email_type && (
-              <span className="shrink-0 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] capitalize text-muted">
-                {item.email_type}
-              </span>
-            )}
-            <span className="shrink-0 text-[12px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100">
-              Open
-            </span>
-          </Link>
+            index={i}
+            item={item}
+            active={active.has(item.draft_id)}
+            settledStatus={settled[item.draft_id]}
+            onSettle={(status) =>
+              setSettled((s) => ({ ...s, [item.draft_id]: status }))
+            }
+          />
         ))}
       </div>
       <p className="mt-2 px-1 text-[12px] text-muted-2">
-        Each email writes itself when you open it. Review, approve, and
-        schedule them one at a time.
+        All emails are writing themselves now. Open any one to review, approve,
+        and schedule it.
       </p>
+    </div>
+  );
+}
+
+function SeriesRow({
+  index,
+  item,
+  active,
+  settledStatus,
+  onSettle,
+}: {
+  index: number;
+  item: SeriesDraftRef;
+  active: boolean;
+  settledStatus: "ready" | "error" | undefined;
+  onSettle: (status: "ready" | "error") => void;
+}) {
+  const typeChip = item.email_type && (
+    <span className="shrink-0 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] capitalize text-muted">
+      {item.email_type}
+    </span>
+  );
+
+  if (!active && !settledStatus) {
+    // Not this row's turn yet: static, no connection opened.
+    return (
+      <div className="flex items-center gap-3 px-1 py-2.5 text-[13.5px] opacity-70">
+        <span className="w-5 shrink-0 text-right tabular-nums text-muted-2">{index + 1}</span>
+        <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+        {typeChip}
+        <span className="shrink-0 text-[11.5px] text-muted-2">Queued</span>
+      </div>
+    );
+  }
+
+  return (
+    <SeriesRowStreaming
+      index={index}
+      item={item}
+      settledStatus={settledStatus}
+      onSettle={onSettle}
+      typeChip={typeChip}
+    />
+  );
+}
+
+/** Split out so useGenerationStream only mounts (and opens a connection) once
+ * a row goes active, and unmounts are cheap once it settles. */
+function SeriesRowStreaming({
+  index,
+  item,
+  settledStatus,
+  onSettle,
+  typeChip,
+}: {
+  index: number;
+  item: SeriesDraftRef;
+  settledStatus: "ready" | "error" | undefined;
+  onSettle: (status: "ready" | "error") => void;
+  typeChip: ReactNode;
+}) {
+  const stream = useGenerationStream(item.draft_id);
+  const notified = useRef(false);
+
+  useEffect(() => {
+    if (notified.current) return;
+    if (stream.status === "ready" || stream.status === "error") {
+      notified.current = true;
+      onSettle(stream.status);
+    }
+  }, [stream.status, onSettle]);
+
+  const status = settledStatus ?? stream.status;
+  const isReady = status === "ready";
+  const isError = status === "error";
+
+  if (isReady || isError) {
+    return (
+      <Link
+        href={`/drafts/${item.draft_id}`}
+        className="group flex items-center gap-3 px-1 py-2.5 text-[13.5px]"
+      >
+        <span className="w-5 shrink-0 text-right tabular-nums text-muted-2">{index + 1}</span>
+        <span className="min-w-0 flex-1 truncate text-foreground group-hover:text-accent">
+          {item.title}
+        </span>
+        {typeChip}
+        {isError ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              notified.current = false;
+              stream.retry();
+            }}
+            className="shrink-0 rounded-full bg-red-500/10 px-2.5 py-1 text-[11.5px] font-medium text-red-500 transition-colors hover:bg-red-500/20"
+          >
+            Retry
+          </button>
+        ) : (
+          <span className="shrink-0 text-[12px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100">
+            Open
+          </span>
+        )}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-1 py-2.5 text-[13.5px]">
+      <span className="w-5 shrink-0 text-right tabular-nums text-muted-2">{index + 1}</span>
+      <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+      {typeChip}
+      <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted-2">
+        <AccentSpinner size={12} />
+        {stream.label}
+      </span>
     </div>
   );
 }

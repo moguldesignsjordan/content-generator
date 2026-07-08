@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  AccentSpinner,
   Button,
   Input,
   SegmentedControl,
   Sheet,
   Skeleton,
   Textarea,
+  useToast,
 } from "@/components/ui";
 import { ImageSheet } from "./image-sheet";
 import type { ContentImage } from "@/lib/db/types";
@@ -146,8 +148,39 @@ export function EmailPreview({
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [regeneratingImage, setRegeneratingImage] = useState(false);
+  const toast = useToast();
 
   const hasImage = html.includes('data-region="image"');
+
+  /** One-tap re-roll: same style and placement, a fresh AI-crafted take. Used
+   * by the prominent preview overlay; the full ImageSheet still covers style
+   * changes, subject, exact-prompt, and reference images. */
+  async function regenerateImage() {
+    if (regeneratingImage || !image || image.style === "uploaded") return;
+    setRegeneratingImage(true);
+    try {
+      const form = new FormData();
+      form.set("mode", "generate");
+      form.set("style", image.style);
+      form.set("placement", image.placement ?? "top");
+      const res = await fetch(`/api/drafts/${draftId}/image`, {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as { html?: string; image?: ContentImage; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't regenerate the image.");
+      }
+      onHtmlChange(data.html);
+      setImage(data.image ?? null);
+      onEdited?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't regenerate the image.");
+    } finally {
+      setRegeneratingImage(false);
+    }
+  }
 
   useEffect(() => {
     setLoaded(false);
@@ -373,6 +406,28 @@ export function EmailPreview({
         >
           + Add image
         </button>
+      )}
+      {loaded && hasImage && (
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+          {image && image.style !== "uploaded" && (
+            <button
+              type="button"
+              onClick={regenerateImage}
+              disabled={regeneratingImage}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2/90 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-surface-3 disabled:opacity-60"
+            >
+              {regeneratingImage ? <AccentSpinner size={12} /> : "↻"} Regenerate
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setImageOpen(true)}
+            disabled={regeneratingImage}
+            className="rounded-full border border-border bg-surface-2/90 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-surface-3 disabled:opacity-60"
+          >
+            Edit image
+          </button>
+        </div>
       )}
       {hotspots.map((h, i) => (
         <button

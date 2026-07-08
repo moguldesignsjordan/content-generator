@@ -67,7 +67,9 @@ export function VisualIdentityForm({
     initialFooter.postal_address ?? "",
   );
   const [social, setSocial] = useState(initialSocial);
-  const [autoImages, setAutoImages] = useState(vi.image_gen?.auto ?? false);
+  // Auto image generation is on by default (see maybeAutoHeroImage); only an
+  // explicit false in saved settings turns it off.
+  const [autoImages, setAutoImages] = useState(vi.image_gen?.auto !== false);
   const [imageStyle, setImageStyle] = useState<ContentImageStyle>(
     vi.image_gen?.style ?? "illustration",
   );
