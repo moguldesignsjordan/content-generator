@@ -255,6 +255,20 @@
     padding-right: var(--sar);
   }
 
+  /* Header padding for native shells (Capacitor iOS/Android): at least 25px
+     of breathing room on every device, growing past that on notched/Dynamic
+     Island phones where the safe-area inset itself exceeds 25px. A plain
+     safe-area inset alone isn't enough here because some Android WebViews
+     report 0 for it, which would leave the header flush against the status
+     bar with no floor. */
+  .safe-header-pt {
+    padding-top: max(25px, var(--sat));
+  }
+  .safe-header-px {
+    padding-left: max(25px, var(--sal));
+    padding-right: max(25px, var(--sar));
+  }
+
   /* Room for the fixed mobile bottom tab bar. */
   .pb-tabbar {
     padding-bottom: calc(76px + var(--sab));

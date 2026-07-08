@@ -41,7 +41,7 @@ export function AppShell({
         {/* Mobile top bar */}
         <header
           className={cn(
-            "sticky top-0 z-40 flex h-14 items-center justify-between border-b border-transparent bg-background/85 px-4 backdrop-blur-xl transition-colors safe-pt md:hidden",
+            "sticky top-0 z-40 flex min-h-14 items-center justify-between border-b border-transparent bg-background/85 backdrop-blur-xl transition-colors safe-header-pt safe-header-px md:hidden",
             scrolled && "border-border",
           )}
         >
