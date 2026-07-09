@@ -370,10 +370,6 @@ export function CreateAgent({
             ref={scrollRef}
             className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
           >
-            {messages.map((m, i) => (
-              <Bubble key={i} msg={m} />
-            ))}
-
             {card && (
               <BriefCardView
                 card={card}
@@ -386,14 +382,25 @@ export function CreateAgent({
                 onEmailTypeChange={setEmailType}
                 blogType={blogType}
                 onBlogTypeChange={setBlogType}
-                onEditRow={(label, value) =>
-                  send(`Change the ${label.toLowerCase()}: ${value}`)
-                }
+                onApply={(pending) => {
+                  const parts: string[] = [];
+                  if (pending.Topic) parts.push(`the topic to "${pending.Topic}"`);
+                  if (pending.For) parts.push(`the audience to "${pending.For}"`);
+                  if (pending.Goal) parts.push(`the goal to "${pending.Goal}"`);
+                  if (pending.Offer) parts.push(`the offer to "${pending.Offer}"`);
+                  if (pending.Tone) parts.push(`the tone to "${pending.Tone}"`);
+                  if (!parts.length) return;
+                  send(`Update the brief: change ${parts.join(", ")}.`);
+                }}
                 onGenerate={generate}
               />
             )}
 
             {series && series.length > 0 && <SeriesCardView items={series} />}
+
+            {messages.map((m, i) => (
+              <Bubble key={i} msg={m} />
+            ))}
 
             {options && options.length > 0 && !loading && (
               <div className="bubble-in flex flex-wrap gap-2">
@@ -646,9 +653,11 @@ interface BriefRow {
 }
 
 /**
- * The editable brief card. Each row is tap-to-edit; committing a row sends a
- * short instruction back through the agent so it applies the change as a brief
- * update. When ready, a Generate action hands off to the draft pipeline.
+ * The editable brief card. Every row is tap-to-edit, but edits are held
+ * locally until "Apply changes" is pressed — so you can fill out the whole
+ * card and send it through the agent in a single round-trip instead of one
+ * field at a time. When ready, a Generate action hands off to the draft
+ * pipeline.
  */
 function BriefCardView({
   card,
@@ -661,7 +670,7 @@ function BriefCardView({
   onEmailTypeChange,
   blogType,
   onBlogTypeChange,
-  onEditRow,
+  onApply,
   onGenerate,
 }: {
   card: BriefCard;
@@ -674,9 +683,13 @@ function BriefCardView({
   onEmailTypeChange: (t: EmailType | "") => void;
   blogType: BlogType | "";
   onBlogTypeChange: (t: BlogType | "") => void;
-  onEditRow: (label: string, value: string) => void;
+  onApply: (pending: Partial<Record<string, string>>) => void;
   onGenerate: () => void;
 }) {
+  // Uncommitted row edits, keyed by row label. Held locally until Apply sends
+  // them through the agent in one batch, then cleared.
+  const [drafts, setDrafts] = useState<Partial<Record<string, string>>>({});
+
   const rows: BriefRow[] = [
     { label: "Topic", value: card.topicTitle },
     { label: "For", value: card.audience },
@@ -698,6 +711,12 @@ function BriefCardView({
       hint: card.tone ? undefined : "brand voice",
     },
   ];
+
+  // Number of rows with a pending (uncommitted) edit, in label order.
+  const pendingLabels = rows
+    .map((r) => r.label)
+    .filter((label) => drafts[label] !== undefined);
+  const pendingCount = pendingLabels.length;
 
   return (
     <div
@@ -726,13 +745,36 @@ function BriefCardView({
           <EditableRow
             key={row.label}
             label={row.label}
-            value={row.value}
+            value={drafts[row.label] ?? row.value}
             hint={row.hint}
             disabled={disabled}
-            onCommit={(value) => onEditRow(row.label, value)}
+            onCommit={(value) =>
+              setDrafts((d) => ({ ...d, [row.label]: value }))
+            }
           />
         ))}
       </div>
+
+      {/* Batch apply: send every pending row edit through the agent at once
+          instead of one field per round-trip. Hidden until something changes. */}
+      {pendingCount > 0 && (
+        <div className="flex items-center justify-between gap-3 px-1 pt-3">
+          <span className="text-[11.5px] text-muted-2">
+            {pendingCount} change{pendingCount === 1 ? "" : "s"} ready
+          </span>
+          <Button
+            size="sm"
+            variant="gradient"
+            onClick={() => {
+              onApply(drafts);
+              setDrafts({});
+            }}
+            disabled={disabled}
+          >
+            Apply changes
+          </Button>
+        </div>
+      )}
 
       {card.keyMessage && (
         <p className="mt-2 rounded-[var(--radius-md)] bg-surface-3 px-3 py-2 text-[13px] italic text-muted">
