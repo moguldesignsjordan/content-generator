@@ -15,10 +15,13 @@ import { ImageSheet } from "./image-sheet";
 import type { ContentImage } from "@/lib/db/types";
 import { forceColorScheme, type EmailPreviewMode } from "@/lib/email/preview-mode";
 import {
+  applyStyleChanges,
   countRegion,
   DELETABLE_REGIONS,
   guessStyleValue,
+  locateRegion,
   removeRegion,
+  replaceRegionText,
   type StyleChanges,
 } from "@/lib/email/inline-style";
 
@@ -138,6 +141,10 @@ export function EmailPreview({
 }: EmailPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  /** The last HTML the server confirmed. Optimistic edits render ahead of this
+   *  and revert to it on failure, so a botched edit (or one stacked on a botched
+   *  one) unwinds to a known-good state rather than a stale per-call snapshot. */
+  const confirmedHtmlRef = useRef(html);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [active, setActive] = useState<Hotspot | null>(null);
   const [tool, setTool] = useState<ToolTab>("wording");
@@ -280,6 +287,39 @@ export function EmailPreview({
     setConfirmingDelete(false);
   }
 
+  /**
+   * Optimistic edit core: paint `optimisticHtml` into the preview immediately,
+   * then run the save round-trip in the background. The server's response is
+   * authoritative (it re-applies em-dash stripping + the unsubscribe guarantee),
+   * so on success we record it as confirmed and adopt it only if it differs
+   * (avoids a needless iframe remount in the common case). On failure we revert
+   * the preview to the last confirmed HTML and toast. Returns the confirmed
+   * html on success, or null on failure (caller decides whether to close).
+   */
+  async function runOptimistic(
+    optimisticHtml: string,
+    fetchFn: () => Promise<Response>,
+    failureMsg: string,
+  ): Promise<{ html: string } | null> {
+    onHtmlChange(optimisticHtml);
+    try {
+      const res = await fetchFn();
+      const data = (await res.json().catch(() => ({}))) as {
+        html?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.html) throw new Error(data.error ?? failureMsg);
+      confirmedHtmlRef.current = data.html;
+      if (data.html !== optimisticHtml) onHtmlChange(data.html);
+      onEdited?.();
+      return { html: data.html };
+    } catch (err) {
+      onHtmlChange(confirmedHtmlRef.current);
+      toast.error(err instanceof Error ? err.message : failureMsg);
+      return null;
+    }
+  }
+
   /** A STYLE change (chips or free text), scoped to the active region. */
   async function applyStyle(instruction: string) {
     if (!active || applying) return;
@@ -300,6 +340,7 @@ export function EmailPreview({
       if (!res.ok || !data.html) {
         throw new Error(data.error ?? "Couldn't apply that change.");
       }
+      confirmedHtmlRef.current = data.html;
       onHtmlChange(data.html);
       onEdited?.();
       closeSheet();
@@ -314,6 +355,14 @@ export function EmailPreview({
    * A WORDING change on the active region. mode "edit" swaps in `newText`
    * verbatim; mode "regenerate" rewrites the region's text, optionally shaped
    * by `instruction`.
+   *
+   * The verbatim "edit" is optimistic: the same pure `replaceRegionText` the
+   * server uses natively is run client-side, and if it produces a result the
+   * preview updates instantly while the save runs in the background. If the
+   * region's structure is too complex for the native swap (replaceRegionText
+   * returns null) we fall through to the non-optimistic path, where the server
+   * rewrites it with the model — that needs a spinner. "regenerate" is always
+   * AI, so it's never optimistic.
    */
   async function applyCopy(
     mode: "edit" | "regenerate",
@@ -322,8 +371,43 @@ export function EmailPreview({
   ) {
     if (!active || applying) return;
     if (mode === "edit" && !newText?.trim()) return;
-    setApplying(true);
     setEditError(null);
+
+    if (mode === "edit") {
+      const located = locateRegion(html, active.region, active.regionIndex);
+      const nextEl =
+        located !== null
+          ? replaceRegionText(located.outerHTML, active.region, newText!.trim())
+          : null;
+      // Client native succeeded → server native will too (identical pure fn on
+      // identical html), so we can paint it ahead of the round-trip.
+      if (located && nextEl !== null) {
+        const optimisticHtml =
+          html.slice(0, located.start) + nextEl + html.slice(located.end);
+        const ok = await runOptimistic(
+          optimisticHtml,
+          () =>
+            fetch(`/api/drafts/${draftId}/copy`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                region: active.region,
+                regionIndex: active.regionIndex,
+                regionLabel: active.label,
+                snippet: active.snippet,
+                mode,
+                newText: newText ?? "",
+              }),
+            }),
+          "Couldn't apply that edit.",
+        );
+        if (ok) closeSheet();
+        return;
+      }
+      // else: native swap impossible → fall through to the AI path below.
+    }
+
+    setApplying(true);
     try {
       const res = await fetch(`/api/drafts/${draftId}/copy`, {
         method: "POST",
@@ -343,6 +427,7 @@ export function EmailPreview({
       if (!res.ok || !data.html) {
         throw new Error(data.error ?? "Couldn't apply that edit.");
       }
+      confirmedHtmlRef.current = data.html;
       onHtmlChange(data.html);
       onEdited?.();
       closeSheet();
@@ -355,36 +440,36 @@ export function EmailPreview({
 
   /**
    * A DESIGN change on the active region: one or more mechanical CSS
-   * properties, applied instantly with no model call. Unlike Wording/Style,
-   * this deliberately doesn't close the sheet, so color/spacing/font/align/
-   * bold tweaks can be chained without reopening the hotspot each time.
+   * properties, applied with no model call. Optimistic: the same pure
+   * `applyStyleChanges` the server uses is run client-side so the preview
+   * updates instantly and the save runs in the background. Doesn't close the
+   * sheet, so color/spacing/font/align/bold tweaks can be chained rapidly.
    */
   async function applyStyleEdit(changes: StyleChanges) {
     if (!active || applying) return;
-    setApplying(true);
-    setEditError(null);
-    try {
-      const res = await fetch(`/api/drafts/${draftId}/style-edit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          region: active.region,
-          regionIndex: active.regionIndex,
-          regionLabel: active.label,
-          changes,
-        }),
-      });
-      const data = (await res.json()) as { html?: string; error?: string };
-      if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't apply that change.");
-      }
-      onHtmlChange(data.html);
-      onEdited?.();
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Couldn't apply that change.");
-    } finally {
-      setApplying(false);
+    const located = locateRegion(html, active.region, active.regionIndex);
+    if (!located) {
+      toast.error("Couldn't find that section. Refresh and try again.");
+      return;
     }
+    const nextEl = applyStyleChanges(located.outerHTML, changes);
+    const optimisticHtml =
+      html.slice(0, located.start) + nextEl + html.slice(located.end);
+    void runOptimistic(
+      optimisticHtml,
+      () =>
+        fetch(`/api/drafts/${draftId}/style-edit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            region: active.region,
+            regionIndex: active.regionIndex,
+            regionLabel: active.label,
+            changes,
+          }),
+        }),
+      "Couldn't apply that change.",
+    );
   }
 
   /**
@@ -398,39 +483,27 @@ export function EmailPreview({
   async function handleDelete() {
     if (!active) return;
     const target = active;
-    const prevHtml = html;
-
     const optimistic = removeRegion(html, target.region, target.regionIndex);
     if ("error" in optimistic) {
       setEditError(optimistic.error);
       return;
     }
-    onHtmlChange(optimistic.html);
     closeSheet();
     toast.success("Section deleted.");
-
-    try {
-      const res = await fetch(`/api/drafts/${draftId}/delete-region`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          region: target.region,
-          regionIndex: target.regionIndex,
-          regionLabel: target.label,
+    void runOptimistic(
+      optimistic.html,
+      () =>
+        fetch(`/api/drafts/${draftId}/delete-region`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            region: target.region,
+            regionIndex: target.regionIndex,
+            regionLabel: target.label,
+          }),
         }),
-      });
-      const data = (await res.json()) as { html?: string; error?: string };
-      if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't delete that section.");
-      }
-      // Adopt the server's post-processed html only if it differs (avoids a
-      // needless second iframe remount in the common case).
-      if (data.html !== optimistic.html) onHtmlChange(data.html);
-      onEdited?.();
-    } catch (err) {
-      onHtmlChange(prevHtml);
-      toast.error(err instanceof Error ? err.message : "Couldn't delete that section. Reverted.");
-    }
+      "Couldn't delete that section. Reverted.",
+    );
   }
 
   const isDeletableRegion = !!active && DELETABLE_REGIONS.includes(
