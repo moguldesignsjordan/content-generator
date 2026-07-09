@@ -81,6 +81,7 @@ export async function GET(
             jobType: draftCtx.jobType,
             emailTypeOverride: draftCtx.emailType ?? undefined,
             blogTypeOverride: draftCtx.blogType ?? undefined,
+            seedIndex: draftCtx.meta.series_seed_index,
           },
           onEvent,
         );

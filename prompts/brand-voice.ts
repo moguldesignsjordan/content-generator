@@ -243,6 +243,7 @@ export function buildBriefStateBlock(
     `  Angle: ${brief.angle ?? "(not set)"}`,
     `  Offer: ${brief.offer_slug ?? "(not set)"}`,
     `  Constraints: ${brief.constraints ?? "(none)"}`,
+    `  Tone: ${brief.tone ?? "(brand voice as-is)"}`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }
@@ -258,6 +259,10 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
   if (brief.key_message) lines.push(`  Key message: ${brief.key_message}`);
   if (brief.angle) lines.push(`  Angle: ${brief.angle}`);
   if (brief.constraints) lines.push(`  Constraints: ${brief.constraints}`);
+  if (brief.tone)
+    lines.push(
+      `  Tone for this piece: ${brief.tone} (shade the brand voice this way; it does not replace it)`,
+    );
   if (!lines.length) return "";
   return ["CAMPAIGN BRIEF (from the strategy conversation; serve this):", ...lines].join(
     "\n",

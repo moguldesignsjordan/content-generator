@@ -372,6 +372,7 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     "offer_slug",
     "angle",
     "constraints",
+    "tone",
   ] as const) {
     const value = input[key];
     if (typeof value === "string" && value.trim()) {

@@ -23,6 +23,8 @@ import type {
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
+  EmailStyleId,
+  EmailTemplateId,
   EmailType,
   BlogType,
   Icp,
@@ -237,6 +239,11 @@ export async function createDraftShell(args: {
    * (plan_series); stored in meta.series_brief and preferred over the shared
    * campaign brief at generation time. */
   seriesBrief?: CampaignBrief;
+  /** This draft's position (0-based) within its plan_series batch. Stored in
+   * meta.series_seed_index so the parallel per-draft generation calls assign
+   * distinct email style/layout by index instead of racing a "recent
+   * variants" DB read. */
+  seriesSeedIndex?: number;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -248,6 +255,7 @@ export async function createDraftShell(args: {
     blogType,
     triggerSource,
     seriesBrief,
+    seriesSeedIndex,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -279,6 +287,7 @@ export async function createDraftShell(args: {
     generation,
     ...(sourceDraftId ? { source_draft_id: sourceDraftId } : {}),
     ...(seriesBrief ? { series_brief: seriesBrief } : {}),
+    ...(seriesSeedIndex !== undefined ? { series_seed_index: seriesSeedIndex } : {}),
   };
 
   const { data: draft, error: draftErr } = await db
@@ -301,6 +310,43 @@ export async function createDraftShell(args: {
   if (topicErr) throw topicErr;
 
   return draft.id as string;
+}
+
+/**
+ * Reads the style/layout of the most recent email drafts for a brand (newest
+ * first), so a fresh generation can rotate away from what was just used. Used
+ * only for single (non-series) generations: campaign series threads a
+ * deterministic seedIndex instead, since its per-draft generation calls run
+ * in parallel and would otherwise race this same read against each other
+ * before any of them has persisted. Never throws: a read failure just means
+ * the caller falls back to an unconstrained rotation pick.
+ */
+export async function getRecentEmailStyleVariants(
+  brandId: string,
+  limit = 5,
+): Promise<{ styles: EmailStyleId[]; layouts: EmailTemplateId[] }> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select(`meta, created_at, content_jobs!inner ( brand_id, type )`)
+    .eq("content_jobs.brand_id", brandId)
+    .eq("content_jobs.type", "email")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    logWarn("db:getRecentEmailStyleVariants", error.message, { brandId });
+    return { styles: [], layouts: [] };
+  }
+
+  const styles: EmailStyleId[] = [];
+  const layouts: EmailTemplateId[] = [];
+  for (const row of (data ?? []) as { meta: DraftMeta | null }[]) {
+    const meta = row.meta ?? {};
+    if (meta.email_style_variant) styles.push(meta.email_style_variant);
+    if (meta.email_template_id) layouts.push(meta.email_template_id);
+  }
+  return { styles, layouts };
 }
 
 /**

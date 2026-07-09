@@ -11,6 +11,10 @@ const KNOWN_TEMPLATES: EmailTemplateId[] = [
   "newsletter_tip",
   "newsletter_feature",
   "newsletter_howto",
+  "promotional_bold",
+  "announcement_banner",
+  "product_spotlight",
+  "digest",
 ];
 
 export async function POST(

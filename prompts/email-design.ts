@@ -1,5 +1,6 @@
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { ContentImage, EmailTemplateId, HeroPlacement } from "@/lib/db/types";
+import { EMAIL_STYLES, type EmailStyleDirective } from "./email-styles";
 
 // Where the design prompt tells the model to put the hero image; mirrors the
 // code-level anchors in spliceHeroImage so prompt and splice never disagree.
@@ -32,6 +33,22 @@ const LAYOUT_SHAPES: Record<EmailTemplateId, string> = {
     "STEP-BY-STEP layout: an uppercase accent eyebrow, one headline, a short lead-in, " +
     "then numbered steps where each number sits in a small accent-colored circle or badge " +
     "beside a bold step title and its body copy, then the CTA button.",
+  promotional_bold:
+    "PROMOTIONAL layout: minimal chrome, one bold offer headline, a short urgency or " +
+    "deadline line, one large dominant CTA button placed above the fold, and an optional " +
+    "brief fine-print line below it in muted text. No lengthy sections; brief beats long.",
+  announcement_banner:
+    "ANNOUNCEMENT layout: the news stated plainly up top as the headline, one short " +
+    "paragraph explaining why it matters to the reader, then the CTA button. Confident " +
+    "and clean, minimal decoration, informative rather than salesy.",
+  product_spotlight:
+    "PRODUCT SPOTLIGHT layout: an uppercase eyebrow naming the category, a headline " +
+    "focused on the outcome the reader gets, a short feature list (2 to 4 short lines " +
+    "each led by a small accent marker or checkmark), then the CTA button.",
+  digest:
+    "DIGEST layout: an uppercase accent eyebrow, one short intro line, then 3 to 5 " +
+    "compact items each with a bold lead-in phrase followed by one supporting sentence " +
+    "(numbered or marker-led), then the CTA button. Scannable, not narrative.",
 };
 
 /**
@@ -42,12 +59,15 @@ const LAYOUT_SHAPES: Record<EmailTemplateId, string> = {
 export function buildEmailDesignBrief(
   tokens: BrandTokens,
   templateId: EmailTemplateId,
-  opts: { heroImage?: ContentImage } = {},
+  opts: { heroImage?: ContentImage; style?: EmailStyleDirective } = {},
 ): string {
   const c = tokens.colors;
   const f = tokens.fonts;
   const footer = tokens.footer;
   const hero = opts.heroImage;
+  // Defaults to the safe baseline look when no style is passed (keeps every
+  // existing call site, and any legacy path, producing a valid brief).
+  const style = opts.style ?? EMAIL_STYLES.soft_card;
 
   return [
     "EMAIL DESIGN SYSTEM (follow exactly; email HTML is not browser HTML):",
@@ -63,9 +83,9 @@ export function buildEmailDesignBrief(
     "  '&#847;&zwnj;&nbsp;' so body copy never leaks into the inbox preview line.",
     "- Layout with nested <table role=\"presentation\"> elements (Outlook-safe), never",
     "  CSS grid, flexbox, floats, or position.",
-    "- One centered single-column card, width 600px (max-width:600px), rounded corners,",
-    "  on a soft neutral page background (#EEF1F6 works well), generous outer padding.",
-    "- A 5px accent-colored top bar on the card gives it brand presence.",
+    "- One centered single-column card, width 600px (max-width:600px), generous outer",
+    "  padding. The card's exact corner radius, border, top accent treatment, and page",
+    "  background come from the STYLE DIRECTION section below, not a fixed default.",
     "",
     "REGIONS (required, enables click-to-edit in the review UI): add a data-region",
     "attribute to the element that wraps each of these parts, exactly one value each:",
@@ -130,9 +150,9 @@ export function buildEmailDesignBrief(
     "",
     "Required chrome:",
     tokens.logo_url
-      ? `- Header: the brand logo <img src="${tokens.logo_url}" alt="${tokens.logo_alt}"> capped at max-width:170px;max-height:48px, above a 1px hairline divider.`
-      : `- Header: a typographic wordmark, "${tokens.logo_alt}" in the heading font, bold, with a period after it colored in the accent, above a 1px hairline divider.`,
-    "- Footer, centered, small muted text above a hairline top border: the sender name" +
+      ? `- Header: the brand logo <img src="${tokens.logo_url}" alt="${tokens.logo_alt}"> capped at max-width:170px;max-height:48px, positioned and divided from the body per the STYLE DIRECTION below.`
+      : `- Header: a typographic wordmark, "${tokens.logo_alt}" in the heading font, bold, with a period after it colored in the accent, positioned and divided from the body per the STYLE DIRECTION below.`,
+    "- Footer, centered, small muted text above a top border or generous space (per the style): the sender name" +
       (footer.website ? ` linked to ${footer.website}` : "") +
       (footer.contact_email ? `, the contact email ${footer.contact_email}` : "") +
       (footer.postal_address
@@ -152,11 +172,18 @@ export function buildEmailDesignBrief(
     `- Heading font stack: ${f.heading}`,
     `- Body font stack: ${f.body}`,
     "",
+    "STYLE DIRECTION FOR THIS EMAIL (this piece's visual identity; the exact spacing,",
+    "sizing, and detail choices within it are yours, but every EMAIL DESIGN SYSTEM rule",
+    "above and below, dark mode, data-regions, one CTA, {$unsubscribe}, WCAG-AA contrast,",
+    "still applies underneath it without exception):",
+    `- Style: ${style.label}`,
+    ...style.lines.map((l) => `  ${l}`),
+    "",
     "LAYOUT FOR THIS EMAIL:",
     `- ${LAYOUT_SHAPES[templateId]}`,
     "",
     "Design taste: modern and confident, generous whitespace, accent used sparingly",
-    "and deliberately. Never cram; when in doubt, add space. NEVER use em dashes or",
-    "en dashes anywhere in the HTML or copy.",
+    "and deliberately per the style direction above. Never cram; when in doubt, add",
+    "space. NEVER use em dashes or en dashes anywhere in the HTML or copy.",
   ].join("\n");
 }

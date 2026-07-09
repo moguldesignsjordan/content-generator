@@ -52,6 +52,9 @@ export function joinRun(
     emailTypeOverride?: EmailType;
     blogTypeOverride?: BlogType;
     briefOverride?: CampaignBrief;
+    /** Campaign-series position (meta.series_seed_index); makes a series
+     * email's style/layout rotation deterministic and distinct-by-index. */
+    seedIndex?: number;
   },
   listener: Listener,
 ): () => void {
@@ -95,6 +98,9 @@ async function startRun(
     emailTypeOverride?: EmailType;
     blogTypeOverride?: BlogType;
     briefOverride?: CampaignBrief;
+    /** Campaign-series position (meta.series_seed_index); makes a series
+     * email's style/layout rotation deterministic and distinct-by-index. */
+    seedIndex?: number;
   },
   emit: (event: GenerationEvent) => void,
 ): Promise<void> {

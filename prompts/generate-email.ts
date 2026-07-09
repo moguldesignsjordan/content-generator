@@ -3,6 +3,7 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   CampaignBrief,
   ContentImage,
+  EmailStyleId,
   EmailTemplateId,
   EmailType,
   Product,
@@ -18,6 +19,7 @@ import {
   buildPositioningBlock,
 } from "./brand-voice";
 import { buildEmailDesignBrief } from "./email-design";
+import { EMAIL_STYLES, pickEmailStyle, pickRotation } from "./email-styles";
 
 // Zod schema for the model's tool input: structured COPY plus the complete
 // designed HTML document (produced under the email design system prompt).
@@ -144,22 +146,71 @@ export function resolveCta(ctx: TopicContext): {
   return { ctaType, ctaText };
 }
 
+// Every known layout id, including the promotional/announcement/spotlight/
+// digest shapes added alongside the style library. A topic's distribution
+// recipe can name any of these; whichever appears first in the recipe wins
+// over automatic resolution (both resolveEmailTemplateId and
+// resolveEmailLayout honor this the same way).
+const ALL_LAYOUT_IDS: EmailTemplateId[] = [
+  "newsletter_tip",
+  "newsletter_feature",
+  "newsletter_howto",
+  "promotional_bold",
+  "announcement_banner",
+  "product_spotlight",
+  "digest",
+];
+
 /**
- * Picks the email template for a topic from its distribution recipe. The seed
- * tags topics with `newsletter_tip` / `newsletter_feature` / `newsletter_howto`;
- * the first match wins, defaulting to a quick tip.
+ * Picks the email template for a topic from its distribution recipe only,
+ * defaulting to a quick tip. Kept as the simple legacy resolver for callers
+ * that don't have an EmailType to route rotation through (e.g. a redesign on
+ * a draft that predates email_template_id). Fresh generations should prefer
+ * resolveEmailLayout, which adds type-aware rotation on top of this same
+ * recipe check.
  */
 export function resolveEmailTemplateId(topic: Topic): EmailTemplateId {
   const recipe = topic.distribution_recipe ?? [];
-  const known: EmailTemplateId[] = [
-    "newsletter_tip",
-    "newsletter_feature",
-    "newsletter_howto",
-  ];
   for (const r of recipe) {
-    if ((known as string[]).includes(r)) return r as EmailTemplateId;
+    if ((ALL_LAYOUT_IDS as string[]).includes(r)) return r as EmailTemplateId;
   }
   return "newsletter_tip";
+}
+
+// Which layout SHAPES are a fit for each marketing PURPOSE. resolveEmailLayout
+// rotates within the matching set instead of always defaulting to the tip
+// layout, so most emails no longer share one shape.
+const LAYOUT_COMPATIBILITY: Record<EmailType, EmailTemplateId[]> = {
+  newsletter: ["newsletter_tip", "newsletter_feature", "newsletter_howto", "digest"],
+  product: ["product_spotlight", "newsletter_feature"],
+  service: ["product_spotlight", "newsletter_feature"],
+  promotional: ["promotional_bold"],
+  announcement: ["announcement_banner"],
+};
+
+/**
+ * Resolves the layout SHAPE for a fresh generation: the topic's distribution
+ * recipe still wins when it names a known layout (unchanged behavior); other-
+ * wise rotates within the set of shapes compatible with this email's marketing
+ * type. `seedIndex` (campaign series) makes the pick deterministic and
+ * distinct-by-index; otherwise `recent` (last-used layouts) is excluded so a
+ * single stream of generations doesn't repeat.
+ */
+export function resolveEmailLayout(
+  emailType: EmailType,
+  topic: Topic,
+  opts: { recent?: EmailTemplateId[]; seedIndex?: number } = {},
+): EmailTemplateId {
+  const recipe = topic.distribution_recipe ?? [];
+  for (const r of recipe) {
+    if ((ALL_LAYOUT_IDS as string[]).includes(r)) return r as EmailTemplateId;
+  }
+  const candidates = LAYOUT_COMPATIBILITY[emailType] ?? ["newsletter_tip"];
+  return pickRotation(candidates, {
+    recent: opts.recent,
+    seedIndex: opts.seedIndex,
+    avoidLastK: Math.max(1, candidates.length - 1),
+  });
 }
 
 // Per-type length budgets. email_type is the axis that decides how long an
@@ -328,17 +379,32 @@ export function buildEmailMessages(
   opts: {
     brief?: CampaignBrief | null;
     rejection?: { feedback: string; previousSubject: string; previousPreheader: string };
-    /** Overrides the topic's auto-resolved layout, e.g. from reject & regenerate. */
+    /** Overrides the topic's auto-resolved layout, e.g. reused from
+     * meta.email_template_id on regenerate/redesign so a locked draft keeps
+     * its shape instead of rotating again. */
     templateOverride?: EmailTemplateId;
     /** Existing hero image to keep in place across a regeneration. */
     heroImage?: ContentImage;
     /** Honors a job's stored content_jobs.email_type instead of deriving one. */
     emailTypeOverride?: EmailType;
+    /** Reuses a specific visual style, e.g. from meta.email_style_variant on
+     * regenerate/redesign, instead of rotating a fresh one. */
+    styleOverride?: EmailStyleId;
+    /** Recently-used layouts/styles (most recent first) to avoid repeating.
+     * Ignored when seedIndex is given. */
+    recentLayouts?: EmailTemplateId[];
+    recentStyles?: EmailStyleId[];
+    /** Campaign-series position: makes layout + style rotation deterministic
+     * and distinct-by-index across the batch instead of reading DB history
+     * (parallel per-draft generation calls would otherwise race that read). */
+    seedIndex?: number;
   } = {},
 ): {
   system: string;
   user: string;
   emailType: EmailType;
+  templateId: EmailTemplateId;
+  styleId: EmailStyleId;
 } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
@@ -352,9 +418,18 @@ export function buildEmailMessages(
     override: opts.emailTypeOverride,
   });
   const length = EMAIL_LENGTH_TARGETS[emailType];
-  const templateId = opts.templateOverride ?? resolveEmailTemplateId(topic);
+  const templateId =
+    opts.templateOverride ??
+    resolveEmailLayout(emailType, topic, {
+      recent: opts.recentLayouts,
+      seedIndex: opts.seedIndex,
+    });
+  const styleId =
+    opts.styleOverride ??
+    pickEmailStyle({ recent: opts.recentStyles, seedIndex: opts.seedIndex });
   const designBrief = buildEmailDesignBrief(tokens, templateId, {
     heroImage: opts.heroImage,
+    style: EMAIL_STYLES[styleId],
   });
 
   const system = [
@@ -433,5 +508,5 @@ export function buildEmailMessages(
     .filter(Boolean)
     .join("\n");
 
-  return { system, user, emailType };
+  return { system, user, emailType, templateId, styleId };
 }

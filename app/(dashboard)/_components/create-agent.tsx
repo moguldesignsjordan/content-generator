@@ -73,6 +73,7 @@ interface BriefCard {
   angle: string | null;
   offerName: string | null;
   offerPrice: string | null;
+  tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
 }
@@ -342,8 +343,8 @@ export function CreateAgent({
             />
             {actionsOpen && (
               <ActionGrid
-                onEmail={() => send("Draft an on-brand email")}
-                onBlog={() => send("Draft a blog post")}
+                onEmail={() => send("I want to create an email")}
+                onBlog={() => send("I want to write a blog post")}
                 onCampaign={() =>
                   send("I want to plan a campaign: a series of emails")
                 }
@@ -425,8 +426,8 @@ export function CreateAgent({
           {actionsOpen && (
             <div className="px-3">
               <ActionGrid
-                onEmail={() => send("Draft an on-brand email")}
-                onBlog={() => send("Draft a blog post")}
+                onEmail={() => send("I want to create an email")}
+                onBlog={() => send("I want to write a blog post")}
                 onCampaign={() =>
                   send("I want to plan a campaign: a series of emails")
                 }
@@ -690,6 +691,11 @@ function BriefCardView({
       label: "Offer",
       value: card.offerName,
       hint: card.offerPrice ?? undefined,
+    },
+    {
+      label: "Tone",
+      value: card.tone,
+      hint: card.tone ? undefined : "brand voice",
     },
   ];
 

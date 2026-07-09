@@ -28,6 +28,7 @@ export interface UpdateBriefInput {
   offer_slug?: string;
   angle?: string;
   constraints?: string;
+  tone?: string;
 }
 
 export interface SelectTopicInput {
@@ -80,6 +81,12 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
       constraints: {
         type: "string",
         description: "Anything to avoid or must-include the user mentioned.",
+      },
+      tone: {
+        type: "string",
+        description:
+          "Tone adjustment for THIS piece only (e.g. more playful, urgent, " +
+          "formal). Leave unset to write in the stored brand voice as-is.",
       },
     },
   },

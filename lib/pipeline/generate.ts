@@ -10,6 +10,7 @@ import {
   getCampaign,
   getDraftWithJobContext,
   getLatestDraftVersion,
+  getRecentEmailStyleVariants,
   getTopicContext,
   patchDraftGeneration,
   populateDraft,
@@ -23,7 +24,6 @@ import {
   EMAIL_LENGTH_TARGETS,
   buildEmailMessages,
   countEmailWords,
-  resolveEmailTemplateId,
   type EmailDraftOutput,
   type EmailLengthTarget,
 } from "@/prompts/generate-email";
@@ -81,6 +81,11 @@ export async function generateEmailForTopicStreamed(
     /** Per-email brief from a plan_series draft (meta.series_brief); wins
      * over the shared campaign brief so series emails keep their own angle. */
     briefOverride?: CampaignBrief;
+    /** Campaign-series position (meta.series_seed_index): makes style/layout
+     * rotation deterministic and distinct-by-index across the batch, since
+     * the series' per-draft generation calls run in parallel and can't
+     * safely race a "recent variants" DB read against each other. */
+    seedIndex?: number;
   },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
@@ -91,19 +96,34 @@ export async function generateEmailForTopicStreamed(
 
     const brief = opts.briefOverride ?? (await loadCampaignBrief(opts.campaignId));
     const tokens = resolveBrandTokens(ctx.brand);
-    const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
-      brief,
-      emailTypeOverride: opts.emailTypeOverride,
-    });
+    // A campaign series assigns style/layout deterministically by index
+    // instead of reading recent history (see seedIndex above); a single
+    // email reads the brand's recent picks so it rotates away from them.
+    const recent =
+      opts.seedIndex === undefined
+        ? await getRecentEmailStyleVariants(ctx.brand.id)
+        : { styles: [], layouts: [] };
+    const { system, user, emailType, templateId, styleId } = buildEmailMessages(
+      ctx,
+      tokens,
+      {
+        brief,
+        emailTypeOverride: opts.emailTypeOverride,
+        seedIndex: opts.seedIndex,
+        recentStyles: recent.styles,
+        recentLayouts: recent.layouts,
+      },
+    );
     const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
       lengthTarget,
       emailType,
     });
 
-    const { content, copy, templateId, designSource } = renderEmailForContext(
+    const { content, copy, designSource } = renderEmailForContext(
       ctx,
       parsed,
+      templateId,
     );
 
     // Brand-level opt-in (asked during onboarding): auto-create the hero
@@ -135,6 +155,7 @@ export async function generateEmailForTopicStreamed(
     const meta: DraftMeta = {
       ...qa.meta,
       email_template_id: templateId,
+      email_style_variant: styleId,
       email_type: emailType,
       email_copy: copy,
       email_design_source: designSource,
@@ -342,12 +363,11 @@ async function generateEmailCopy(
 function renderEmailForContext(
   ctx: TopicContext,
   parsed: EmailDraftOutput,
-  templateOverride?: EmailTemplateId,
+  templateId: EmailTemplateId,
   heroImage?: ContentImage,
 ): {
   content: EmailDraftContent;
   copy: EmailCopy;
-  templateId: EmailTemplateId;
   designSource: "model" | "template";
 } {
   const copy: EmailCopy = {
@@ -366,7 +386,6 @@ function renderEmailForContext(
     cta_url: parsed.cta_url?.trim() || undefined,
   };
 
-  const templateId = templateOverride ?? resolveEmailTemplateId(ctx.topic);
   const tokens = resolveBrandTokens(ctx.brand);
 
   // Dark-mode CSS is gated here, at fresh generation, not inside
@@ -405,7 +424,6 @@ function renderEmailForContext(
   return {
     content: { subject: copy.subject, preheader: copy.preheader, html },
     copy,
-    templateId,
     designSource,
   };
 }
@@ -576,17 +594,26 @@ export async function regenerateEmailDraft(
     draftCtx.meta.series_brief ?? (await loadCampaignBrief(draftCtx.campaignId));
   const tokens = resolveBrandTokens(ctx.brand);
   const heroImage = draftCtx.meta.hero_image;
-  const { system, user, emailType } = buildEmailMessages(ctx, tokens, {
-    brief,
-    templateOverride: opts.templateOverride,
-    heroImage,
-    emailTypeOverride: draftCtx.emailType ?? undefined,
-    rejection: {
-      feedback,
-      previousSubject: draftCtx.content.subject,
-      previousPreheader: draftCtx.content.preheader,
+  // Reject & regenerate keeps this draft's look: reuse its stored layout and
+  // style (like the hero image above) instead of rotating again. An explicit
+  // opts.templateOverride (the reviewer picked a different layout in the UI)
+  // still wins over the stored one. Only a FRESH generation rotates.
+  const { system, user, emailType, templateId, styleId } = buildEmailMessages(
+    ctx,
+    tokens,
+    {
+      brief,
+      templateOverride: opts.templateOverride ?? draftCtx.meta.email_template_id,
+      styleOverride: draftCtx.meta.email_style_variant,
+      heroImage,
+      emailTypeOverride: draftCtx.emailType ?? undefined,
+      rejection: {
+        feedback,
+        previousSubject: draftCtx.content.subject,
+        previousPreheader: draftCtx.content.preheader,
+      },
     },
-  });
+  );
   const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
 
   const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
@@ -594,10 +621,10 @@ export async function regenerateEmailDraft(
     emailType,
   });
 
-  const { content, copy, templateId, designSource } = renderEmailForContext(
+  const { content, copy, designSource } = renderEmailForContext(
     ctx,
     parsed,
-    opts.templateOverride,
+    templateId,
     heroImage,
   );
 
@@ -609,6 +636,7 @@ export async function regenerateEmailDraft(
   const meta: DraftMeta = {
     ...qa.meta,
     email_template_id: templateId,
+    email_style_variant: styleId,
     email_type: emailType,
     email_copy: copy,
     email_design_source: designSource,

@@ -2,11 +2,13 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   ContentImage,
   EmailCopy,
+  EmailStyleId,
   EmailTemplateId,
   TopicContext,
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import { buildEmailDesignBrief } from "./email-design";
+import { EMAIL_STYLES } from "./email-styles";
 import { buildOfferBlock } from "./generate-email";
 
 // Instant full-design regeneration: keeps the copy EXACTLY as already
@@ -58,9 +60,17 @@ export function buildRedesignMessages(args: {
   direction?: string;
   /** The draft's existing hero image; the redesign keeps it in place. */
   heroImage?: ContentImage;
+  /** The draft's existing visual style (meta.email_style_variant); a
+   * redesign keeps the same style direction, it's a token/copy resync, not a
+   * fresh rotation. Falls back to the safe baseline when unset (older
+   * drafts that predate the style library). */
+  styleId?: EmailStyleId;
 }): { system: string; user: string } {
-  const { copy, tokens, templateId, ctx, direction, heroImage } = args;
-  const designBrief = buildEmailDesignBrief(tokens, templateId, { heroImage });
+  const { copy, tokens, templateId, ctx, direction, heroImage, styleId } = args;
+  const designBrief = buildEmailDesignBrief(tokens, templateId, {
+    heroImage,
+    style: styleId ? EMAIL_STYLES[styleId] : undefined,
+  });
   const offerBlock = buildOfferBlock(ctx);
 
   const system = [

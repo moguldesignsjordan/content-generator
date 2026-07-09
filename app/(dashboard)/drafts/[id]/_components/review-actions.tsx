@@ -20,6 +20,8 @@ import type {
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
+  EmailStyleId,
+  EmailTemplateId,
   PerformanceMetric,
   PublicationRecord,
 } from "@/lib/db/types";
@@ -31,6 +33,31 @@ import {
 import { DesignChat } from "./design-chat";
 import { EmailPreview } from "./email-preview";
 import { PerformanceStats } from "./performance-stats";
+
+// Human labels for the design direction badge below. Kept local (not
+// imported from prompts/email-styles.ts or lib/email/templates, both of
+// which pull in "server-only" code) so this client component's bundle
+// never touches server-only modules. Light touch: display only, no picker.
+const STYLE_LABELS: Record<EmailStyleId, string> = {
+  soft_card: "Soft card",
+  editorial_serif: "Editorial serif",
+  bold_accent_band: "Bold accent band",
+  minimal_mono: "Minimal mono",
+  bordered_ledger: "Bordered ledger",
+  left_rule_editorial: "Left rule editorial",
+  pill_modern: "Pill modern",
+  warm_gradient_top: "Warm gradient top",
+};
+
+const LAYOUT_LABELS: Record<EmailTemplateId, string> = {
+  newsletter_tip: "Quick tip",
+  newsletter_feature: "Feature",
+  newsletter_howto: "How-to",
+  promotional_bold: "Promotional",
+  announcement_banner: "Announcement",
+  product_spotlight: "Product spotlight",
+  digest: "Digest",
+};
 
 interface ReviewActionsProps {
   draftId: string;
@@ -152,6 +179,12 @@ export function ReviewActions({
 
   const subjectVariants = initialMeta.email_copy?.subject_variants ?? [];
   const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
+  const designLabel = [
+    initialMeta.email_style_variant ? STYLE_LABELS[initialMeta.email_style_variant] : null,
+    initialMeta.email_template_id ? LAYOUT_LABELS[initialMeta.email_template_id] : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // Approve runs through two soft gates: a nudge when the quality check found
   // issues, and a server-enforced banned-terms block (409) that needs an
@@ -801,11 +834,14 @@ export function ReviewActions({
         >
           Delete
         </Button>
-        {draftCostUsd > 0 && (
-          <span className="ml-auto text-[12px] text-muted">
-            This draft cost about ${draftCostUsd < 0.01 ? "0.01" : draftCostUsd.toFixed(2)} to generate.
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-3 text-[12px] text-muted">
+          {designLabel && <span title="This draft's visual design direction">{designLabel}</span>}
+          {draftCostUsd > 0 && (
+            <span>
+              This draft cost about ${draftCostUsd < 0.01 ? "0.01" : draftCostUsd.toFixed(2)} to generate.
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Soft nudge: the quality check found issues; approving is still allowed. */}

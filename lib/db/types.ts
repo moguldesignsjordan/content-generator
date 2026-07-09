@@ -303,6 +303,8 @@ export interface CampaignBrief {
   offer_slug?: string;
   angle?: string;
   constraints?: string;
+  /** Per-piece tone override; unset means the stored brand voice as-is. */
+  tone?: string;
 }
 
 /** One draft created as part of a multi-email series (plan_series), kept in
@@ -361,10 +363,32 @@ export interface EmailDraftContent {
 
 // The structured copy Claude produces; the email templates render it into HTML.
 // Stored on drafts.meta so a draft remembers the copy that produced its HTML.
+// "Layout" = content SHAPE (tip vs feature vs steps vs digest...), orthogonal
+// to EmailStyleId ("visual identity": card frame, accent treatment, radius).
+// A given email combines one of each (see resolveEmailLayout + pickEmailStyle
+// in prompts/generate-email.ts / prompts/email-styles.ts).
 export type EmailTemplateId =
   | "newsletter_tip"
   | "newsletter_feature"
-  | "newsletter_howto";
+  | "newsletter_howto"
+  | "promotional_bold"
+  | "announcement_banner"
+  | "product_spotlight"
+  | "digest";
+
+// A curated visual design direction (page background, card frame, header
+// style, accent treatment, CTA shape, radius, whitespace). Rotated
+// (no-consecutive-repeats) across generations so emails vary in look while
+// staying professional and email-safe; see prompts/email-styles.ts.
+export type EmailStyleId =
+  | "soft_card"
+  | "editorial_serif"
+  | "bold_accent_band"
+  | "minimal_mono"
+  | "bordered_ledger"
+  | "left_rule_editorial"
+  | "pill_modern"
+  | "warm_gradient_top";
 
 // The marketing PURPOSE of an email. Kept deliberately separate from
 // EmailTemplateId (which is layout) and FunnelStage (which picks the CTA):
@@ -513,6 +537,12 @@ export interface DraftMeta {
   meta_title?: string;
   meta_description?: string;
   email_template_id?: EmailTemplateId;
+  // The visual design direction chosen for this draft (rotation, no
+  // consecutive repeats). Set at fresh-generation time from pickEmailStyle;
+  // regenerate/redesign REUSE this value (like email_template_id) instead of
+  // rotating again, so a locked/edited draft keeps its look. jsonb, no
+  // migration needed.
+  email_style_variant?: EmailStyleId;
   // The marketing purpose that drove this draft's length budget. Set at
   // generation time from resolveEmailType so the review surface and future
   // logic know which length target the draft was shaped against.
@@ -548,6 +578,13 @@ export interface DraftMeta {
   // each email in the series keeps its own angle/message/offer. Lives in meta
   // (jsonb) and survives generation because populateDraft merges meta.
   series_brief?: CampaignBrief;
+  // Position of this draft within its plan_series batch, set at shell
+  // creation (createDraftShell). Lets the parallel per-draft generation
+  // calls assign distinct style/layout by index (rotation.length-cycle),
+  // instead of racing a "recent variants" DB read against sibling calls
+  // that haven't persisted yet. Absent for non-series drafts, which pick
+  // from recent history instead. jsonb, no migration needed.
+  series_seed_index?: number;
 }
 
 // One row in the Emails / Blogs dashboard lists. source_draft_id and

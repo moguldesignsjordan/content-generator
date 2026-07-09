@@ -21,6 +21,7 @@ export interface CreateBriefCard {
   angle: string | null;
   offerName: string | null;
   offerPrice: string | null;
+  tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
 }
@@ -63,6 +64,7 @@ export function buildBriefCard(args: {
     angle: brief.angle ?? null,
     offerName: offer?.name ?? null,
     offerPrice: offer?.price_point ?? null,
+    tone: brief.tone ?? null,
     funnelStage,
     ctaLabel: resolveCtaLabel(brand, strategy, funnelStage),
   };

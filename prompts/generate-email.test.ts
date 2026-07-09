@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
   CampaignBrief,
+  EmailTemplateId,
+  EmailType,
   Product,
   Topic,
   TopicStatus,
@@ -8,6 +10,8 @@ import type {
 import {
   EMAIL_LENGTH_TARGETS,
   countEmailWords,
+  resolveEmailLayout,
+  resolveEmailTemplateId,
   resolveEmailType,
 } from "./generate-email";
 
@@ -99,6 +103,80 @@ describe("resolveEmailType", () => {
       angle: "Educational walkthrough",
     };
     expect(resolveEmailType(makeTopic(), { brief })).toBe("newsletter");
+  });
+});
+
+describe("resolveEmailLayout", () => {
+  const COMPATIBLE: Record<EmailType, EmailTemplateId[]> = {
+    newsletter: ["newsletter_tip", "newsletter_feature", "newsletter_howto", "digest"],
+    product: ["product_spotlight", "newsletter_feature"],
+    service: ["product_spotlight", "newsletter_feature"],
+    promotional: ["promotional_bold"],
+    announcement: ["announcement_banner"],
+  };
+
+  it("maps every EmailType to a layout inside its compatible set", () => {
+    for (const [type, compatible] of Object.entries(COMPATIBLE) as [
+      EmailType,
+      EmailTemplateId[],
+    ][]) {
+      for (let seedIndex = 0; seedIndex < 6; seedIndex++) {
+        const layout = resolveEmailLayout(type, makeTopic({ distribution_recipe: [] }), {
+          seedIndex,
+        });
+        expect(compatible).toContain(layout);
+      }
+    }
+  });
+
+  it("no longer forces newsletter_tip for every newsletter email (rotates the set)", () => {
+    const picks = new Set(
+      Array.from({ length: 4 }, (_, i) =>
+        resolveEmailLayout("newsletter", makeTopic({ distribution_recipe: [] }), {
+          seedIndex: i,
+        }),
+      ),
+    );
+    expect(picks.size).toBeGreaterThan(1);
+  });
+
+  it("never repeats within a small recent-avoid window for a multi-option type", () => {
+    for (let i = 0; i < 100; i++) {
+      const layout = resolveEmailLayout("newsletter", makeTopic({ distribution_recipe: [] }), {
+        recent: ["newsletter_tip", "newsletter_feature"],
+      });
+      expect(["newsletter_tip", "newsletter_feature"]).not.toContain(layout);
+    }
+  });
+
+  it("still honors a known layout named in the topic's distribution recipe", () => {
+    const topic = makeTopic({ distribution_recipe: ["digest"] });
+    expect(resolveEmailLayout("newsletter", topic, { seedIndex: 0 })).toBe("digest");
+    expect(resolveEmailLayout("promotional", topic, { seedIndex: 0 })).toBe("digest");
+  });
+
+  it("assigns distinct layouts by index within one email type's set", () => {
+    const compatible = COMPATIBLE.newsletter;
+    const picks = compatible.map((_, i) =>
+      resolveEmailLayout("newsletter", makeTopic({ distribution_recipe: [] }), {
+        seedIndex: i,
+      }),
+    );
+    expect(new Set(picks).size).toBe(compatible.length);
+  });
+});
+
+describe("resolveEmailTemplateId", () => {
+  it("defaults to newsletter_tip with no recipe match", () => {
+    expect(resolveEmailTemplateId(makeTopic({ distribution_recipe: [] }))).toBe(
+      "newsletter_tip",
+    );
+  });
+
+  it("honors any known layout id in the recipe, including the newer shapes", () => {
+    expect(
+      resolveEmailTemplateId(makeTopic({ distribution_recipe: ["promotional_bold"] })),
+    ).toBe("promotional_bold");
   });
 });
 

@@ -356,7 +356,7 @@ async function dispatchTool(
       const input = block.input as UpdateBriefInput;
       state.brief = mergeBrief(state.brief, input);
       const saved = (
-        ["goal", "audience_notes", "key_message", "offer_slug", "angle", "constraints"] as const
+        ["goal", "audience_notes", "key_message", "offer_slug", "angle", "constraints", "tone"] as const
       )
         .filter((k) => typeof input[k] === "string" && input[k]!.trim())
         .map((k) => `${k}=${state.brief[k]}`);
@@ -441,7 +441,8 @@ async function dispatchTool(
       const clusterId = await ensureDefaultCluster(strategyId);
 
       const created: SeriesDraftRef[] = [];
-      for (const item of items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         let topicId =
           item.topic_id && ctx.topics.some((t) => t.id === item.topic_id)
             ? item.topic_id
@@ -466,6 +467,7 @@ async function dispatchTool(
           campaignId: ctx.campaignId,
           type: "email",
           emailType: item.email_type,
+          seriesSeedIndex: i,
           seriesBrief: {
             ...(state.brief.goal ? { goal: state.brief.goal } : {}),
             ...(state.brief.audience_notes
@@ -572,6 +574,7 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     "offer_slug",
     "angle",
     "constraints",
+    "tone",
   ] as const) {
     const value = input[key];
     if (typeof value === "string" && value.trim()) {

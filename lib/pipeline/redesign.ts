@@ -94,6 +94,7 @@ export async function redesignEmail(
     ctx,
     direction,
     heroImage,
+    styleId: draftCtx.meta.email_style_variant,
   });
 
   // FAST_MODEL first (no copywriting judgment needed, just following the
