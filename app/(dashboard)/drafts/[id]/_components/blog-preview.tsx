@@ -55,6 +55,7 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     setLoaded(false);
@@ -135,6 +136,11 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
     }
   }
 
+  function editValue(next: string) {
+    if (confirmingDelete) setConfirmingDelete(false);
+    setValue(next);
+  }
+
   function openHotspot(h: Hotspot) {
     if (!copy) return;
     setActive(h);
@@ -148,6 +154,7 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
     setValue("");
     setCtaUrl("");
     setSaveError(null);
+    setConfirmingDelete(false);
   }
 
   function buildNextCopy(): BlogCopy | null {
@@ -207,6 +214,50 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
       closeSheet();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Couldn't save your edit.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // A section can be removed only when the article has more than the schema's
+  // minimum (BlogDraftSchema requires sections.min(2)). Removing a section drops
+  // both its heading and its body, since they share the same data-index.
+  const canDeleteSection =
+    (active?.field === "section-heading" || active?.field === "section-body") &&
+    !!copy &&
+    copy.sections.length > 2;
+
+  function buildDeletedCopy(): BlogCopy | null {
+    if (!copy || !active || active.index === undefined) return null;
+    return {
+      ...copy,
+      sections: copy.sections.filter((_, i) => i !== active.index),
+    };
+  }
+
+  async function handleDelete() {
+    const next = buildDeletedCopy();
+    if (!next) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/blog-copy`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        html?: string;
+        copy?: BlogCopy;
+        error?: string;
+      };
+      if (!res.ok || !data.html || !data.copy) {
+        throw new Error(data.error ?? "Couldn't delete that section.");
+      }
+      onSaved(data.html, data.copy);
+      closeSheet();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Couldn't delete that section.");
     } finally {
       setSaving(false);
     }
@@ -274,7 +325,7 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
         {active?.field === "cta" ? (
           <div className="space-y-3">
             <Field label="Button text">
-              <Input value={value} onChange={(e) => setValue(e.target.value)} disabled={saving} />
+              <Input value={value} onChange={(e) => editValue(e.target.value)} disabled={saving} />
             </Field>
             <Field label="Button link" hint="Optional.">
               <Input
@@ -290,16 +341,36 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
           <Textarea
             rows={8}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => editValue(e.target.value)}
             disabled={saving}
           />
         ) : (
-          <Input value={value} onChange={(e) => setValue(e.target.value)} disabled={saving} />
+          <Input value={value} onChange={(e) => editValue(e.target.value)} disabled={saving} />
         )}
 
         {saveError && <p className="mt-2 text-xs text-danger">{saveError}</p>}
 
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex items-center justify-between">
+          {active?.field === "section-heading" || active?.field === "section-body" ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger hover:bg-danger/10 disabled:text-danger/40"
+              loading={saving}
+              disabled={saving || !canDeleteSection}
+              onClick={() => {
+                if (confirmingDelete) {
+                  void handleDelete();
+                } else {
+                  setConfirmingDelete(true);
+                }
+              }}
+            >
+              {confirmingDelete ? "Confirm delete section" : "Delete section"}
+            </Button>
+          ) : (
+            <span />
+          )}
           <Button
             variant="gradient"
             size="sm"
@@ -310,6 +381,18 @@ export function BlogPreview({ draftId, copy, html, onSaved }: BlogPreviewProps) 
             Save
           </Button>
         </div>
+
+        {active?.field === "section-heading" || active?.field === "section-body" ? (
+          confirmingDelete ? (
+            <p className="mt-2 text-xs text-danger">
+              This removes the whole section (heading and body). Click again to confirm.
+            </p>
+          ) : !canDeleteSection ? (
+            <p className="mt-2 text-xs text-muted">
+              An article needs at least two sections, so this one can't be deleted.
+            </p>
+          ) : null
+        ) : null}
       </Sheet>
     </div>
   );
