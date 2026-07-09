@@ -14,7 +14,12 @@ import {
 import { ImageSheet } from "./image-sheet";
 import type { ContentImage } from "@/lib/db/types";
 import { forceColorScheme, type EmailPreviewMode } from "@/lib/email/preview-mode";
-import { guessStyleValue, type StyleChanges } from "@/lib/email/inline-style";
+import {
+  countRegion,
+  DELETABLE_REGIONS,
+  guessStyleValue,
+  type StyleChanges,
+} from "@/lib/email/inline-style";
 
 // Click-to-edit creative control: overlays the rendered email with invisible
 // hotspot buttons over every [data-region] element the design/templates tag
@@ -149,6 +154,7 @@ export function EmailPreview({
   const [editError, setEditError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [regeneratingImage, setRegeneratingImage] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const toast = useToast();
 
   const hasImage = html.includes('data-region="image"');
@@ -252,6 +258,7 @@ export function EmailPreview({
     }
     setActive(h);
     setTool("wording");
+    setConfirmingDelete(false);
     setTextValue(h.text);
     const design = guessDesignState(h.snippet);
     setDesignColor(design.color);
@@ -269,6 +276,7 @@ export function EmailPreview({
     setCustomInput("");
     setTextValue("");
     setEditError(null);
+    setConfirmingDelete(false);
   }
 
   /** A STYLE change (chips or free text), scoped to the active region. */
@@ -377,6 +385,50 @@ export function EmailPreview({
       setApplying(false);
     }
   }
+
+  /**
+   * Removes the active region (body / eyebrow / headline) outright. No model
+   * call — the server locates the region by occurrence index and splices it
+   * out of the stored HTML. Structural regions (header/footer/cta/image) and
+   * the last body block are refused server-side.
+   */
+  async function handleDelete() {
+    if (!active || applying) return;
+    setApplying(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/delete-region`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region: active.region,
+          regionIndex: active.regionIndex,
+          regionLabel: active.label,
+        }),
+      });
+      const data = (await res.json()) as { html?: string; error?: string };
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Couldn't delete that section.");
+      }
+      onHtmlChange(data.html);
+      onEdited?.();
+      closeSheet();
+      toast.success("Section deleted.");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't delete that section.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const isDeletableRegion = !!active && DELETABLE_REGIONS.includes(
+    active.region as (typeof DELETABLE_REGIONS)[number],
+  );
+  // Client guard mirrors the server's "keep at least one body block" rule so
+  // the button disables instead of the request round-tripping to a 400.
+  const isLastBodyBlock =
+    !!active && active.region === "body" && countRegion(html, "body") <= 1;
+  const canDeleteSection = isDeletableRegion && !isLastBodyBlock;
 
   const textUnchanged = !active || textValue.trim() === active.text;
 
@@ -706,6 +758,48 @@ export function EmailPreview({
         )}
 
         {editError && <p className="mt-3 text-xs text-danger">{editError}</p>}
+
+        {isDeletableRegion && (
+          <div className="mt-5 border-t border-border pt-4">
+            {confirmingDelete ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={applying}
+                  onClick={() => void handleDelete()}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-danger px-4 text-[13px] font-semibold text-white transition-colors hover:bg-danger/90 disabled:opacity-45"
+                >
+                  {applying && <AccentSpinner size={12} />}
+                  Yes, delete it
+                </button>
+                <button
+                  type="button"
+                  disabled={applying}
+                  onClick={() => setConfirmingDelete(false)}
+                  className="inline-flex h-9 items-center rounded-full px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-2 disabled:opacity-45"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={applying || !canDeleteSection}
+                  onClick={() => setConfirmingDelete(true)}
+                  className="rounded-full px-3 py-1.5 text-[13px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:text-danger/40"
+                >
+                  Delete this section
+                </button>
+                {!canDeleteSection && (
+                  <span className="text-[11px] text-muted">
+                    An email needs at least one body block.
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </Sheet>
     </div>
   );

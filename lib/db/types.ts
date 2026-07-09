@@ -440,7 +440,7 @@ export interface EmailCopy {
 // Which kind of in-place edit pushed an entry onto the undo stack, so the
 // history log can label itself. The stack itself is shared (one Undo button
 // covers all of them); this is purely for display.
-export type EditType = "style" | "copy" | "recolor" | "image";
+export type EditType = "style" | "copy" | "recolor" | "image" | "delete";
 
 // ── AI-generated content images (hero image in emails, blog hero later) ─────
 

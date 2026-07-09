@@ -84,6 +84,49 @@ export function locateRegion(
 }
 
 /**
+ * Regions a user may delete outright. Structural regions are excluded on
+ * purpose: the footer carries the required {$unsubscribe} merge tag (deleting
+ * it would make the draft unpublishable), header/cta hold the email together,
+ * and image has its own dedicated remove control. Only repeatable or optional
+ * text blocks — body, eyebrow, headline — are deletable here.
+ */
+export const DELETABLE_REGIONS = ["body", "eyebrow", "headline"] as const;
+
+/** Counts how many elements carry `data-region="region"` in `html`. */
+export function countRegion(html: string, region: string): number {
+  const attr = `data-region="${region}"`;
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const idx = html.indexOf(attr, from);
+    if (idx === -1) break;
+    count++;
+    from = idx + attr.length;
+  }
+  return count;
+}
+
+/**
+ * Removes the (0-based) `occurrence`-th `data-region="region"` element from
+ * `html`. Sibling to locateRegion: same scan, but instead of returning offsets
+ * it splices the element out. Returns the trimmed html, or an error if the
+ * occurrence can't be found. Caller is responsible for the allowlist + the
+ * "don't delete the last body" guard; this only does the mechanical removal.
+ */
+export function removeRegion(
+  html: string,
+  region: string,
+  occurrence: number,
+): { html: string } | { error: string } {
+  const located = locateRegion(html, region, occurrence);
+  if (!located) {
+    return { error: "That section couldn't be found. Refresh and try again." };
+  }
+  const next = html.slice(0, located.start) + html.slice(located.end);
+  return { html: next };
+}
+
+/**
  * Sets or replaces one or more CSS properties inside the `style="..."`
  * attribute of `elementHtml`'s OPENING tag only. Adds the attribute if
  * missing. Leaves every other attribute and the inner HTML byte-identical.

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyStyleChanges,
+  countRegion,
   guessStyleValue,
   locateRegion,
+  removeRegion,
   replaceRegionText,
 } from "./inline-style";
 
@@ -141,5 +143,42 @@ describe("replaceRegionText", () => {
   it("returns null for an empty replacement in a body region", () => {
     const loc = locateRegion(TAGGED, "body", 0)!;
     expect(replaceRegionText(loc.outerHTML, "body", "   \n\n  ")).toBeNull();
+  });
+});
+
+describe("countRegion", () => {
+  it("counts repeated occurrences", () => {
+    expect(countRegion(TAGGED, "body")).toBe(2);
+    expect(countRegion(TAGGED, "headline")).toBe(1);
+  });
+
+  it("returns 0 for a region that isn't present", () => {
+    expect(countRegion(TAGGED, "nonexistent")).toBe(0);
+  });
+});
+
+describe("removeRegion", () => {
+  it("removes the targeted occurrence and leaves the rest intact", () => {
+    const res = removeRegion(TAGGED, "body", 1);
+    expect("html" in res).toBe(true);
+    if ("html" in res) {
+      expect(res.html).not.toContain("Second.");
+      expect(res.html).toContain("First.");
+      expect(countRegion(res.html, "body")).toBe(1);
+    }
+  });
+
+  it("can remove a single-occurrence content region like eyebrow", () => {
+    const res = removeRegion(TAGGED, "eyebrow", 0);
+    expect("html" in res).toBe(true);
+    if ("html" in res) {
+      expect(res.html).not.toContain("QUICK TIP");
+      expect(countRegion(res.html, "eyebrow")).toBe(0);
+    }
+  });
+
+  it("errors when the occurrence index doesn't exist", () => {
+    const res = removeRegion(TAGGED, "body", 9);
+    expect("error" in res).toBe(true);
   });
 });
