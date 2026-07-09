@@ -18,6 +18,7 @@ import {
   countRegion,
   DELETABLE_REGIONS,
   guessStyleValue,
+  removeRegion,
   type StyleChanges,
 } from "@/lib/email/inline-style";
 
@@ -388,36 +389,47 @@ export function EmailPreview({
 
   /**
    * Removes the active region (body / eyebrow / headline) outright. No model
-   * call — the server locates the region by occurrence index and splices it
-   * out of the stored HTML. Structural regions (header/footer/cta/image) and
-   * the last body block are refused server-side.
+   * call — deletion is a pure string splice. To keep it feeling instant, the
+   * section is cut from the preview immediately (optimistic) using the same
+   * pure `removeRegion` the server uses, and the persist round-trip runs in
+   * the background. The server's response is authoritative (it re-applies
+   * em-dash stripping + the unsubscribe guarantee); on failure we revert.
    */
   async function handleDelete() {
-    if (!active || applying) return;
-    setApplying(true);
-    setEditError(null);
+    if (!active) return;
+    const target = active;
+    const prevHtml = html;
+
+    const optimistic = removeRegion(html, target.region, target.regionIndex);
+    if ("error" in optimistic) {
+      setEditError(optimistic.error);
+      return;
+    }
+    onHtmlChange(optimistic.html);
+    closeSheet();
+    toast.success("Section deleted.");
+
     try {
       const res = await fetch(`/api/drafts/${draftId}/delete-region`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          region: active.region,
-          regionIndex: active.regionIndex,
-          regionLabel: active.label,
+          region: target.region,
+          regionIndex: target.regionIndex,
+          regionLabel: target.label,
         }),
       });
       const data = (await res.json()) as { html?: string; error?: string };
       if (!res.ok || !data.html) {
         throw new Error(data.error ?? "Couldn't delete that section.");
       }
-      onHtmlChange(data.html);
+      // Adopt the server's post-processed html only if it differs (avoids a
+      // needless second iframe remount in the common case).
+      if (data.html !== optimistic.html) onHtmlChange(data.html);
       onEdited?.();
-      closeSheet();
-      toast.success("Section deleted.");
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Couldn't delete that section.");
-    } finally {
-      setApplying(false);
+      onHtmlChange(prevHtml);
+      toast.error(err instanceof Error ? err.message : "Couldn't delete that section. Reverted.");
     }
   }
 
