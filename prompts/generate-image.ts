@@ -19,7 +19,7 @@ export const IMAGE_STYLE_LABELS: Record<ContentImageStyle, string> = {
 
 /** One-line descriptions for the style picker UI. Keep in sync with the scaffolds. */
 export const IMAGE_STYLE_DESCRIPTIONS: Record<ContentImageStyle, string> = {
-  illustration: "Flat editorial vector art in brand colors, bold and clean.",
+  illustration: "Flat editorial vector art, neutral base with brand-color accents.",
   photo: "Premium photography, natural light, graded to the brand palette.",
   texture: "Abstract gradient backdrop built only from brand colors.",
   render3d: "Soft matte 3D shapes with studio lighting, playful but polished.",
@@ -33,8 +33,10 @@ const STYLE_SCAFFOLDS: Record<ContentImageStyle, string> = {
   illustration:
     "A modern flat vector-style editorial illustration of {SCENE}. Clean bold " +
     "shapes, minimal detail, generous negative space, confident composition. " +
-    "Strictly limited palette built from these brand colors: {PALETTE}. No text, " +
-    "no words, no letters, no logos, no watermarks. Crisp edges, print quality.",
+    "A calm neutral base of soft grays, off-whites, and muted naturals, with " +
+    "these brand colors used sparingly as deliberate accents on a few focal " +
+    "shapes: {PALETTE}. No text, no words, no letters, no logos, no watermarks. " +
+    "Crisp edges, print quality.",
   photo:
     "A premium editorial photograph of {SCENE}. Natural light, shallow depth of " +
     "field, uncluttered composition with clear negative space, color-graded to " +
@@ -49,20 +51,24 @@ const STYLE_SCAFFOLDS: Record<ContentImageStyle, string> = {
   render3d:
     "A soft 3D render of {SCENE}. Smooth matte clay-like materials, rounded " +
     "friendly geometry, gentle studio lighting with soft shadows, objects " +
-    "floating on a clean backdrop with generous negative space. Colors drawn " +
-    "from this brand palette: {PALETTE}. No text, no words, no letters, no " +
-    "logos, no watermarks. Modern, high-end product-page quality.",
+    "floating on a clean neutral backdrop (soft gray or off-white) with " +
+    "generous negative space. Mostly soft neutral tones, with these brand " +
+    "colors appearing as accents on one or two hero objects: {PALETTE}. No " +
+    "text, no words, no letters, no logos, no watermarks. Modern, high-end " +
+    "product-page quality.",
   collage:
     "A modern editorial paper-cutout collage of {SCENE}. Layered torn and " +
     "cleanly cut paper shapes, subtle drop shadows for real depth, a playful " +
-    "but disciplined composition with clear focal hierarchy. Paper stock " +
-    "restricted to this brand palette plus paper white: {PALETTE}. No text, no " +
-    "letters, no logos, no watermarks. Tactile, magazine-cover quality.",
+    "but disciplined composition with clear focal hierarchy. Mostly paper " +
+    "white, kraft, and soft gray stock, with a few pieces cut from these " +
+    "brand colors as accents: {PALETTE}. No text, no letters, no logos, no " +
+    "watermarks. Tactile, magazine-cover quality.",
   lineart:
     "A minimal continuous line-art drawing of {SCENE}. Confident single-weight " +
-    "strokes, at most one or two flat accent fills, drawn on a clean background " +
-    "tinted from this brand palette: {PALETTE}. Elegant, sparse, gallery " +
-    "quality. No text, no words, no letters, no logos, no watermarks.",
+    "strokes in a dark neutral ink on a clean near-white background, with at " +
+    "most one or two small flat accent fills drawn from this brand palette: " +
+    "{PALETTE}. Elegant, sparse, gallery quality. No text, no words, no " +
+    "letters, no logos, no watermarks.",
 };
 
 // Appended to the final render prompt when the user attached a reference
@@ -123,9 +129,14 @@ export function buildFinalImagePrompt(
   referenceUse?: ReferenceUse,
 ): string {
   const c = tokens.colors;
-  const palette = [c.primary, c.accent, c.secondary, c.background]
-    .filter(Boolean)
-    .join(", ");
+  // Texture is deliberately a pure brand backdrop, so it gets the full
+  // palette; every other style reads brand colors as accents over a neutral
+  // base, and feeding it the whole gamut makes renders brand-saturated.
+  const paletteColors =
+    style === "texture"
+      ? [c.primary, c.accent, c.secondary, c.background]
+      : [c.accent, c.primary];
+  const palette = paletteColors.filter(Boolean).join(", ");
   const base = STYLE_SCAFFOLDS[style]
     .replace("{SCENE}", scene.trim().replace(/\.$/, ""))
     .replace("{PALETTE}", palette);
