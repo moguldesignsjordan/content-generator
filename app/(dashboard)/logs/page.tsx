@@ -1,5 +1,8 @@
+import { notFound } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getLogStats, listRecentLogs } from "@/lib/db/queries";
+import { getLogStats, getUserRole, listRecentLogs } from "@/lib/db/queries";
+import { createClient } from "@/lib/supabase/server";
+import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 import { Card, StatCard } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { LogsFeed } from "./_components/logs-feed";
@@ -8,6 +11,19 @@ import { LogsFeed } from "./_components/logs-feed";
 export const dynamic = "force-dynamic";
 
 export default async function LogsPage() {
+  // Admin-only, in addition to the nav link already being hidden (defense
+  // in depth — the nav hides the link, this stops direct navigation to
+  // /logs). 404s rather than redirects so the page's existence isn't
+  // signaled to non-admins.
+  if (isSupabaseAuthConfigured()) {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const role = user && isSupabaseConfigured() ? await getUserRole(user.id) : "user";
+    if (role !== "admin") notFound();
+  }
+
   if (!isSupabaseConfigured()) {
     return (
       <Card className="p-7">

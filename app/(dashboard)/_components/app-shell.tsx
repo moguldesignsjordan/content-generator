@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import type { UserRole } from "@/lib/db/types";
 import { Sidebar } from "./sidebar";
 import { TabBar } from "./tab-bar";
 import { ThemeToggle } from "./theme-toggle";
@@ -16,9 +17,11 @@ import { ThemeToggle } from "./theme-toggle";
  */
 export function AppShell({
   userEmail,
+  role,
   children,
 }: {
   userEmail: string | null;
+  role: UserRole;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -35,7 +38,7 @@ export function AppShell({
 
   return (
     <div className="md:flex md:min-h-dvh">
-      <Sidebar pathname={pathname} userEmail={userEmail} />
+      <Sidebar pathname={pathname} userEmail={userEmail} role={role} />
 
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
         {/* Mobile top bar */}
@@ -65,7 +68,7 @@ export function AppShell({
         </main>
       </div>
 
-      <TabBar pathname={pathname} className="md:hidden" />
+      <TabBar pathname={pathname} role={role} className="md:hidden" />
     </div>
   );
 }

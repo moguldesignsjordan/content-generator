@@ -648,20 +648,40 @@ confirm the dashboard chat now starts blank after logging back in.
   pass. **Not yet verified in the browser:** the new image-sheet controls and
   the dashboard glow (needs Jordan's logged-in session or a Playwright MCP
   session).
+- **User roles (new, migration 013, not yet applied to the live DB):**
+  `user_profiles` table (`id` → `auth.users`, `role` in `admin`/`user`,
+  default `user`) plus an `on_auth_user_created_profile` trigger so future
+  invited users default to `user`; the migration's one-time backfill makes
+  every *existing* auth user (today just Jordan) `admin` so nobody gets
+  locked out by applying it. First (and so far only) use: the Logs nav item
+  (`app/(dashboard)/_components/nav.tsx` `adminOnly` flag) is hidden from
+  non-admins in the sidebar and tab bar, and both the `/logs` page and
+  `/api/logs/recent` independently re-check the role server-side (404, not
+  redirect, so the route's existence isn't signaled). `getUserRole()` in
+  `lib/db/queries.ts` fails closed to `'user'` if the table isn't migrated
+  yet or the row is missing. This is a flat, non-brand-scoped role — see
+  `multi-tenancy-roadmap.md` for how it's expected to grow into per-brand
+  roles (`owner`/`editor`/`viewer`) later; that roadmap's `brand_members`
+  table is unrelated to this one and not built yet.
 
 ## Next step (backlog, still open)
 
-1. Click through `/logs` logged in as Jordan: confirm the stat tiles and feed
+1. Apply `db/migrations/013_user_roles.sql` in the Supabase SQL editor, then
+   verify: Jordan's own account still sees Logs (backfilled to `admin`), and
+   a second test account (or `update user_profiles set role = 'user'` on a
+   throwaway row) confirms Logs disappears from both the sidebar and tab bar
+   and `/logs` / `/api/logs/recent` 404 directly.
+2. Click through `/logs` logged in as Jordan: confirm the stat tiles and feed
    render, the All/Errors/Warnings/Usage filter works, and a real
    error/generation shows up live within the ~2.5s poll interval.
-2. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
+3. Get real `DATAFORSEO_LOGIN`/`DATAFORSEO_PASSWORD` credentials from
    app.dataforseo.com (account email + a separate API password from their
    dashboard) and add them to `.env.local` — the only remaining blocker on
    Slice 4 keyword research now that migration 008 is confirmed applied.
-3. Decide on Plan 5 Phase B (AI-assisted section-level copy editing for
+4. Decide on Plan 5 Phase B (AI-assisted section-level copy editing for
    blogs, vs. the direct manual field editor already shipped in `b6f427d`)
    — check with Jordan before starting.
-4. Remaining "Not yet verified" items: the from-scratch brand-guidelines
+5. Remaining "Not yet verified" items: the from-scratch brand-guidelines
    generate path (no colors set), onboarding auto-images toggle, an actual
    MailerLite "Send now"/"Schedule" click-through (Jordan's call, not done
    yet — still testing), and Plan 4's actual cross-instance lock race test

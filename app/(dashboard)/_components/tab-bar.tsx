@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import type { UserRole } from "@/lib/db/types";
 import { NAV } from "./nav";
 
 /** Fixed bottom tab bar (mobile only). Native iOS feel + safe-area padding. */
 export function TabBar({
   pathname,
+  role,
   className,
 }: {
   pathname: string;
+  role: UserRole;
   className?: string;
 }) {
+  const items = NAV.filter((item) => !item.adminOnly || role === "admin");
+
   return (
     <nav
       className={cn(
@@ -21,7 +26,7 @@ export function TabBar({
       style={{ paddingBottom: "var(--sab)" }}
     >
       <div className="flex items-stretch justify-around px-1">
-        {NAV.map(({ href, label, Icon, match }) => {
+        {items.map(({ href, label, Icon, match }) => {
           const active = match(pathname);
           return (
             <Link

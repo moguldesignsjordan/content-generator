@@ -5,6 +5,7 @@ import { Logo } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
 import { cn } from "@/lib/cn";
+import type { UserRole } from "@/lib/db/types";
 import { NAV } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -12,11 +13,14 @@ import { ThemeToggle } from "./theme-toggle";
 export function Sidebar({
   pathname,
   userEmail,
+  role,
 }: {
   pathname: string;
   userEmail: string | null;
+  role: UserRole;
 }) {
   const initials = (userEmail?.[0] ?? "M").toUpperCase();
+  const items = NAV.filter((item) => !item.adminOnly || role === "admin");
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[244px] shrink-0 flex-col border-r border-border bg-surface/30 md:flex">
@@ -27,7 +31,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-3">
-        {NAV.map(({ href, label, Icon, match }) => {
+        {items.map(({ href, label, Icon, match }) => {
           const active = match(pathname);
           return (
             <Link

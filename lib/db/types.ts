@@ -705,6 +705,11 @@ export interface ContentSchedule {
   created_at: string;
 }
 
+// ── User roles (migration 013). Flat, not brand-scoped yet — 'admin' can
+// see the Logs screen, 'user' can't. See multi-tenancy-roadmap.md for how
+// this grows into per-brand roles later.
+export type UserRole = "admin" | "user";
+
 // ── Logs: unified real-time feed for errors/warnings/info + Claude token
 // usage (migration 011). `level` doubles as severity (info/warn/error) and
 // as the usage-row discriminator; usage-only fields are null on log rows and

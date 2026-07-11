@@ -14,6 +14,8 @@ export interface NavItem {
   label: string;
   Icon: (props: IconProps) => React.ReactElement;
   match: (pathname: string) => boolean;
+  /** Only rendered for the 'admin' role (see lib/db/queries.ts getUserRole). */
+  adminOnly?: boolean;
 }
 
 export const NAV: NavItem[] = [
@@ -61,5 +63,6 @@ export const NAV: NavItem[] = [
     label: "Logs",
     Icon: ActivityIcon,
     match: (p) => p.startsWith("/logs"),
+    adminOnly: true,
   },
 ];

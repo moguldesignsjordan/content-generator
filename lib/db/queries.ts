@@ -28,6 +28,7 @@ import type {
   EmailType,
   BlogType,
   Icp,
+  UserRole,
   IcpProfile,
   KeywordData,
   MailerliteConfig,
@@ -2006,6 +2007,25 @@ export async function countScheduledAwaitingReview(brandId: string): Promise<num
     .eq("content_jobs.trigger_source", "schedule");
   if (error) throw error;
   return count ?? 0;
+}
+
+// ── User roles (migration 013) ──────────────────────────────────────────────
+
+/** The caller's role, defaulting to 'user' if no profile row exists yet
+ * (pre-migration, or a race with the on-signup trigger) — fail closed so a
+ * missing row never grants admin-only access. */
+export async function getUserRole(userId: string): Promise<UserRole> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return "user";
+    throw error;
+  }
+  return (data?.role as UserRole | undefined) ?? "user";
 }
 
 // ── Logs (migration 011) ───────────────────────────────────────────────────
