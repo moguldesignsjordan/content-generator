@@ -4,7 +4,14 @@ import { useState } from "react";
 import { ListGroup, ListRow, Sheet } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
-import type { Brand, ContentSchedule, Icp, Product, Strategy } from "@/lib/db/types";
+import type {
+  Brand,
+  ContentJobType,
+  ContentSchedule,
+  Icp,
+  Product,
+  Strategy,
+} from "@/lib/db/types";
 import type { ProviderField } from "@/lib/publishing/provider";
 import type { ConnectionState } from "@/lib/publishing/connections";
 import { BrandBasicsForm } from "./brand-basics-form";
@@ -34,7 +41,7 @@ type SectionKey =
 export interface ConnectionStatus {
   id: string;
   label: string;
-  kind: "email" | "blog";
+  kind: ContentJobType;
   configHint: string;
   fields: ProviderField[];
   state: ConnectionState;

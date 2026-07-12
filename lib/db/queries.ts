@@ -22,11 +22,14 @@ import type {
   DraftListRow,
   DraftMeta,
   DraftSeoData,
+  EmailCopy,
   EmailDraftContent,
   EmailStyleId,
   EmailTemplateId,
   EmailType,
   BlogType,
+  FlyerAspect,
+  StyleReference,
   Icp,
   UserRole,
   IcpProfile,
@@ -245,6 +248,12 @@ export async function createDraftShell(args: {
    * distinct email style/layout by index instead of racing a "recent
    * variants" DB read. */
   seriesSeedIndex?: number;
+  /** Social flyer inputs (type='social' only), stashed in meta so the flyer
+   * pipeline (lib/pipeline/generate-flyer.ts) picks them up at generation
+   * time, the same way series_brief travels. */
+  flyerAspect?: FlyerAspect;
+  flyerBrief?: string;
+  styleReferenceId?: string;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -257,6 +266,9 @@ export async function createDraftShell(args: {
     triggerSource,
     seriesBrief,
     seriesSeedIndex,
+    flyerAspect,
+    flyerBrief,
+    styleReferenceId,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -289,6 +301,9 @@ export async function createDraftShell(args: {
     ...(sourceDraftId ? { source_draft_id: sourceDraftId } : {}),
     ...(seriesBrief ? { series_brief: seriesBrief } : {}),
     ...(seriesSeedIndex !== undefined ? { series_seed_index: seriesSeedIndex } : {}),
+    ...(flyerAspect ? { flyer_aspect: flyerAspect } : {}),
+    ...(flyerBrief ? { flyer_brief: flyerBrief } : {}),
+    ...(styleReferenceId ? { style_reference_id: styleReferenceId } : {}),
   };
 
   const { data: draft, error: draftErr } = await db
@@ -1773,11 +1788,29 @@ export async function getDraftSubject(draftId: string): Promise<string | null> {
 export async function getBlogDraftFromEmail(
   emailDraftId: string,
 ): Promise<{ draftId: string; subject: string } | null> {
+  return getSpinoffDraft(emailDraftId, "blog");
+}
+
+/** The flyer spun off the given email draft (if any), same idea as
+ * getBlogDraftFromEmail: turns "Create flyer" into a link once one exists. */
+export async function getFlyerDraftFromEmail(
+  emailDraftId: string,
+): Promise<{ draftId: string; subject: string } | null> {
+  return getSpinoffDraft(emailDraftId, "social");
+}
+
+/** A draft of the given kind whose meta.source_draft_id points at the email.
+ * Kind-scoped because blogs AND flyers both spin off emails now. */
+async function getSpinoffDraft(
+  emailDraftId: string,
+  jobType: ContentJobType,
+): Promise<{ draftId: string; subject: string } | null> {
   const db = getAdminClient();
   const { data, error } = await db
     .from("drafts")
-    .select("id, content")
+    .select("id, content, content_jobs!inner ( type )")
     .eq("meta->>source_draft_id", emailDraftId)
+    .eq("content_jobs.type", jobType)
     .limit(1)
     .maybeSingle();
   if (error) throw error;
@@ -1786,6 +1819,90 @@ export async function getBlogDraftFromEmail(
     draftId: data.id as string,
     subject: (data.content as EmailDraftContent | null)?.subject ?? "",
   };
+}
+
+/**
+ * The structured email copy of a draft (meta.email_copy), for the flyer
+ * pipeline to distill a source email's offer into flyer copy. Null when the
+ * draft doesn't exist or predates structured copy.
+ */
+export async function getEmailCopyForDraft(
+  draftId: string,
+): Promise<EmailCopy | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("meta")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (error) throw error;
+  return ((data?.meta ?? {}) as DraftMeta).email_copy ?? null;
+}
+
+// ── Style references (migration 014): the reusable flyer style library ──────
+
+export async function listStyleReferences(
+  brandId: string,
+): Promise<StyleReference[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("style_references")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    // Pre-migration-014 DBs have no table yet; the library is just empty.
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as StyleReference[];
+}
+
+export async function getStyleReference(
+  id: string,
+): Promise<StyleReference | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("style_references")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as StyleReference) ?? null;
+}
+
+export async function createStyleReference(args: {
+  brandId: string;
+  name: string;
+  imageUrl: string;
+  storagePath: string;
+  notes?: string;
+}): Promise<StyleReference> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("style_references")
+    .insert({
+      brand_id: args.brandId,
+      name: args.name.trim(),
+      image_url: args.imageUrl,
+      storage_path: args.storagePath,
+      notes: args.notes?.trim() || null,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as StyleReference;
+}
+
+/** Deletes the row only; the caller removes the storage object first (it has
+ * the storage_path from getStyleReference). */
+export async function deleteStyleReference(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("style_references").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /**

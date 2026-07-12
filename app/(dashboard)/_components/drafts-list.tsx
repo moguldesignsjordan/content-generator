@@ -21,7 +21,7 @@ import type { DraftListRow } from "@/lib/db/types";
 import { DraftStateBadge } from "./topic-badges";
 
 type Filter = "all" | "in_review" | "approved" | "archived";
-type Kind = "email" | "blog";
+type Kind = "email" | "blog" | "social";
 
 /**
  * The shared Emails/Blogs list. Both tabs are the same flat list of drafts,
@@ -109,7 +109,9 @@ export function DraftsList({
   const emptyCopy =
     kind === "blog"
       ? "No blog posts yet. Open an email's review page and tap Create blog post, or generate one from a topic in Create."
-      : "No emails yet. Ask the assistant to draft one, or generate from a topic in Create.";
+      : kind === "social"
+        ? "No flyers yet. Tap New flyer to design one from a topic or a quick brief."
+        : "No emails yet. Ask the assistant to draft one, or generate from a topic in Create.";
 
   return (
     <div>

@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BlogIcon,
+  FlyerIcon,
   GearIcon,
   HomeIcon,
   MailIcon,
@@ -39,6 +40,12 @@ export const NAV: NavItem[] = [
     label: "Blogs",
     Icon: BlogIcon,
     match: (p) => p.startsWith("/blogs"),
+  },
+  {
+    href: "/flyers",
+    label: "Flyers",
+    Icon: FlyerIcon,
+    match: (p) => p.startsWith("/flyers"),
   },
   {
     href: "/campaigns",

@@ -46,6 +46,22 @@ export const BlogIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const FlyerIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="2" />
+    <path d="m4 15 4.5-4.5 4 4L15 12l5 5" />
+    <circle cx="9.5" cy="8" r="1.5" />
+  </Svg>
+);
+
+export const DownloadIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M4 19h16" />
+  </Svg>
+);
+
 export const PlusIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />

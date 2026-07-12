@@ -514,7 +514,7 @@ export interface DraftGenerationState {
 // review-page, and approve-gate code path keeps working unchanged; the real
 // structured post lives in meta.blog_copy (section bodies are markdown).
 
-export type ContentJobType = "email" | "blog";
+export type ContentJobType = "email" | "blog" | "social";
 
 export interface BlogSection {
   heading: string;
@@ -531,6 +531,41 @@ export interface BlogCopy {
   conclusion: string; // markdown
   cta_text: string;
   cta_url?: string;
+}
+
+// ── Social flyer drafts ──────────────────────────────────────────────────────
+// A flyer draft reuses the drafts table via content_jobs.type='social', the
+// same trick blogs use: `content` stores the EmailDraftContent SHAPE
+// (subject = headline, preheader = caption excerpt, html = "") so every list,
+// review-page, and approve-gate code path keeps working; the real flyer lives
+// in meta.flyer_copy / meta.flyer_image.
+
+/** Instagram/Facebook post shapes. Width/height presets live in
+ * prompts/generate-flyer.ts (FLYER_ASPECTS). */
+export type FlyerAspect = "1:1" | "4:5" | "9:16";
+
+export interface FlyerCopy {
+  /** Rendered IN the image, as-is. Keep it short. */
+  headline: string;
+  /** Rendered IN the image under the headline (optional). */
+  subtext?: string;
+  /** Rendered IN the image as the call-to-action (optional). */
+  cta?: string;
+  /** The post caption that accompanies the image; NOT rendered in it. */
+  caption: string;
+  hashtags?: string[];
+}
+
+/** One row of style_references (migration 014): an uploaded reference image
+ * the flyer generator can match visually (style transfer). */
+export interface StyleReference {
+  id: string;
+  brand_id: string;
+  name: string;
+  image_url: string;
+  storage_path: string;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface DraftMeta {
@@ -578,6 +613,24 @@ export interface DraftMeta {
   // each email in the series keeps its own angle/message/offer. Lives in meta
   // (jsonb) and survives generation because populateDraft merges meta.
   series_brief?: CampaignBrief;
+  // ── Social flyer fields (content_jobs.type='social' drafts only). All jsonb,
+  // no migration needed; they survive generation because populateDraft merges
+  // meta rather than replacing it.
+  // The structured flyer: in-image text (headline/subtext/cta) + post caption.
+  flyer_copy?: FlyerCopy;
+  // The rendered flyer currently attached to this draft (hosted on Supabase
+  // Storage; prompt field enables tweak-and-regenerate like hero images).
+  flyer_image?: ContentImage;
+  // The post shape this flyer was rendered at. Defaults to "1:1" when absent.
+  flyer_aspect?: FlyerAspect;
+  // The visual concept behind the current render (imagery only, no text), so
+  // the edit sheet can rebuild the prompt after copy tweaks without a new
+  // copy-crafting call.
+  flyer_scene?: string;
+  // Freeform creative brief typed at creation time (standalone flyers).
+  flyer_brief?: string;
+  // The style_references row whose image steers this flyer's look, if any.
+  style_reference_id?: string;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation
   // calls assign distinct style/layout by index (rotation.length-cycle),

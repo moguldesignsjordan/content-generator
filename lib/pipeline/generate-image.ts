@@ -220,8 +220,10 @@ export async function saveUploadedHeroImage(args: {
   };
 }
 
-/** Uploads a JPEG to the content-images bucket, creating it if missing. */
-async function uploadContentImage(data: Buffer): Promise<string> {
+/** Uploads a JPEG to the content-images bucket, creating it if missing.
+ * Exported for the flyer pipeline (lib/pipeline/generate-flyer.ts), which
+ * hosts its renders in the same bucket. */
+export async function uploadContentImage(data: Buffer): Promise<string> {
   const db = getAdminClient();
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { generateEmailForTopicStreamed, type GenerationEvent } from "./generate";
 import { generateBlogForTopicStreamed } from "./generate-blog";
+import { generateFlyerForTopicStreamed } from "./generate-flyer";
 import {
   acquireGenerationLock,
   getDraftGenerationState,
@@ -122,7 +123,11 @@ async function startRun(
 
   try {
     const runner =
-      opts.jobType === "blog" ? generateBlogForTopicStreamed : generateEmailForTopicStreamed;
+      opts.jobType === "blog"
+        ? generateBlogForTopicStreamed
+        : opts.jobType === "social"
+          ? generateFlyerForTopicStreamed
+          : generateEmailForTopicStreamed;
     await runner(draftId, ctx, opts, emit);
   } catch {
     // Errors are already surfaced to listeners via the runner's own "error"

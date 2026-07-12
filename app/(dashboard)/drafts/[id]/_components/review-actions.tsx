@@ -71,6 +71,8 @@ interface ReviewActionsProps {
   /** A blog already spun off this email, if any. When present, the blog card
    * links to it instead of offering to create a duplicate. */
   existingBlog?: { draftId: string; subject: string } | null;
+  /** A flyer already spun off this email, if any. Same link-not-duplicate rule. */
+  existingFlyer?: { draftId: string; subject: string } | null;
   /** The MailerLite campaign row if this email was already pushed, else null. */
   publication: PublicationRecord | null;
   /** True when MailerLite has an API key + sender identity and can actually send. */
@@ -101,6 +103,7 @@ export function ReviewActions({
   seoData,
   initialArchived,
   existingBlog,
+  existingFlyer,
   publication: initialPublication,
   mailerliteConfigured,
   initialPerformance = [],
@@ -111,6 +114,7 @@ export function ReviewActions({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creatingBlog, setCreatingBlog] = useState(false);
+  const [creatingFlyer, setCreatingFlyer] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publication, setPublication] = useState(initialPublication);
   const [showSchedule, setShowSchedule] = useState(false);
@@ -369,6 +373,27 @@ export function ReviewActions({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start blog post.");
       setCreatingBlog(false);
+    }
+  }
+
+  // One-click flyer spin-off: starts a social flyer draft that distills THIS
+  // email's copy into a post graphic, then drops onto its review page.
+  async function handleCreateFlyer() {
+    setCreatingFlyer(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/create-flyer`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to start the flyer.");
+      }
+      const data = (await res.json()) as { draftId?: string };
+      if (!data.draftId) throw new Error("Failed to start the flyer.");
+      router.push(`/drafts/${data.draftId}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to start the flyer.");
+      setCreatingFlyer(false);
     }
   }
 
@@ -694,6 +719,47 @@ export function ReviewActions({
             onClick={handleCreateBlog}
           >
             Create blog post
+          </Button>
+        </Card>
+      )}
+
+      {/* Flyer spin-off: a social post graphic distilled from THIS email's
+          copy. Same link-not-duplicate behavior as the blog card. */}
+      {existingFlyer ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Flyer created from this email
+            </p>
+            <p className="truncate text-[13px] text-muted">
+              {existingFlyer.subject || "Untitled flyer"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/drafts/${existingFlyer.draftId}`)}
+          >
+            Open flyer
+          </Button>
+        </Card>
+      ) : (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Create a social flyer from this email
+            </p>
+            <p className="text-[13px] text-muted">
+              Designs a Facebook/Instagram post graphic with this email's
+              offer, ready to download and post.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            loading={creatingFlyer}
+            disabled={busy}
+            onClick={handleCreateFlyer}
+          >
+            Create flyer
           </Button>
         </Card>
       )}

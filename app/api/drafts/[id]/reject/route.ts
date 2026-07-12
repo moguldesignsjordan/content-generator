@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { regenerateEmailDraft } from "@/lib/pipeline/generate";
 import { regenerateBlogDraft } from "@/lib/pipeline/generate-blog";
+import { regenerateFlyerDraft } from "@/lib/pipeline/generate-flyer";
 import { getDraftWithJobContext } from "@/lib/db/queries";
 import type { EmailTemplateId } from "@/lib/db/types";
 import { logError } from "@/lib/log";
@@ -42,6 +43,11 @@ export async function POST(
 
     if (draftCtx.jobType === "blog") {
       const result = await regenerateBlogDraft(id, feedback.trim());
+      return NextResponse.json(result);
+    }
+
+    if (draftCtx.jobType === "social") {
+      const result = await regenerateFlyerDraft(id, feedback.trim());
       return NextResponse.json(result);
     }
 
