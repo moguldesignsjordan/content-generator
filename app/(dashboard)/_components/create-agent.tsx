@@ -430,19 +430,6 @@ export function CreateAgent({
 
           {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
 
-          {actionsOpen && (
-            <div className="px-3">
-              <ActionGrid
-                onEmail={() => send("I want to create an email")}
-                onBlog={() => send("I want to write a blog post")}
-                onCampaign={() =>
-                  send("I want to plan a campaign: a series of emails")
-                }
-                disabled={loading || generating}
-              />
-            </div>
-          )}
-
           <div className="p-3 pt-2">
             <ComposerBar
               inputRef={inputRef}
@@ -455,7 +442,6 @@ export function CreateAgent({
                 }
               }}
               onSend={() => send(input)}
-              onPlus={() => setActionsOpen((v) => !v)}
               ready={ready}
               disabled={loading || generating}
             />
@@ -482,7 +468,7 @@ function ComposerBar({
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
-  onPlus: () => void;
+  onPlus?: () => void;
   ready: boolean;
   disabled: boolean;
   /** When set (landing), the placeholder cycles through example prompts as a
@@ -493,14 +479,16 @@ function ComposerBar({
   const hasText = Boolean(input.trim());
   return (
     <div className="hero-ring composer-glow flex items-end gap-1.5 rounded-[28px] border border-border bg-surface-2 p-2 pl-2.5">
-      <button
-        type="button"
-        onClick={onPlus}
-        aria-label="Quick actions"
-        className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
-      >
-        <PlusIcon size={20} />
-      </button>
+      {onPlus && (
+        <button
+          type="button"
+          onClick={onPlus}
+          aria-label="Quick actions"
+          className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+        >
+          <PlusIcon size={20} />
+        </button>
+      )}
       <div className="relative min-w-0 flex-1 self-center">
         <textarea
           ref={inputRef}
