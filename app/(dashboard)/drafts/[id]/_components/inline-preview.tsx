@@ -511,27 +511,29 @@ export function InlinePreview({
   const toolbarLeft = selectedRect ? selectedRect.left : 0;
   const showToolbar = !!selected && !!selectedRect && !editing && !rewriteOpen;
 
-  // The preview container clips its overflow, so the Design panel has to be kept
-  // inside it. Preference order: sit BELOW the section (so you can see the change
-  // land on the thing you're styling), else flip above it, else pin to the top and
-  // let the panel scroll. It is capped to the container height either way, so it
-  // can never be half cut off.
+  // The Design panel is portalled to <body>, so this is in VIEWPORT coordinates,
+  // not container ones. That is deliberate: the preview container clips its
+  // overflow, and a 600px-tall preview leaves no room under a section for a
+  // panel, so an in-container panel had to flip up and cover the very section
+  // being styled. Out here it simply hangs below the section, over the page.
   const containerBox = containerRef.current?.getBoundingClientRect();
   const designLayout = (() => {
-    const cw = containerBox?.width ?? 0;
-    const ch = containerBox?.height ?? 0;
-    const left = Math.max(8, Math.min(toolbarLeft, Math.max(8, cw - DESIGN_PANEL_WIDTH - 8)));
-    const below = toolbarTop + TOOLBAR_HEIGHT + 6;
-    const maxHeight = ch ? ch - 16 : DESIGN_PANEL_HEIGHT;
+    if (!containerBox || !selectedRect) return { anchor: { top: 0, left: 0 }, maxHeight: undefined };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
-    if (!ch || below + DESIGN_PANEL_HEIGHT <= ch - 8) {
-      return { anchor: { top: below, left }, maxHeight: Math.min(maxHeight, ch - below - 8) };
-    }
-    const above = (selectedRect?.top ?? 0) - DESIGN_PANEL_HEIGHT - 6;
-    if (above >= 8) {
-      return { anchor: { top: above, left }, maxHeight: DESIGN_PANEL_HEIGHT };
-    }
-    return { anchor: { top: 8, left }, maxHeight };
+    const left = Math.max(
+      8,
+      Math.min(containerBox.left + toolbarLeft, vw - DESIGN_PANEL_WIDTH - 8),
+    );
+    const below = containerBox.top + toolbarTop + TOOLBAR_HEIGHT + 6;
+    // Prefer below the section. Only flip above if that would run off-screen.
+    const top =
+      below + DESIGN_PANEL_HEIGHT <= vh - 8
+        ? below
+        : Math.max(8, containerBox.top + (selectedRect.top ?? 0) - DESIGN_PANEL_HEIGHT - 6);
+
+    return { anchor: { top, left }, maxHeight: Math.max(200, vh - top - 12) };
   })();
 
   return (

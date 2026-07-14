@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, Input, SegmentedControl } from "@/components/ui";
 import { guessStyleValue, type StyleChanges } from "@/lib/email/inline-style";
 
@@ -50,9 +51,9 @@ function guessDesignState(snippet: string) {
 interface DesignPopoverProps {
   /** The section's current outerHTML, for seeding the controls. */
   snippet: string;
-  /** Where to anchor, in container coordinates. */
+  /** Where to anchor, in VIEWPORT coordinates (the panel is portalled to body). */
   anchor: { top: number; left: number };
-  /** Hard cap so the panel can never spill out of the clipped preview container. */
+  /** Hard cap so a tall panel scrolls instead of running off the bottom of the screen. */
   maxHeight?: number;
   busy: boolean;
   onApply: (changes: StyleChanges) => void;
@@ -92,16 +93,17 @@ export function DesignPopover({
     };
   }, [onClose]);
 
-  return (
+  // Portalled to <body> and positioned in VIEWPORT coordinates. The preview
+  // container clips its overflow, so a panel rendered inside it had to flip up
+  // and cover the very section being styled, which defeats the point of watching
+  // the change land. Out here it can simply hang below the section, over the rest
+  // of the page, like a normal inspector popover.
+  return createPortal(
     <div
       ref={ref}
       style={{ top: anchor.top, left: anchor.left, maxHeight: maxHeight ?? undefined }}
-      className="absolute z-40 w-[268px] space-y-3 overflow-y-auto rounded-xl border border-border bg-surface-2/95 p-3 shadow-xl backdrop-blur"
+      className="fixed z-50 w-[268px] space-y-3 overflow-y-auto rounded-xl border border-border bg-surface-2/95 p-3 shadow-2xl backdrop-blur"
     >
-      {/* Deliberately compact: the panel lives inside the clipped preview, and a
-          tall one has to flip up and cover the very section being styled, which
-          defeats the point of seeing the change land. Keep it short enough to
-          sit under the section. */}
       <ColorRow
         label="Text"
         value={color}
@@ -209,7 +211,8 @@ export function DesignPopover({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
