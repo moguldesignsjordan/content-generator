@@ -1,4 +1,5 @@
 import "server-only";
+import type { Anthropic } from "@anthropic-ai/sdk";
 import {
   DRAFT_MODEL,
   FAST_MODEL,
@@ -44,7 +45,8 @@ import type {
   DraftUsage,
   TopicContext,
 } from "@/lib/db/types";
-import { stripEmDashes } from "@/lib/text";
+import { stripEmDashes, stripMarkdown } from "@/lib/text";
+import { prepareReferenceImage } from "@/lib/images/optimize";
 import { contrastIssues, findBannedTerms } from "@/lib/email/quality";
 import {
   generateContentImage,
@@ -110,9 +112,11 @@ export async function generateEmailForTopicStreamed(
         recentStyles: recent.styles,
         recentLayouts: recent.layouts,
       });
+    const designReference = await loadEmailDesignReference(ctx, draftId);
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
       lengthTarget,
       emailType,
+      designReference,
     });
 
     const { content, copy, designSource } = renderEmailForContext(
@@ -128,11 +132,15 @@ export async function generateEmailForTopicStreamed(
     // Series emails skip auto imaging by default: a 10-email campaign would
     // otherwise spend 10 Gemini calls up front. Single emails and blogs keep
     // the on-by-default behavior (see maybeAutoHeroImage).
+    // The chat's "want a picture in this email?" answer, when the user gave
+    // one, beats both defaults: no means no even if the brand auto-images, yes
+    // means yes even if the brand opted out.
     const isSeriesEmail = Boolean(opts.briefOverride);
     const heroImage = await maybeAutoHeroImage(ctx, copy.headline, usageDeltas, {
       draftId,
       onEvent,
-      skip: isSeriesEmail,
+      skip: isSeriesEmail || brief?.include_image === false,
+      force: brief?.include_image === true,
     });
     if (heroImage) {
       content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
@@ -181,6 +189,39 @@ export async function generateEmailForTopicStreamed(
 }
 
 /**
+ * Fetches the newest email DESIGN reference (migration 016) and prepares it as
+ * the base64 payload Claude's vision input takes, so generation can recreate
+ * the design instead of only reading notes about it.
+ *
+ * Only the newest is used: recreation targets ONE design (see
+ * buildDesignReferenceBlock, which describes that same reference in text).
+ *
+ * Non-fatal by design, exactly like the flyer's loadStyleReference: a deleted
+ * row, an unreachable image, or an unreadable file logs a warning and the email
+ * generates without the reference. A broken screenshot must never cost a draft.
+ */
+async function loadEmailDesignReference(
+  ctx: TopicContext,
+  draftId: string,
+): Promise<{ data: string; mimeType: string } | null> {
+  const ref = ctx.emailDesignRefs?.[0];
+  if (!ref) return null;
+  try {
+    const res = await fetch(ref.image_url);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return await prepareReferenceImage(buffer);
+  } catch (err) {
+    logWarn(
+      "pipeline:generate:design-ref",
+      err instanceof Error ? err.message : String(err),
+      { draftId, styleReferenceId: ref.id },
+    );
+    return null;
+  }
+}
+
+/**
  * Auto-generates a hero image on by default for single emails and blogs,
  * unless the brand explicitly opted out (visual_identity.image_gen.auto ===
  * false) or the caller passes skip (series emails, to keep a multi-email
@@ -189,6 +230,10 @@ export async function generateEmailForTopicStreamed(
  * when skipped: the approval gate still covers the image, and the reviewer
  * can always generate, regenerate, replace, move, or remove it on the review
  * screen.
+ *
+ * force is the per-piece "yes, I want a picture" answer from the chat: it beats
+ * the brand's auto === false opt-out, but never beats skip (a series still
+ * defers its images) and never conjures an image without Gemini configured.
  */
 export async function maybeAutoHeroImage(
   ctx: TopicContext,
@@ -198,10 +243,12 @@ export async function maybeAutoHeroImage(
     draftId: string;
     onEvent: (event: GenerationEvent) => void;
     skip?: boolean;
+    force?: boolean;
   },
 ): Promise<ContentImage | undefined> {
   const prefs = ctx.brand.visual_identity?.image_gen;
-  if (progress?.skip || prefs?.auto === false || !isGeminiConfigured()) {
+  const optedOut = prefs?.auto === false && !progress?.force;
+  if (progress?.skip || optedOut || !isGeminiConfigured()) {
     return undefined;
   }
 
@@ -245,7 +292,11 @@ async function loadCampaignBrief(
 async function generateEmailCopy(
   system: string,
   user: string,
-  opts: { lengthTarget?: EmailLengthTarget; emailType?: EmailType } = {},
+  opts: {
+    lengthTarget?: EmailLengthTarget;
+    emailType?: EmailType;
+    designReference?: { data: string; mimeType: string } | null;
+  } = {},
 ): Promise<{ parsed: EmailDraftOutput; usageDeltas: UsageDelta[] }> {
   // The system prompt (brand guidelines/voice/positioning + the email design
   // system) only varies by template, of which there are three, so it's
@@ -253,6 +304,28 @@ async function generateEmailCopy(
   // means back-to-back drafts in a session, and same-request retries below,
   // reprice at roughly a 90% discount instead of full price every time.
   const cachedSystem = cacheableSystem(system);
+
+  // The design reference screenshot rides in the USER turn, not the system
+  // prompt, so cacheableSystem still lands. Every call shape (first attempt,
+  // error retry, length nudge) goes through this, so the image is never
+  // silently dropped on a retry.
+  const toUserContent = (
+    text: string,
+  ): string | Anthropic.ContentBlockParam[] => {
+    const ref = opts.designReference;
+    if (!ref) return text;
+    return [
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: ref.mimeType as "image/jpeg" | "image/png" | "image/webp",
+          data: ref.data,
+        },
+      },
+      { type: "text", text },
+    ];
+  };
 
   // Streamed because copy + a complete designed HTML document + adaptive
   // thinking share this token budget, and the SDK requires streaming for
@@ -264,7 +337,7 @@ async function generateEmailCopy(
         max_tokens: 32000,
         thinking: { type: "adaptive" },
         system: cachedSystem,
-        messages: [{ role: "user", content: u }],
+        messages: [{ role: "user", content: toUserContent(u) }],
         tools: [EMAIL_TOOL],
         tool_choice: { type: "tool", name: "save_email_draft" },
       })
@@ -365,19 +438,23 @@ function renderEmailForContext(
   copy: EmailCopy;
   designSource: "model" | "template";
 } {
+  // Copy fields render as literal plain text (subject lines, click-to-edit
+  // regions), so markdown the model slipped in would show as raw asterisks.
+  // The html field is NOT markdown-stripped: ** and # are legal inside styles.
+  const plain = (text: string) => stripMarkdown(stripEmDashes(text));
   const copy: EmailCopy = {
-    subject: stripEmDashes(parsed.subject.trim()),
+    subject: plain(parsed.subject.trim()),
     subject_variants: (parsed.subject_variants ?? [])
-      .map((v) => stripEmDashes(v.trim()))
+      .map((v) => plain(v.trim()))
       .filter((v) => v.length > 0)
       .slice(0, 3),
-    preheader: stripEmDashes(parsed.preheader.trim()),
-    headline: stripEmDashes(parsed.headline.trim()),
+    preheader: plain(parsed.preheader.trim()),
+    headline: plain(parsed.headline.trim()),
     body_sections: parsed.body_sections.map((s) => ({
-      heading: s.heading ? stripEmDashes(s.heading.trim()) : undefined,
-      body: stripEmDashes(s.body.trim()),
+      heading: s.heading ? plain(s.heading.trim()) : undefined,
+      body: plain(s.body.trim()),
     })),
-    cta_text: stripEmDashes(parsed.cta_text.trim()),
+    cta_text: plain(parsed.cta_text.trim()),
     cta_url: parsed.cta_url?.trim() || undefined,
   };
 
@@ -607,9 +684,11 @@ export async function regenerateEmailDraft(
       },
     });
 
+  const designReference = await loadEmailDesignReference(ctx, draftId);
   const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
     lengthTarget,
     emailType,
+    designReference,
   });
 
   const { content, copy, designSource } = renderEmailForContext(

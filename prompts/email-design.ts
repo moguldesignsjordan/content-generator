@@ -1,5 +1,10 @@
 import type { BrandTokens } from "@/lib/email/templates/types";
-import type { ContentImage, EmailTemplateId, HeroPlacement } from "@/lib/db/types";
+import type {
+  ContentImage,
+  EmailTemplateId,
+  HeroPlacement,
+  StyleReference,
+} from "@/lib/db/types";
 import { EMAIL_STYLES, type EmailStyleDirective } from "./email-styles";
 
 // Where the design prompt tells the model to put the hero image; mirrors the
@@ -199,5 +204,71 @@ export function buildEmailDesignBrief(
     "Design taste: modern and confident, generous whitespace, accent used sparingly",
     "and deliberately per the style direction above. Never cram; when in doubt, add",
     "space. NEVER use em dashes or en dashes anywhere in the HTML or copy.",
+  ].join("\n");
+}
+
+/**
+ * The block that tells the model to rebuild an uploaded email design (migration
+ * 016). Injected right after the design brief, so it can override the generic
+ * layout direction above it while the hard EMAIL DESIGN SYSTEM rules (600px
+ * card, inline styles, dark mode, {$unsubscribe}) still win over both.
+ *
+ * Only the NEWEST email-kind reference is used, deliberately: recreation means
+ * reproducing ONE design, and blending two references produces neither, at
+ * double the image tokens.
+ *
+ * This is the text half. The actual screenshot is attached to the user turn by
+ * loadEmailDesignReference in lib/pipeline/generate.ts; the notes here are what
+ * Claude distilled from that same image at upload time.
+ */
+export function buildDesignReferenceBlock(refs: StyleReference[] | undefined): string {
+  const ref = refs?.[0];
+  if (!ref) return "";
+
+  const recreate = (ref.mode ?? "recreate") === "recreate";
+  const profile = ref.design_profile;
+
+  const instruction = recreate
+    ? [
+        "A reference email design is ATTACHED TO THIS MESSAGE AS AN IMAGE. RECREATE its",
+        "design: reproduce its layout structure, the order and proportion of its sections,",
+        "its spacing rhythm, its type hierarchy, and its button treatment in your HTML.",
+        "Swap in THIS brand's colors, fonts, logo, and the copy you write. Never reproduce",
+        "the reference's brand, its logo, its images, or its words: you are rebuilding the",
+        "shape, not copying the email.",
+      ]
+    : [
+        "A reference email design is ATTACHED TO THIS MESSAGE AS AN IMAGE. Take its overall",
+        "look and mood as inspiration: its density, its visual weight, how it spends color",
+        "and space. Do not copy its layout section by section, and never reproduce its",
+        "brand, images, or words.",
+      ];
+
+  return [
+    recreate ? "REFERENCE EMAIL DESIGN (RECREATE THIS):" : "REFERENCE EMAIL DESIGN (INSPIRATION):",
+    ...instruction,
+    "The EMAIL DESIGN SYSTEM rules above (600px card, inline styles, dark-mode classes,",
+    "one CTA, {$unsubscribe} in the footer, WCAG-AA contrast) still apply and WIN on any",
+    "conflict with the reference. If the reference does something an email client can't do,",
+    "do the closest thing that survives Outlook and Gmail.",
+    ...(recreate
+      ? [
+          "Where the reference's structure and the LAYOUT FOR THIS EMAIL above disagree, the",
+          "reference wins: recreating it is the point.",
+        ]
+      : []),
+    ...(profile
+      ? [
+          "",
+          `What the design looks like: ${profile.summary}`,
+          "Its sections, top to bottom:",
+          ...profile.layout.map((section, i) => `  ${i + 1}. ${section}`),
+          ...(profile.palette_notes ? [`How it uses color: ${profile.palette_notes}`] : []),
+          ...(profile.typography_notes ? [`Its type hierarchy: ${profile.typography_notes}`] : []),
+        ]
+      : [
+          "",
+          "(No distilled notes for this one: read the attached image directly.)",
+        ]),
   ].join("\n");
 }

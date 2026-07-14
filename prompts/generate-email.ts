@@ -20,7 +20,7 @@ import {
   buildPositioningBlock,
   buildReferenceEmailsBlock,
 } from "./brand-voice";
-import { buildEmailDesignBrief } from "./email-design";
+import { buildDesignReferenceBlock, buildEmailDesignBrief } from "./email-design";
 import { EMAIL_STYLES, pickEmailStyle, pickRotation } from "./email-styles";
 
 // Zod schema for the model's tool input: structured COPY plus the complete
@@ -454,7 +454,11 @@ export function buildEmailMessages(
     product: ctx.product,
     override: opts.emailTypeOverride,
   });
-  const length = resolveLengthTarget(emailType, brand.voice_profile?.email_length);
+  // A length picked for THIS piece in the chat wins over the brand-wide setting.
+  const length = resolveLengthTarget(
+    emailType,
+    opts.brief?.length ?? brand.voice_profile?.email_length,
+  );
   const templateId =
     opts.templateOverride ??
     resolveEmailLayout(emailType, topic, {
@@ -468,6 +472,10 @@ export function buildEmailMessages(
     heroImage: opts.heroImage,
     style: EMAIL_STYLES[styleId],
   });
+  // The text half of the design reference; the screenshot itself is attached to
+  // the user turn by the pipeline (loadEmailDesignReference). Empty string when
+  // the brand has no email design references, so the prompt is unchanged.
+  const designRefBlock = buildDesignReferenceBlock(ctx.emailDesignRefs);
 
   const system = [
     `You are the email copywriter AND designer for ${brand.name}. You produce one`,
@@ -481,6 +489,7 @@ export function buildEmailMessages(
     "",
     designBrief,
     "",
+    designRefBlock,
     "COPY PRINCIPLES:",
     "- Lead with the reader, not the brand: open on their problem or outcome; the",
     "  offer earns its place after. Second person, active voice; cut hedging",
@@ -505,6 +514,9 @@ export function buildEmailMessages(
     "- Match the email's call-to-action to the funnel stage (provided below).",
     "- Fill the plain-text copy fields (no markup in them) AND the html field with the",
     "  complete designed document. The copy fields must match the copy inside the HTML.",
+    "- The copy fields are PLAIN TEXT: no markdown syntax at all, no **bold**, no ##",
+    "  headings, no asterisk bullets. They render literally, so an asterisk stays an",
+    "  asterisk. Emphasis belongs in the HTML, as real tags and styles.",
     "- Subject under 60 characters (plus 2 subject_variants with different angles);",
     "  preheader under 150 characters.",
     "- NEVER use em dashes or double-hyphens as punctuation. Use a comma, colon, or period.",

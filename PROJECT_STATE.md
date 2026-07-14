@@ -717,6 +717,102 @@ Still open from this session:
 - Brief card UI doesn't show/clear style_example (model-side only); add a
   row later if Jordan wants to see/remove it per piece.
 
+(That batch is now COMMITTED as `fdc5a34 new chat features`.)
+
+## Session 2026-07-13 (later): non-technical guided chat, email design refs, universal uploads, plain formatting
+
+Driver: Jordan is technical, his END USERS are not. The create chat asked
+compound, jargon-y questions and answered in `**markdown**` that rendered as
+literal asterisks. He also wanted to hand the engine ANY style material
+(text, HTML, code, a file, a screenshot) and, for images specifically, get a
+true recreation of the design, not loose inspiration. A raw Gmail "show
+original" paste (MIME + quoted-printable) was being rejected outright.
+
+Five parts, all on top of `fdc5a34` (typecheck + **208 tests** + build green;
+**uncommitted**; **migrations 015 AND 016 both still unapplied**):
+
+1. **Chip-first wizard** (`prompts/create-agent.ts`, mirrored into
+   `prompts/campaign.ts`). Rules the prompt now states absolutely: ONE short
+   question per turn, ALWAYS paired with `suggest_options` chips, plain
+   everyday words, never an internal concept (brief/tool/field/CTA/funnel/ICP),
+   chips never block free typing. Stages: what they're making → kind of email
+   (chips map to the `email_type` enum) → topic → the one message → what
+   readers should do (chips from the CTA library + mapped product) → who it's
+   for → length → image → look and feel → recap + generate.
+   Front-loading still short-circuits the whole thing.
+   Key mechanic worth knowing: a tapped chip is just `send(opt.label)`, i.e. a
+   normal user message. `opt.id`/`kind` never reach the server, so chips needed
+   NO new UI channel.
+2. **Per-piece brief fields** `length` and `include_image` on `CampaignBrief` /
+   `UpdateBriefInput` / both routes' `mergeBrief` / `buildBriefStateBlock`.
+   `buildEmailMessages` resolves `opts.brief?.length ?? brand.voice_profile
+   .email_length`, so the chat's choice beats the brand default.
+   `maybeAutoHeroImage` grew a `force` flag: `include_image === true` beats the
+   brand's `auto === false` opt-out, `false` skips, unset keeps the old
+   behavior. `skip` (series) still wins over `force`.
+3. **New `create_flyer_from_email` tool** (`prompts/agent-tools.ts` + a
+   `dispatchTool` case in `/api/create/chat`), mirroring
+   `create_blog_from_email` including its reuse-don't-duplicate check
+   (`getFlyerDraftFromEmail`, which already existed). Creates a `social` shell
+   with `meta.source_draft_id`, which the flyer pipeline already consumes.
+   **Deviation from the plan, on purpose:** the plan wanted a "want a matching
+   flyer?" chip question right after the draft is generated. That is
+   unreachable: `create-agent.tsx` does `router.push('/drafts/'+draftId)` the
+   moment `generate_content` returns, so the user is never looking at the chat
+   when that question renders. The draft review page ALREADY has a Create flyer
+   button (`review-actions.tsx` → `/api/drafts/[id]/create-flyer`), which is
+   the right place. So the prompt now just points there, and the tool serves the
+   in-chat path that DOES work: "make a flyer out of that email".
+4. **Email design references** (`db/migrations/016_email_design_references.sql`).
+   REUSES the migration-014 `style_references` table and bucket rather than a
+   parallel one; three new columns tell the two libraries apart: `kind`
+   ('flyer' default | 'email'), `mode` ('style' | 'recreate'), `design_profile`
+   jsonb. Upload a screenshot in Settings → "Email designs" (or just attach it
+   in chat) → `/api/style-references` with `kind=email` runs ONE vision call
+   (`lib/pipeline/extract-design.ts`, forced `save_design_profile`, null on
+   failure) → every email generation attaches the ACTUAL image to the user turn
+   (`loadEmailDesignReference` in generate.ts, non-fatal) and injects
+   `buildDesignReferenceBlock` (prompts/email-design.ts) telling the model to
+   RECREATE the layout with this brand's colors/fonts/copy. Only the NEWEST
+   email-kind ref is used (blending two would recreate neither). The design
+   system's hard rules (600px card, inline styles, dark mode, `{$unsubscribe}`)
+   explicitly WIN over the reference. `generateEmailCopy`'s user message becomes
+   `[image, text]` blocks via a `toUserContent` helper shared by the first call
+   AND both retries, so a retry never silently drops the image; the system
+   prompt stays a cacheable string.
+   New `isMissingColumnError` (lib/db/table-guard.ts) lets
+   `listStyleReferences(brandId, kind)` degrade on a pre-016 DB instead of
+   crashing; `createStyleReference` omits the new columns unless passed.
+5. **Universal chat uploads + raw MIME + no markdown.** The composer paperclip
+   now branches: an IMAGE posts straight to `/api/style-references` as
+   `kind=email` (design library); anything else rides into the composer as text.
+   Client-side DOMParser flattening was REMOVED on purpose, it shredded MIME;
+   the raw text now goes to the server, where `emailHtmlToText` (lib/text.ts)
+   unwraps RFC-822/MIME first (boundary split, prefers text/html, decodes
+   quoted-printable to BYTES so emoji survive, decodes base64, strips headers)
+   and only then flattens HTML. The 8000-char cap still applies AFTER
+   extraction, in `mergeBrief`. New `stripMarkdown` (lib/text.ts) is applied to
+   both chat routes' replies, `renderEmailForContext`'s copy fields, and
+   `cleanFlyerCopy` — never to email HTML, where `**`/`#` are legal.
+
+Still open from this session:
+- **Apply BOTH `015_reference_emails.sql` and
+  `016_email_design_references.sql`** in the Supabase SQL editor. The app
+  degrades gracefully without either (empty libraries), so nothing is broken
+  meanwhile, but neither feature does anything until they're applied.
+- Nothing is committed. Jordan says when.
+- Live click-through (the whole point, none of it is browser-verified):
+  tap through the new chip flow start to finish and confirm every question is
+  one line with chips; upload a screenshot in chat and confirm the generated
+  email actually copies that design; paste a raw Gmail "show original" and
+  confirm it's accepted, not refused; confirm no asterisks in any reply; and in
+  chat say "make a flyer out of that email" about an existing email, confirming
+  a flyer draft opens.
+- Known cost, accepted: an attached text/.eml file rides into the chat message
+  at up to 100k chars and is persisted in the transcript, so it's re-sent (from
+  the prompt cache) on later turns. The stored `style_example` is still capped
+  at 8000 chars after extraction. Tighten the composer cap if it ever bites.
+
 ## Next step (backlog, still open)
 
 1. Apply `db/migrations/013_user_roles.sql` in the Supabase SQL editor, then

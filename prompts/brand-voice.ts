@@ -298,6 +298,14 @@ export function buildBriefStateBlock(
     // Presence only: re-injecting the full example every turn would bloat the
     // message; generation reads the real text via buildCampaignBriefBlock.
     `  Style example: ${brief.style_example ? "attached (an email to emulate)" : "(none)"}`,
+    `  Length: ${brief.length ?? "(brand default)"}`,
+    `  Image: ${
+      brief.include_image === undefined
+        ? "(brand default)"
+        : brief.include_image
+          ? "yes"
+          : "no"
+    }`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BrandTokens } from "@/lib/email/templates/types";
-import type { EmailTemplateId } from "@/lib/db/types";
-import { buildEmailDesignBrief } from "./email-design";
+import type { EmailTemplateId, StyleReference } from "@/lib/db/types";
+import { buildDesignReferenceBlock, buildEmailDesignBrief } from "./email-design";
 import { EMAIL_STYLE_IDS, EMAIL_STYLES } from "./email-styles";
 
 const TOKENS: BrandTokens = {
@@ -115,5 +115,78 @@ describe("buildEmailDesignBrief", () => {
     });
     expect(withHero).toContain("IMAGE (this email has a generated hero image");
     expect(withHero).toContain('data-region="image"');
+  });
+});
+
+describe("buildDesignReferenceBlock", () => {
+  const makeRef = (over: Partial<StyleReference> = {}): StyleReference => ({
+    id: "ref-1",
+    brand_id: "brand-1",
+    name: "Clean promo",
+    image_url: "https://example.test/a.jpg",
+    storage_path: "a.jpg",
+    notes: null,
+    created_at: "2026-07-13T00:00:00Z",
+    kind: "email",
+    mode: "recreate",
+    design_profile: {
+      summary: "Airy and photo-led, one big product shot over a lot of white.",
+      layout: ["centered logo bar", "full-width hero image", "dark footer bar"],
+      palette_notes: "Mostly white, one dark block at the bottom.",
+      typography_notes: "Big light headline, small all-caps button label.",
+    },
+    ...over,
+  });
+
+  it("returns an empty string when the brand has no email designs", () => {
+    expect(buildDesignReferenceBlock(undefined)).toBe("");
+    expect(buildDesignReferenceBlock([])).toBe("");
+  });
+
+  it("tells the model to RECREATE the attached design, with its sections in order", () => {
+    const block = buildDesignReferenceBlock([makeRef()]);
+    expect(block).toContain("RECREATE");
+    expect(block).toContain("ATTACHED TO THIS MESSAGE AS AN IMAGE");
+    expect(block).toContain("1. centered logo bar");
+    expect(block).toContain("2. full-width hero image");
+    expect(block).toContain("3. dark footer bar");
+    expect(block).toContain("Airy and photo-led");
+    // The design system's hard rules must still outrank the reference.
+    expect(block).toContain("{$unsubscribe}");
+    expect(block).toContain("WIN on any");
+  });
+
+  it("softens to inspiration in style mode", () => {
+    const block = buildDesignReferenceBlock([makeRef({ mode: "style" })]);
+    expect(block).toContain("INSPIRATION");
+    expect(block).not.toContain("RECREATE its");
+    expect(block).toContain("inspiration");
+  });
+
+  it("defaults to recreate when the row predates the mode column", () => {
+    const block = buildDesignReferenceBlock([makeRef({ mode: undefined })]);
+    expect(block).toContain("RECREATE");
+  });
+
+  it("uses only the newest design, never a blend of two", () => {
+    const block = buildDesignReferenceBlock([
+      makeRef({ id: "newest", name: "Newest" }),
+      makeRef({
+        id: "older",
+        design_profile: {
+          summary: "Dense text-only digest.",
+          layout: ["plain text header"],
+        },
+      }),
+    ]);
+    expect(block).toContain("Airy and photo-led");
+    expect(block).not.toContain("Dense text-only digest.");
+    expect(block).not.toContain("plain text header");
+  });
+
+  it("still instructs a recreate when the one-time design read failed", () => {
+    const block = buildDesignReferenceBlock([makeRef({ design_profile: null })]);
+    expect(block).toContain("RECREATE");
+    expect(block).toContain("read the attached image directly");
   });
 });

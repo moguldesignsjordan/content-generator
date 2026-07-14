@@ -141,6 +141,9 @@ export function CreateAgent({
   const [series, setSeries] = useState<SeriesDraftRef[] | null>(initial?.series ?? null);
   const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
+  // An attached image is uploaded and analyzed before the user can send, so the
+  // paperclip needs its own pending state (send() has its own `loading`).
+  const [uploading, setUploading] = useState(false);
   // Quick-action panel open state. Open in the landing; tapping + toggles it.
   // Closes on send so the conversation reads clean.
   const [actionsOpen, setActionsOpen] = useState(true);
@@ -158,37 +161,77 @@ export function CreateAgent({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Attach an example email (.txt/.html/.eml…) into the composer as text: the
-  // agent saves it to the brief as style_example so generation matches how it
-  // reads. HTML exports are flattened client-side so the chat never sees soup.
-  function handleAttachFile(file: File) {
+  /** Drops a line into the composer without clobbering what's already typed. */
+  function appendToInput(text: string) {
+    setInput((cur) => (cur.trim() ? cur.trimEnd() + "\n\n" : "") + text);
+    inputRef.current?.focus();
+  }
+
+  /**
+   * An IMAGE attachment is an email design to copy: it goes straight to the
+   * design library (kind=email), which analyzes it once and attaches it to
+   * every following email generation. Nothing about it belongs in the chat
+   * transcript, so only a plain sentence lands in the composer, and the agent
+   * acknowledges it in flow.
+   */
+  async function uploadDesignImage(file: File) {
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("kind", "email");
+      body.append(
+        "name",
+        `Uploaded design, ${new Date().toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })}`,
+      );
+      const res = await fetch("/api/style-references", { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't save that design.");
+      appendToInput("I uploaded a design example, make the email look like it.");
+      toast.success("Got it. Your email will copy that design.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save that design.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /**
+   * Anything else (text, HTML, code, a raw .eml export) is an example of how the
+   * email should READ: the text rides into the composer and the agent saves it
+   * as style_example. Sent RAW on purpose, no client-side flattening: a Gmail
+   * "show original" export is MIME, not HTML, and DOMParser would shred it. The
+   * server's emailHtmlToText unwraps MIME and flattens HTML properly, and the
+   * 8000-char cap is applied there, after extraction. The generous truncation
+   * here only stops a giant paste from choking the textarea.
+   */
+  function attachTextFile(file: File) {
     file
       .text()
       .then((raw) => {
-        let text = raw;
-        if (/<[a-z][^>]*>/i.test(raw)) {
-          const doc = new DOMParser().parseFromString(raw, "text/html");
-          text = doc.body?.textContent ?? raw;
-        }
-        text = text
-          .replace(/\r\n/g, "\n")
-          .replace(/[ \t]{2,}/g, " ")
-          .replace(/\n{3,}/g, "\n\n")
-          .trim()
-          .slice(0, 8000);
+        const text = raw.trim().slice(0, 100_000);
         if (!text) {
           toast.error("That file looks empty.");
           return;
         }
-        setInput(
-          (cur) =>
-            (cur.trim() ? cur.trimEnd() + "\n\n" : "") +
-            "Here's an example email I want mine to read like (match its style, not its content):\n\n" +
+        appendToInput(
+          "Here's an example email I want mine to read like (match its style, not its content):\n\n" +
             text,
         );
-        inputRef.current?.focus();
       })
       .catch(() => toast.error("Couldn't read that file."));
+  }
+
+  /** The paperclip: takes anything a non-technical user might have on hand. */
+  function handleAttachFile(file: File) {
+    if (file.type.startsWith("image/")) {
+      void uploadDesignImage(file);
+      return;
+    }
+    attachTextFile(file);
   }
 
   const empty = messages.length === 0;
@@ -372,6 +415,7 @@ export function CreateAgent({
               onSend={() => send(input)}
               onPlus={() => setActionsOpen((v) => !v)}
               onAttachFile={handleAttachFile}
+              uploading={uploading}
               ready={ready}
               disabled={loading || generating}
               placeholderCycle={PROMPT_IDEAS[phIndex]}
@@ -478,6 +522,7 @@ export function CreateAgent({
               }}
               onSend={() => send(input)}
               onAttachFile={handleAttachFile}
+              uploading={uploading}
               ready={ready}
               disabled={loading || generating}
             />
@@ -496,6 +541,7 @@ function ComposerBar({
   onSend,
   onPlus,
   onAttachFile,
+  uploading,
   ready,
   disabled,
   placeholderCycle,
@@ -506,9 +552,11 @@ function ComposerBar({
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
   onPlus?: () => void;
-  /** Attach a text/HTML/eml file whose contents drop into the composer as an
-   * example email for the agent to save as the brief's style_example. */
+  /** Attach an example: a text/HTML/eml file drops into the composer as an
+   * email to READ like; an image uploads as a design to LOOK like. */
   onAttachFile?: (file: File) => void;
+  /** An attached image is still uploading and being read. */
+  uploading?: boolean;
   ready: boolean;
   disabled: boolean;
   /** When set (landing), the placeholder cycles through example prompts as a
@@ -535,16 +583,19 @@ function ComposerBar({
           <button
             type="button"
             onClick={() => attachRef.current?.click()}
-            aria-label="Attach an example email to match its style"
-            title="Attach an example email"
-            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+            disabled={uploading}
+            aria-label="Attach an example email or a screenshot of a design to copy"
+            title="Attach an example email or a design screenshot"
+            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground disabled:opacity-50"
           >
-            <PaperclipIcon size={18} />
+            {uploading ? <AccentSpinner size={14} /> : <PaperclipIcon size={18} />}
           </button>
           <input
             ref={attachRef}
             type="file"
-            accept=".txt,.md,.html,.htm,.eml"
+            // Text-ish files become "write like this"; images become "look like
+            // this" (uploaded to the email design library).
+            accept=".txt,.md,.html,.htm,.eml,image/png,image/jpeg,image/webp"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

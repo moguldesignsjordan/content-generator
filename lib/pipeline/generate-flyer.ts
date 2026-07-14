@@ -29,7 +29,7 @@ import {
   buildFlyerImagePrompt,
   type FlyerCopyOutput,
 } from "@/prompts/generate-flyer";
-import { stripEmDashes } from "@/lib/text";
+import { stripEmDashes, stripMarkdown } from "@/lib/text";
 import type {
   ContentImage,
   DraftMeta,
@@ -412,16 +412,19 @@ async function generateFlyerCopy(
 
 /** Em-dash stripping + trimming across every text field, like the other pipelines. */
 function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
+  // Flyer copy is painted onto an image and posted as a caption: markdown the
+  // model slipped in would render as literal asterisks either way.
+  const plain = (text: string) => stripMarkdown(stripEmDashes(text));
   return {
-    headline: stripEmDashes(out.headline.trim()),
-    subtext: out.subtext?.trim() ? stripEmDashes(out.subtext.trim()) : undefined,
-    cta: out.cta?.trim() ? stripEmDashes(out.cta.trim()) : undefined,
-    caption: stripEmDashes(out.caption.trim()),
+    headline: plain(out.headline.trim()),
+    subtext: out.subtext?.trim() ? plain(out.subtext.trim()) : undefined,
+    cta: out.cta?.trim() ? plain(out.cta.trim()) : undefined,
+    caption: plain(out.caption.trim()),
     hashtags: (out.hashtags ?? [])
       .map((h) => h.trim())
       .filter(Boolean)
       .map((h) => (h.startsWith("#") ? h : `#${h}`)),
-    scene: stripEmDashes(out.scene.trim()),
+    scene: plain(out.scene.trim()),
   };
 }
 

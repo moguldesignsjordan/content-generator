@@ -315,6 +315,13 @@ export interface CampaignBrief {
    * matches its length, structure, and register, never its content. Kept
    * verbatim (no em-dash stripping): it's the user's own reference material. */
   style_example?: string;
+  /** Per-piece length override. Wins over the brand-level
+   * voice_profile.email_length; unset falls back to it. */
+  length?: EmailLengthPreference;
+  /** Per-piece hero-image choice. true forces an image even when the brand's
+   * auto-image setting is off; false skips it even when auto is on; unset
+   * leaves the brand setting in charge. */
+  include_image?: boolean;
 }
 
 /** One draft created as part of a multi-email series (plan_series), kept in
@@ -365,6 +372,10 @@ export interface TopicContext {
   /** The brand's reference email library (migration 015), newest first.
    * Optional so pre-migration DBs and older call sites degrade to "none". */
   referenceEmails?: ReferenceEmail[];
+  /** Uploaded email DESIGN references (migration 016), newest first: emails the
+   * user liked the look of, whose layout generation recreates. Optional for the
+   * same reason as referenceEmails. */
+  emailDesignRefs?: StyleReference[];
 }
 
 // What we store in drafts.content for an email draft.
@@ -569,8 +580,32 @@ export interface FlyerCopy {
   hashtags?: string[];
 }
 
-/** One row of style_references (migration 014): an uploaded reference image
- * the flyer generator can match visually (style transfer). */
+/** How a reference image is used: "style" borrows the look loosely (the
+ * default, the original migration-014 flyer behavior); "recreate" rebuilds the
+ * reference's actual layout/composition with our own text and brand. */
+export type StyleReferenceMode = "style" | "recreate";
+
+/** What an uploaded reference image is a reference FOR (migration 016):
+ * a flyer's visual style, or an email's design to recreate. */
+export type StyleReferenceKind = "flyer" | "email";
+
+/** What Claude distilled once, at upload time, from an uploaded email design
+ * screenshot (prompts/extract-design.ts). Describes the DESIGN only, never the
+ * marketing copy: the copy always comes from this brand's own brief. */
+export interface EmailDesignProfile {
+  /** One paragraph on the overall look: era, mood, density, visual weight. */
+  summary: string;
+  /** The sections top to bottom, e.g. "full-width hero image",
+   * "two-column product grid", "dark footer bar". */
+  layout: string[];
+  palette_notes?: string;
+  typography_notes?: string;
+}
+
+/** One row of style_references (migration 014, extended by 016): an uploaded
+ * reference image, either a flyer's visual style or an email design to
+ * recreate. kind/mode/design_profile are optional in the type because a
+ * pre-016 database simply doesn't return them. */
 export interface StyleReference {
   id: string;
   brand_id: string;
@@ -579,6 +614,9 @@ export interface StyleReference {
   storage_path: string;
   notes: string | null;
   created_at: string;
+  kind?: StyleReferenceKind;
+  mode?: StyleReferenceMode;
+  design_profile?: EmailDesignProfile | null;
 }
 
 // ── Reference emails (migration 015) ────────────────────────────────────────

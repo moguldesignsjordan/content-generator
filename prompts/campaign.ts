@@ -2,6 +2,7 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   Brand,
   CampaignBrief,
+  EmailLengthPreference,
   Icp,
   Product,
   Strategy,
@@ -30,6 +31,8 @@ export interface UpdateBriefInput {
   constraints?: string;
   tone?: string;
   style_example?: string;
+  length?: EmailLengthPreference;
+  include_image?: boolean;
 }
 
 export interface SelectTopicInput {
@@ -96,7 +99,22 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "theirs to READ (its style, length, structure), pass that email " +
           "VERBATIM here. Generation will match its style, never its content. " +
           "Not for notes, offers, or rough drafts of the piece itself: those " +
-          "belong in key_message/angle/constraints.",
+          "belong in key_message/angle/constraints. A raw email export (mail " +
+          "headers, boundary markers, =3D gibberish) still belongs here " +
+          "VERBATIM: the readable email is extracted automatically.",
+      },
+      length: {
+        type: "string",
+        enum: ["short", "standard", "long"],
+        description:
+          "How long this piece should be, when the user says. Overrides the " +
+          "brand's saved length setting for this piece only.",
+      },
+      include_image: {
+        type: "boolean",
+        description:
+          "true when the user wants a picture in this email, false when they " +
+          "explicitly don't. Leave unset to use the brand's default.",
       },
     },
   },
@@ -295,15 +313,34 @@ export function buildCampaignSystem(args: {
     "state of the brief, refreshed automatically every turn. Trust it over your",
     "own memory of the conversation.",
     "",
+    "WHO YOU ARE TALKING TO: someone who is great at their business and knows",
+    "nothing about marketing software, often on a phone. Plain everyday words.",
+    "NEVER say brief, field, tool, prompt, generation, CTA, funnel, or ICP. Say",
+    "\"what should it say\", \"who is it for\", \"what should people do\".",
+    "PLAIN TEXT ONLY: never use markdown, no **bold**, no # headings, no asterisk",
+    "bullets. Asterisks reach this user as literal characters.",
+    "",
     "HOW TO RUN THE INTERVIEW:",
-    "- Work toward: goal → audience/segment → key message and angle → offer → topic.",
-    "- Ask ONE focused question at a time (two only when tightly related). Short turns.",
+    "- Work toward: what readers should do → who it's for → the one message and",
+    "  angle → the offer → the topic → how long → whether it needs a picture.",
+    "- Ask ONE short question at a time, and ALWAYS pair it with suggest_options so",
+    "  the user can tap an answer instead of typing. Typing their own answer is",
+    "  always welcome; the options are a shortcut, never a cage.",
     "- Acknowledge answers briefly and specifically; never re-ask what's stored or in the brief.",
     "- When an answer gives brief data, call update_brief with exactly those fields.",
+    "- Ask how long it should be with options Short and punchy, Standard, Long and",
+    "  detailed, and save it with update_brief.length (short | standard | long).",
+    "- Ask whether they want a picture in it and save true/false with",
+    "  update_brief.include_image.",
     "- If the user pastes a whole email as an example of how they want theirs to",
     "  read, save it VERBATIM with update_brief.style_example (generation matches",
     "  its style, never its content). Offer this once when discussing tone:",
-    "  they can paste an email they love, theirs or anyone's.",
+    "  they can paste an email they love, theirs or anyone's, or attach a",
+    "  screenshot of one.",
+    "- A pasted email may arrive as a raw export: mail headers, boundary lines,",
+    "  =3D codes, a wall of HTML. That's normal. Save it verbatim as style_example",
+    "  anyway; the readable email is extracted automatically. Never refuse it or",
+    "  ask the user to clean it up.",
     "- Once you understand the goal, call suggest_options with 1 to 3 fitting topics",
     "  from the list (kind: \"topic\", id = the topic's exact id, label = its title) so",
     "  the user can tap one instead of typing it out. When the user picks one (by tap",
@@ -324,6 +361,7 @@ export function buildCampaignSystem(args: {
     "  they're ready, call start_generation and tell them the draft is on its way.",
     "- Always reply with a normal conversational message; never a bare tool call.",
     "- NEVER use em dashes. Use a comma, colon, or period instead.",
+    "- NEVER use markdown. Plain sentences only.",
   ]
     .filter(Boolean)
     .join("\n");

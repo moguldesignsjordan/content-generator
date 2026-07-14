@@ -23,6 +23,7 @@ import {
   getCampaign,
   getDraftForReview,
   getDraftWithJobContext,
+  getFlyerDraftFromEmail,
   getTopicContext,
   listBrandMemory,
   listDrafts,
@@ -42,6 +43,7 @@ import {
   buildCreateAgentSystem,
   type CampaignTopicOption,
   type CreateBlogFromEmailInput,
+  type CreateFlyerFromEmailInput,
   type CreateTopicInput,
   type ForgetInput,
   type GenerateContentInput,
@@ -56,7 +58,7 @@ import {
 } from "@/prompts/create-agent";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
-import { emailHtmlToText, stripEmDashes } from "@/lib/text";
+import { emailHtmlToText, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
@@ -84,7 +86,7 @@ interface TurnState {
   // Set by generate_content or create_blog_from_email once a draft actually
   // exists; the client auto-navigates to /drafts/[draftId] when present.
   draftId: string | null;
-  channel: "email" | "blog" | null;
+  channel: "email" | "blog" | "social" | null;
   // Set by plan_series: every draft created for a multi-email campaign, in
   // order. The client renders these as a series card instead of navigating.
   series: SeriesDraftRef[] | null;
@@ -271,7 +273,10 @@ export async function POST(req: NextRequest) {
           ? "Your series is ready below. Open each email to review it."
           : "Got it. What's the one thing this email needs to land?";
     }
-    reply = stripEmDashes(reply);
+    // Chat bubbles render as plain text, so any markdown the model slipped in
+    // would reach the user as literal asterisks. The prompt forbids it; this
+    // enforces it.
+    reply = stripMarkdown(stripEmDashes(reply));
 
     const readyToGenerate = !!(
       state.brief.goal &&
@@ -553,6 +558,34 @@ async function dispatchTool(
       state.channel = "blog";
       return JSON.stringify({ draftId, channel: "blog", reused: false });
     }
+    case "create_flyer_from_email": {
+      const input = block.input as CreateFlyerFromEmailInput;
+      // Same reuse-don't-duplicate contract as create_blog_from_email.
+      const existing = await getFlyerDraftFromEmail(input.source_draft_id);
+      if (existing) {
+        state.draftId = existing.draftId;
+        state.channel = "social";
+        return JSON.stringify({ draftId: existing.draftId, channel: "social", reused: true });
+      }
+      const source = await getDraftWithJobContext(input.source_draft_id);
+      if (!source || !source.topicId) {
+        return "That draft has no topic to build a flyer from.";
+      }
+      const topicCtx = await getTopicContext(source.topicId);
+      if (!topicCtx) return "That draft's topic no longer exists.";
+      // The flyer pipeline reads meta.source_draft_id back off the shell and
+      // distills the EMAIL's copy instead of re-briefing from the bare topic.
+      const draftId = await createDraftShell({
+        ctx: topicCtx,
+        campaignId: source.campaignId ?? undefined,
+        type: "social",
+        sourceDraftId: input.source_draft_id,
+        flyerAspect: "1:1",
+      });
+      state.draftId = draftId;
+      state.channel = "social";
+      return JSON.stringify({ draftId, channel: "social", reused: false });
+    }
     case "remember": {
       const input = block.input as RememberInput;
       const memory = await addBrandMemory(ctx.brand.id, {
@@ -594,6 +627,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   // HTML export or thread can't balloon the stored brief.
   if (typeof input.style_example === "string" && input.style_example.trim()) {
     next.style_example = emailHtmlToText(input.style_example).slice(0, 8000);
+  }
+  if (input.length === "short" || input.length === "standard" || input.length === "long") {
+    next.length = input.length;
+  }
+  if (typeof input.include_image === "boolean") {
+    next.include_image = input.include_image;
   }
   return next;
 }

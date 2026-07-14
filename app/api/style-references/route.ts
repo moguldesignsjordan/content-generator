@@ -5,27 +5,42 @@ import {
   getSingleBrand,
   listStyleReferences,
 } from "@/lib/db/queries";
+import type { EmailDesignProfile, StyleReferenceKind } from "@/lib/db/types";
+import { extractEmailDesign } from "@/lib/pipeline/extract-design";
+import { prepareReferenceImage } from "@/lib/images/optimize";
 import { logError } from "@/lib/log";
 import sharp from "sharp";
 
 export const maxDuration = 60;
 
-// The reusable flyer style library (style_references, migration 014): upload
-// a reference image once, pick it on any flyer. Stored on the public
-// `style-references` bucket; the pipeline downscales it per generation via
-// prepareReferenceImage, so we keep a good-quality original here.
+// The reusable reference image library (style_references, migrations 014+016).
+// Two kinds share the table and the public `style-references` bucket:
+//
+//   kind=flyer (default)  a look a flyer can borrow; picked per flyer.
+//   kind=email            an email design screenshot; the newest one is
+//                         attached to every email generation, whose layout it
+//                         recreates. Analyzed once here at upload
+//                         (extractEmailDesign) so no draft re-reads the image.
+//
+// A good-quality original is stored; the pipeline downscales per generation via
+// prepareReferenceImage.
 
 const BUCKET = "style-references";
 const MAX_BYTES = 10 * 1024 * 1024;
 
-export async function GET() {
+function parseKind(value: FormDataEntryValue | string | null): StyleReferenceKind {
+  return String(value ?? "") === "email" ? "email" : "flyer";
+}
+
+export async function GET(req: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ styles: [] });
   }
   try {
     const brand = await getSingleBrand();
     if (!brand) return NextResponse.json({ styles: [] });
-    const styles = await listStyleReferences(brand.id);
+    const kind = parseKind(req.nextUrl.searchParams.get("kind"));
+    const styles = await listStyleReferences(brand.id, kind);
     return NextResponse.json({ styles });
   } catch (err) {
     logError("api:/api/style-references:list", err);
@@ -46,6 +61,7 @@ export async function POST(req: NextRequest) {
     const file = form.get("file");
     const name = String(form.get("name") ?? "").trim();
     const notes = String(form.get("notes") ?? "").trim();
+    const kind = parseKind(form.get("kind"));
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "No image provided." }, { status: 400 });
@@ -109,6 +125,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Read the design once, now, so generation never re-analyzes the image.
+    // Non-fatal: a null profile still saves, and the attached image alone is
+    // enough to recreate from.
+    let designProfile: EmailDesignProfile | null = null;
+    if (kind === "email") {
+      const prepared = await prepareReferenceImage(normalized).catch(() => null);
+      if (prepared) designProfile = await extractEmailDesign(prepared);
+    }
+
     const { data: pub } = db.storage.from(BUCKET).getPublicUrl(path);
     const style = await createStyleReference({
       brandId: brand.id,
@@ -116,14 +141,20 @@ export async function POST(req: NextRequest) {
       imageUrl: pub.publicUrl,
       storagePath: path,
       notes: notes || undefined,
+      kind,
+      // A flyer reference borrows a look; an email reference is rebuilt.
+      mode: kind === "email" ? "recreate" : "style",
+      designProfile: kind === "email" ? designProfile : undefined,
     });
     return NextResponse.json({ style });
   } catch (err) {
     logError("api:/api/style-references", err);
+    const message = err instanceof Error ? err.message : "";
     return NextResponse.json(
       {
-        error:
-          err instanceof Error && /style_references/.test(err.message)
+        error: /kind|mode|design_profile/.test(message)
+          ? "Design library isn't set up yet: apply migration 016 in Supabase."
+          : /style_references/.test(message)
             ? "Style library isn't set up yet: apply migration 014 in Supabase."
             : "Failed to save the style.",
       },

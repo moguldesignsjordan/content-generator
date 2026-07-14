@@ -1,6 +1,6 @@
 import "server-only";
 import { getAdminClient } from "./client";
-import { isMissingTableError } from "./table-guard";
+import { isMissingColumnError, isMissingTableError } from "./table-guard";
 import { logError, logWarn } from "@/lib/log";
 import type {
   AppLog,
@@ -29,7 +29,10 @@ import type {
   EmailType,
   BlogType,
   FlyerAspect,
+  EmailDesignProfile,
   StyleReference,
+  StyleReferenceKind,
+  StyleReferenceMode,
   Icp,
   UserRole,
   IcpProfile,
@@ -205,9 +208,13 @@ export async function getTopicContext(
     product = (productRow as Product) ?? null;
   }
 
-  // The reference email library steers every email's style; a pre-migration-
-  // 015 DB just means an empty library, never a broken generation.
-  const referenceEmails = await listReferenceEmails(brand.id);
+  // The reference email library steers every email's style, and the email
+  // design library steers its layout. A pre-migration-015/016 DB just means an
+  // empty library, never a broken generation.
+  const [referenceEmails, emailDesignRefs] = await Promise.all([
+    listReferenceEmails(brand.id),
+    listStyleReferences(brand.id, "email"),
+  ]);
 
   return {
     topic: topic as Topic,
@@ -216,6 +223,7 @@ export async function getTopicContext(
     primaryIcp: (icps?.[0] as Icp) ?? null,
     product,
     referenceEmails,
+    emailDesignRefs,
   };
 }
 
@@ -1846,23 +1854,46 @@ export async function getEmailCopyForDraft(
   return ((data?.meta ?? {}) as DraftMeta).email_copy ?? null;
 }
 
-// ── Style references (migration 014): the reusable flyer style library ──────
+// ── Style references (migration 014, extended by 016) ───────────────────────
+// One table, two libraries: flyer style references (kind 'flyer', the original
+// behavior) and email design references (kind 'email', whose layout email
+// generation recreates).
 
+/**
+ * The brand's reference images of the given kind, newest first. kind defaults
+ * to 'flyer' so the original flyer callers keep their exact behavior.
+ *
+ * Degrades twice over: no table (pre-014) and no kind column (pre-016) both
+ * mean "nothing to filter on", so a partially-migrated DB falls back to the
+ * unfiltered flyer library rather than crashing a generation.
+ */
 export async function listStyleReferences(
   brandId: string,
+  kind: StyleReferenceKind = "flyer",
 ): Promise<StyleReference[]> {
   const db = getAdminClient();
   const { data, error } = await db
     .from("style_references")
     .select("*")
     .eq("brand_id", brandId)
+    .eq("kind", kind)
     .order("created_at", { ascending: false });
-  if (error) {
-    // Pre-migration-014 DBs have no table yet; the library is just empty.
-    if (isMissingTableError(error)) return [];
-    throw error;
-  }
-  return (data ?? []) as StyleReference[];
+  if (!error) return (data ?? []) as StyleReference[];
+
+  // Pre-migration-014 DBs have no table yet; the library is just empty.
+  if (isMissingTableError(error)) return [];
+  if (!isMissingColumnError(error)) throw error;
+
+  // Pre-016: every row is a flyer reference by definition, so an email-kind
+  // lookup finds nothing and a flyer lookup is the whole table.
+  if (kind === "email") return [];
+  const fallback = await db
+    .from("style_references")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (fallback.error) throw fallback.error;
+  return (fallback.data ?? []) as StyleReference[];
 }
 
 export async function getStyleReference(
@@ -1881,23 +1912,36 @@ export async function getStyleReference(
   return (data as StyleReference) ?? null;
 }
 
+/**
+ * The kind/mode/design_profile columns are omitted from the insert unless the
+ * caller passes them, so a plain flyer upload still works against a pre-016
+ * database (where those columns don't exist yet).
+ */
 export async function createStyleReference(args: {
   brandId: string;
   name: string;
   imageUrl: string;
   storagePath: string;
   notes?: string;
+  kind?: StyleReferenceKind;
+  mode?: StyleReferenceMode;
+  designProfile?: EmailDesignProfile | null;
 }): Promise<StyleReference> {
   const db = getAdminClient();
+  const row: Record<string, unknown> = {
+    brand_id: args.brandId,
+    name: args.name.trim(),
+    image_url: args.imageUrl,
+    storage_path: args.storagePath,
+    notes: args.notes?.trim() || null,
+  };
+  if (args.kind) row.kind = args.kind;
+  if (args.mode) row.mode = args.mode;
+  if (args.designProfile !== undefined) row.design_profile = args.designProfile;
+
   const { data, error } = await db
     .from("style_references")
-    .insert({
-      brand_id: args.brandId,
-      name: args.name.trim(),
-      image_url: args.imageUrl,
-      storage_path: args.storagePath,
-      notes: args.notes?.trim() || null,
-    })
+    .insert(row)
     .select("*")
     .single();
   if (error) throw error;

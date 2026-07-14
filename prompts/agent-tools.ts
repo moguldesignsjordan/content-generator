@@ -199,6 +199,30 @@ export const CREATE_BLOG_FROM_EMAIL_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface CreateFlyerFromEmailInput {
+  source_draft_id: string;
+}
+
+export const CREATE_FLYER_FROM_EMAIL_TOOL: Anthropic.Tool = {
+  name: "create_flyer_from_email",
+  description:
+    "Turn an existing email draft into a matching social media flyer (an image " +
+    "post on the same topic), e.g. when the user says yes to \"want a matching " +
+    "flyer for this?\" or asks for a social post about an email. Creates and " +
+    "opens a new flyer draft; if one already exists for that email it reuses it " +
+    "instead of duplicating. Use the email's real draft id, never a guessed one.",
+  input_schema: {
+    type: "object",
+    properties: {
+      source_draft_id: {
+        type: "string",
+        description: "The id of the existing EMAIL draft to build the flyer from.",
+      },
+    },
+    required: ["source_draft_id"],
+  },
+};
+
 export interface RememberInput {
   content: string;
   kind?: string;
@@ -252,6 +276,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,
+  CREATE_FLYER_FROM_EMAIL_TOOL,
   REMEMBER_TOOL,
   FORGET_TOOL,
 ];

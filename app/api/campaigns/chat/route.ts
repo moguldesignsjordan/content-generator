@@ -38,7 +38,7 @@ import {
   type VoiceProposals,
 } from "@/prompts/campaign";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
-import { emailHtmlToText, stripEmDashes } from "@/lib/text";
+import { emailHtmlToText, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A chat turn is short, but give the strategist headroom for thinking.
@@ -240,7 +240,8 @@ export async function POST(req: NextRequest) {
         ? "Great, the brief is set. Kicking off your draft now."
         : "Got it, let's keep going. What's next?";
     }
-    reply = stripEmDashes(reply);
+    // Chat bubbles render as plain text: strip markdown the model slipped in.
+    reply = stripMarkdown(stripEmDashes(reply));
 
     const nextMessages: OnboardingMessage[] = [
       ...history,
@@ -384,6 +385,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   // HTML export or thread can't balloon the stored brief.
   if (typeof input.style_example === "string" && input.style_example.trim()) {
     next.style_example = emailHtmlToText(input.style_example).slice(0, 8000);
+  }
+  if (input.length === "short" || input.length === "standard" || input.length === "long") {
+    next.length = input.length;
+  }
+  if (typeof input.include_image === "boolean") {
+    next.include_image = input.include_image;
   }
   return next;
 }

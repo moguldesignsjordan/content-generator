@@ -26,12 +26,14 @@ import { IcpForm } from "./icp-form";
 import { ConnectionForm } from "./connection-form";
 import { SchedulesForm } from "./schedules-form";
 import { ReferenceEmailsForm } from "./reference-emails-form";
+import { EmailDesignsForm } from "./email-designs-form";
 
 type SectionKey =
   | "import"
   | "basics"
   | "voice"
   | "references"
+  | "emailDesigns"
   | "positioning"
   | "visual"
   | "guidelines"
@@ -99,6 +101,11 @@ export function SettingsClient({
           title="Reference emails"
           subtitle="Paste emails you love; new drafts match their style and length"
           onClick={() => setOpen("references")}
+        />
+        <ListRow
+          title="Email designs"
+          subtitle="Upload emails you like the look of; new emails copy the design"
+          onClick={() => setOpen("emailDesigns")}
         />
         <ListRow
           title="Positioning"
@@ -235,6 +242,16 @@ export function SettingsClient({
         size="xl"
       >
         <ReferenceEmailsForm />
+      </Sheet>
+
+      <Sheet
+        open={open === "emailDesigns"}
+        onClose={close}
+        title="Email designs"
+        description="Screenshots of emails you love the look of. Your emails get rebuilt in the newest design here, using your own colors, fonts, and words."
+        size="xl"
+      >
+        <EmailDesignsForm />
       </Sheet>
 
       <Sheet
