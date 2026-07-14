@@ -728,8 +728,9 @@ literal asterisks. He also wanted to hand the engine ANY style material
 true recreation of the design, not loose inspiration. A raw Gmail "show
 original" paste (MIME + quoted-printable) was being rejected outright.
 
-Five parts, all on top of `fdc5a34` (typecheck + **208 tests** + build green;
-**uncommitted**; **migrations 015 AND 016 both still unapplied**):
+Five parts, all on top of `fdc5a34` (typecheck + **211 tests** + build green;
+pushed as `60bedf4` + `9edb3e2`; **migrations 015 and 016 both applied and
+verified live on 2026-07-14**):
 
 1. **Chip-first wizard** (`prompts/create-agent.ts`, mirrored into
    `prompts/campaign.ts`). Rules the prompt now states absolutely: ONE short
@@ -796,11 +797,14 @@ Five parts, all on top of `fdc5a34` (typecheck + **208 tests** + build green;
    `cleanFlyerCopy` — never to email HTML, where `**`/`#` are legal.
 
 Still open from this session:
-- **Apply BOTH `015_reference_emails.sql` and
-  `016_email_design_references.sql`** in the Supabase SQL editor. The app
-  degrades gracefully without either (empty libraries), so nothing is broken
-  meanwhile, but neither feature does anything until they're applied.
-- Nothing is committed. Jordan says when.
+- ~~Apply migrations 015 + 016~~ **BOTH CONFIRMED APPLIED 2026-07-14** (checked
+  against the live DB, not assumed): `reference_emails` exists;
+  `style_references` has `kind`/`mode`/`design_profile`; the pre-existing flyer
+  row correctly backfilled to `kind=flyer, mode=style`; the `kind` check
+  constraint is enforced (rejects a bogus value with 23514). Both libraries are
+  currently EMPTY, so uploading the first email design is what proves the
+  feature end to end.
+- Committed and pushed: `60bedf4` (the batch) + `9edb3e2` (click-through fixes).
 - Live click-through (the whole point, none of it is browser-verified):
   tap through the new chip flow start to finish and confirm every question is
   one line with chips; upload a screenshot in chat and confirm the generated
