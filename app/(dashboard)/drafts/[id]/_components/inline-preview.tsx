@@ -42,6 +42,10 @@ import type { EditableAdapter, EditTarget, SaveResult } from "./editable-adapter
 
 /** How far below a section its toolbar sits. */
 const TOOLBAR_GAP = 8;
+/** Toolbar height, and the Design panel's box — used to keep the panel inside the clipped preview. */
+const TOOLBAR_HEIGHT = 34;
+const DESIGN_PANEL_WIDTH = 268;
+const DESIGN_PANEL_HEIGHT = 300;
 
 interface InlinePreviewProps {
   adapter: EditableAdapter;
@@ -309,14 +313,24 @@ export function InlinePreview({
       // onLoad can run twice (the load event AND the already-complete path), so
       // don't stack duplicate stylesheets or duplicate listeners.
       if (doc.getElementById("__ie-style")) return;
+
+      // The ring is the brand accent, read from the app's theme at inject time.
+      // It has to be resolved HERE, in the parent: the iframe is a separate
+      // document and cannot see the app's CSS variables, so var(--accent) inside
+      // it would simply not resolve. Re-read on every load, so the ring follows
+      // light/dark rather than being frozen at first paint.
+      const accent =
+        getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() ||
+        "#e2327d";
+
       const style = doc.createElement("style");
       style.id = "__ie-style";
       style.textContent = `
-        [${markerAttr}] { transition: outline-color .12s ease; outline: 2px solid transparent; outline-offset: 3px; border-radius: 3px; }
-        [${markerAttr}]:hover { outline-color: rgba(99,102,241,.45); cursor: text; }
-        .__ie-selected { outline-color: rgba(99,102,241,.9) !important; }
-        .__ie-editing { outline-color: rgba(99,102,241,1) !important; background: rgba(99,102,241,.04); }
-        .__ie-editing:focus { outline-color: rgba(99,102,241,1) !important; }
+        [${markerAttr}] { transition: outline-color .12s ease, background-color .12s ease; outline: 1.5px solid transparent; outline-offset: 4px; border-radius: 2px; }
+        [${markerAttr}]:hover { outline-color: color-mix(in srgb, ${accent} 40%, transparent); cursor: text; }
+        .__ie-selected { outline-color: ${accent} !important; }
+        .__ie-editing { outline-color: ${accent} !important; background-color: color-mix(in srgb, ${accent} 5%, transparent); }
+        .__ie-editing:focus { outline-color: ${accent} !important; }
       `;
       doc.head?.appendChild(style);
 
@@ -497,6 +511,29 @@ export function InlinePreview({
   const toolbarLeft = selectedRect ? selectedRect.left : 0;
   const showToolbar = !!selected && !!selectedRect && !editing && !rewriteOpen;
 
+  // The preview container clips its overflow, so the Design panel has to be kept
+  // inside it. Preference order: sit BELOW the section (so you can see the change
+  // land on the thing you're styling), else flip above it, else pin to the top and
+  // let the panel scroll. It is capped to the container height either way, so it
+  // can never be half cut off.
+  const containerBox = containerRef.current?.getBoundingClientRect();
+  const designLayout = (() => {
+    const cw = containerBox?.width ?? 0;
+    const ch = containerBox?.height ?? 0;
+    const left = Math.max(8, Math.min(toolbarLeft, Math.max(8, cw - DESIGN_PANEL_WIDTH - 8)));
+    const below = toolbarTop + TOOLBAR_HEIGHT + 6;
+    const maxHeight = ch ? ch - 16 : DESIGN_PANEL_HEIGHT;
+
+    if (!ch || below + DESIGN_PANEL_HEIGHT <= ch - 8) {
+      return { anchor: { top: below, left }, maxHeight: Math.min(maxHeight, ch - below - 8) };
+    }
+    const above = (selectedRect?.top ?? 0) - DESIGN_PANEL_HEIGHT - 6;
+    if (above >= 8) {
+      return { anchor: { top: above, left }, maxHeight: DESIGN_PANEL_HEIGHT };
+    }
+    return { anchor: { top: 8, left }, maxHeight };
+  })();
+
   return (
     <div ref={containerRef} className="relative overflow-hidden">
       {!loaded && (
@@ -521,8 +558,8 @@ export function InlinePreview({
       {loaded && overlay}
 
       {editing && (
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full bg-foreground/85 px-3 py-1.5 text-[11.5px] font-medium text-background shadow-lg backdrop-blur">
-          Editing. Click outside to save, Esc to cancel.
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-border bg-surface-2/95 px-3 py-1.5 text-[11.5px] font-medium text-muted shadow-lg backdrop-blur">
+          Click outside to save, Esc to cancel
         </div>
       )}
 
@@ -535,9 +572,9 @@ export function InlinePreview({
       {showToolbar && selected && (
         <div
           style={{ top: toolbarTop, left: toolbarLeft }}
-          className="absolute z-30 flex items-center gap-1 rounded-full border border-border bg-surface-1 px-1 py-1 shadow-lg"
+          className="absolute z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 px-1.5 py-1 shadow-lg backdrop-blur"
         >
-          <span className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+          <span className="px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">
             {selected.label}
           </span>
           <button
@@ -546,7 +583,7 @@ export function InlinePreview({
             onClick={() => setRewriteOpen(true)}
             className="rounded-full px-2.5 py-1 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
           >
-            ✨ Rewrite
+            Rewrite
           </button>
           {adapter.applyStyle && (
             <button
@@ -557,7 +594,7 @@ export function InlinePreview({
                 designOpen ? "bg-surface-3 text-foreground" : "text-foreground hover:bg-surface-3"
               }`}
             >
-              🎨 Design
+              Design
             </button>
           )}
           {canDelete &&
@@ -576,9 +613,8 @@ export function InlinePreview({
                 disabled={busy}
                 onClick={() => setConfirmingDelete(true)}
                 className="rounded-full px-2.5 py-1 text-[12.5px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
-                aria-label={`Delete ${selected.label}`}
               >
-                🗑
+                Delete
               </button>
             ))}
           {!canDelete && deleteBlocked && (
@@ -590,7 +626,8 @@ export function InlinePreview({
       {designOpen && selected && selectedRect && adapter.applyStyle && (
         <DesignPopover
           snippet={selectedElRef.current?.outerHTML ?? ""}
-          anchor={{ top: toolbarTop + 42, left: toolbarLeft }}
+          anchor={designLayout.anchor}
+          maxHeight={designLayout.maxHeight}
           busy={busy}
           onApply={(changes) => void handleStyle(changes)}
           onClose={() => setDesignOpen(false)}

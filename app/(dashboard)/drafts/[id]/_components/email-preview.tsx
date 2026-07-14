@@ -85,7 +85,7 @@ export function EmailPreview({
               onClick={() => setImageOpen(true)}
               className="absolute right-3 top-3 z-20 rounded-full border border-border bg-surface-2/90 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-surface-3"
             >
-              + Add image
+              Add image
             </button>
           ) : (
             <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
@@ -96,7 +96,7 @@ export function EmailPreview({
                   disabled={regenerating}
                   className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2/90 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-surface-3 disabled:opacity-60"
                 >
-                  {regenerating ? <AccentSpinner size={12} /> : "↻"} Regenerate
+                  {regenerating && <AccentSpinner size={12} />} Regenerate
                 </button>
               )}
               <button

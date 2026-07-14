@@ -52,12 +52,21 @@ interface DesignPopoverProps {
   snippet: string;
   /** Where to anchor, in container coordinates. */
   anchor: { top: number; left: number };
+  /** Hard cap so the panel can never spill out of the clipped preview container. */
+  maxHeight?: number;
   busy: boolean;
   onApply: (changes: StyleChanges) => void;
   onClose: () => void;
 }
 
-export function DesignPopover({ snippet, anchor, busy, onApply, onClose }: DesignPopoverProps) {
+export function DesignPopover({
+  snippet,
+  anchor,
+  maxHeight,
+  busy,
+  onApply,
+  onClose,
+}: DesignPopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const initial = guessDesignState(snippet);
   const [color, setColor] = useState(initial.color);
@@ -86,69 +95,30 @@ export function DesignPopover({ snippet, anchor, busy, onApply, onClose }: Desig
   return (
     <div
       ref={ref}
-      style={{ top: anchor.top, left: anchor.left }}
-      className="absolute z-40 w-[268px] space-y-4 rounded-xl border border-border bg-surface-1 p-3.5 shadow-xl"
+      style={{ top: anchor.top, left: anchor.left, maxHeight: maxHeight ?? undefined }}
+      className="absolute z-40 w-[268px] space-y-3 overflow-y-auto rounded-xl border border-border bg-surface-2/95 p-3 shadow-xl backdrop-blur"
     >
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Text color</p>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            disabled={busy}
-            aria-label="Pick a text color"
-            className="h-8 w-8 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
-          />
-          <Input
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            placeholder="#000000"
-            disabled={busy}
-            className="w-24"
-          />
-          <Button
-            variant="gradient"
-            size="sm"
-            disabled={busy}
-            onClick={() => onApply({ color })}
-          >
-            Apply
-          </Button>
-        </div>
-      </div>
+      {/* Deliberately compact: the panel lives inside the clipped preview, and a
+          tall one has to flip up and cover the very section being styled, which
+          defeats the point of seeing the change land. Keep it short enough to
+          sit under the section. */}
+      <ColorRow
+        label="Text"
+        value={color}
+        onChange={setColor}
+        onApply={() => onApply({ color })}
+        busy={busy}
+      />
+      <ColorRow
+        label="Background"
+        value={background}
+        onChange={setBackground}
+        onApply={() => onApply({ background })}
+        busy={busy}
+      />
 
       <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Background</p>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={background}
-            onChange={(e) => setBackground(e.target.value)}
-            disabled={busy}
-            aria-label="Pick a background color"
-            className="h-8 w-8 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
-          />
-          <Input
-            value={background}
-            onChange={(e) => setBackground(e.target.value)}
-            placeholder="#ffffff"
-            disabled={busy}
-            className="w-24"
-          />
-          <Button
-            variant="gradient"
-            size="sm"
-            disabled={busy}
-            onClick={() => onApply({ background })}
-          >
-            Apply
-          </Button>
-        </div>
-      </div>
-
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Spacing</p>
+        <p className="mb-1 text-[11px] font-medium text-muted">Spacing</p>
         <SegmentedControl
           size="sm"
           value={spacing}
@@ -165,40 +135,7 @@ export function DesignPopover({ snippet, anchor, busy, onApply, onClose }: Desig
       </div>
 
       <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Font size</p>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={busy || fontSize <= 10}
-            onClick={() => {
-              const next = Math.max(10, fontSize - 2);
-              setFontSize(next);
-              onApply({ fontSize: `${next}px` });
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface-2 text-foreground transition-colors hover:bg-surface-3 disabled:opacity-40"
-            aria-label="Decrease font size"
-          >
-            −
-          </button>
-          <span className="w-12 text-center text-[13px] text-foreground">{fontSize}px</span>
-          <button
-            type="button"
-            disabled={busy || fontSize >= 64}
-            onClick={() => {
-              const next = Math.min(64, fontSize + 2);
-              setFontSize(next);
-              onApply({ fontSize: `${next}px` });
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface-2 text-foreground transition-colors hover:bg-surface-3 disabled:opacity-40"
-            aria-label="Increase font size"
-          >
-            +
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Alignment</p>
+        <p className="mb-1 text-[11px] font-medium text-muted">Alignment</p>
         <SegmentedControl
           size="sm"
           value={align}
@@ -214,25 +151,103 @@ export function DesignPopover({ snippet, anchor, busy, onApply, onClose }: Desig
         />
       </div>
 
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-muted">Weight</p>
-        <button
-          type="button"
+      {/* Size and weight share a row: both are single-tap controls. */}
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="mb-1 text-[11px] font-medium text-muted">Size</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={busy || fontSize <= 10}
+              onClick={() => {
+                const next = Math.max(10, fontSize - 2);
+                setFontSize(next);
+                onApply({ fontSize: `${next}px` });
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface-3 text-foreground transition-colors hover:bg-surface-2 disabled:opacity-40"
+              aria-label="Decrease font size"
+            >
+              −
+            </button>
+            <span className="w-10 text-center text-[12.5px] tabular-nums text-foreground">
+              {fontSize}px
+            </span>
+            <button
+              type="button"
+              disabled={busy || fontSize >= 64}
+              onClick={() => {
+                const next = Math.min(64, fontSize + 2);
+                setFontSize(next);
+                onApply({ fontSize: `${next}px` });
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface-3 text-foreground transition-colors hover:bg-surface-2 disabled:opacity-40"
+              aria-label="Increase font size"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1 text-[11px] font-medium text-muted">Weight</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              const next = !bold;
+              setBold(next);
+              onApply({ fontWeight: next ? "700" : "400" });
+            }}
+            aria-pressed={bold}
+            className={`h-7 rounded-full border px-3 text-[12.5px] font-semibold transition-colors disabled:opacity-40 ${
+              bold
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border bg-surface-3 text-foreground hover:bg-surface-2"
+            }`}
+          >
+            Bold
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One colour control: swatch, hex field, Apply. Used for text and background. */
+function ColorRow({
+  label,
+  value,
+  onChange,
+  onApply,
+  busy,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onApply: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-medium text-muted">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           disabled={busy}
-          onClick={() => {
-            const next = !bold;
-            setBold(next);
-            onApply({ fontWeight: next ? "700" : "400" });
-          }}
-          aria-pressed={bold}
-          className={`rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
-            bold
-              ? "border-accent bg-accent/10 text-accent"
-              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
-          }`}
-        >
-          Bold
-        </button>
+          aria-label={`Pick a ${label.toLowerCase()} color`}
+          className="h-7 w-7 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5 disabled:opacity-50"
+        />
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={busy}
+          className="h-7 flex-1 text-[12px]"
+        />
+        <Button variant="gradient" size="sm" disabled={busy} onClick={onApply}>
+          Apply
+        </Button>
       </div>
     </div>
   );

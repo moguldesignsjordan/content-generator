@@ -426,7 +426,7 @@ export function BlogReviewActions({
                 disabled={regeneratingImage}
                 className="flex items-center gap-1.5 text-[12px] font-medium text-accent transition-colors hover:text-accent-press disabled:opacity-60"
               >
-                {regeneratingImage ? <AccentSpinner size={12} /> : "↻"} Regenerate
+                {regeneratingImage && <AccentSpinner size={12} />} Regenerate
               </button>
             )}
             <button
