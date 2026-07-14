@@ -162,7 +162,7 @@ export async function adjustCopy(
 }
 
 /** Collapses an HTML snippet to its visible text, whitespace-normalized. */
-function stripTags(html: string): string {
+export function stripTags(html: string): string {
   return html
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
@@ -173,8 +173,13 @@ function stripTags(html: string): string {
  * Best-effort: if the region's previous visible text matches a single field
  * of email_copy, update that field to the new text. Returns the original
  * object reference when nothing matched (so the caller can skip writing it).
+ *
+ * Exported because the inline (contentEditable) commit path in
+ * /api/drafts/[id]/region-html needs the identical sync: without it, a typed
+ * edit lands in the HTML but not in email_copy, and the next redesign — which
+ * rebuilds from email_copy — silently reverts the user's own words.
  */
-function syncEmailCopy(
+export function syncEmailCopy(
   copy: EmailCopy,
   prevText: string,
   newText: string,

@@ -32,29 +32,61 @@ const PROP_NAMES: Record<keyof StyleChanges, string> = {
   fontWeight: "font-weight",
 };
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 export interface RegionLocation {
   /** Index of the '<' opening the region element in the source html. */
   start: number;
   /** Index just past the element's closing tag. */
   end: number;
+  /** Index just past the element's opening tag — where its inner HTML begins. */
+  innerStart: number;
+  /** Index of the '<' opening the element's closing tag — where its inner HTML ends. */
+  innerEnd: number;
   /** The exact substring html.slice(start, end) — the element's outerHTML. */
   outerHTML: string;
+  /** The exact substring html.slice(innerStart, innerEnd) — the element's innerHTML. */
+  innerHTML: string;
+}
+
+/**
+ * Returns the index just past the '>' that closes the tag starting at `from`.
+ * Quote-aware, because an attribute value may legally contain '>' (an inline
+ * style with a CSS child combinator, a data-uri, a merge tag). Returns -1 if
+ * the tag is never closed.
+ */
+function findTagEnd(html: string, from: number): number {
+  let quote: '"' | "'" | null = null;
+  for (let i = from; i < html.length; i++) {
+    const ch = html[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === ">") return i + 1;
+  }
+  return -1;
 }
 
 /**
  * Finds the (0-based) `occurrence`-th element carrying `data-region="region"`
- * in `html` and returns its exact offsets. Assumes the element doesn't nest
- * its own tag name — true for every region in the templates today (h1/div
- * for headline/eyebrow/cta/body/image, table for header/footer with no
- * nested table inside). Returns null if that occurrence doesn't exist.
+ * in `html` and returns its exact offsets.
+ *
+ * Depth-aware: it walks forward from the opening tag counting nested opening
+ * tags of the SAME name, so a region whose markup nests its own tag (a
+ * `<table data-region="header">` containing a layout `<table>`, which
+ * model-designed emails do emit) ends at its own closing tag rather than the
+ * first one encountered. The naive version of this — stopping at the first
+ * `</table>` — spliced edits into the middle of the markup and corrupted the
+ * document, so the depth count is load-bearing, not defensive.
+ *
+ * Comments are skipped wholesale, which matters because Outlook conditional
+ * comments (`<!--[if mso]><table>…<![endif]-->`) contain tags that must not
+ * count toward depth. Void and self-closing tags never open a level.
+ *
+ * Returns null if that occurrence doesn't exist or the element is unclosed.
  */
 export function locateRegion(
   html: string,
@@ -74,13 +106,93 @@ export function locateRegion(
 
   const start = html.lastIndexOf("<", attrIdx);
   if (start === -1) return null;
-  const tag = /^<([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(start))?.[1];
+  const tag = /^<([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(start))?.[1]?.toLowerCase();
   if (!tag) return null;
-  const closeTag = `</${tag.toLowerCase()}>`;
-  const closeIdx = html.toLowerCase().indexOf(closeTag, start);
-  if (closeIdx === -1) return null;
-  const end = closeIdx + closeTag.length;
-  return { start, end, outerHTML: html.slice(start, end) };
+
+  const innerStart = findTagEnd(html, start);
+  if (innerStart === -1) return null;
+  // A self-closing region element has no inner HTML to edit.
+  if (html.slice(start, innerStart).trimEnd().endsWith("/>")) return null;
+
+  let depth = 1;
+  let i = innerStart;
+  while (i < html.length) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) return null;
+
+    if (html.startsWith("<!--", lt)) {
+      const commentEnd = html.indexOf("-->", lt);
+      if (commentEnd === -1) return null;
+      i = commentEnd + 3;
+      continue;
+    }
+
+    const closing = /^<\/\s*([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(lt, lt + 32));
+    if (closing) {
+      const tagEnd = findTagEnd(html, lt);
+      if (tagEnd === -1) return null;
+      if (closing[1].toLowerCase() === tag) {
+        depth--;
+        if (depth === 0) {
+          return {
+            start,
+            end: tagEnd,
+            innerStart,
+            innerEnd: lt,
+            outerHTML: html.slice(start, tagEnd),
+            innerHTML: html.slice(innerStart, lt),
+          };
+        }
+      }
+      i = tagEnd;
+      continue;
+    }
+
+    const opening = /^<\s*([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(lt, lt + 32));
+    if (opening) {
+      const tagEnd = findTagEnd(html, lt);
+      if (tagEnd === -1) return null;
+      if (
+        opening[1].toLowerCase() === tag &&
+        !html.slice(lt, tagEnd).trimEnd().endsWith("/>")
+      ) {
+        depth++;
+      }
+      i = tagEnd;
+      continue;
+    }
+
+    i = lt + 1;
+  }
+  return null;
+}
+
+/**
+ * Replaces the INNER HTML of the located region, leaving every other byte of
+ * the document untouched. This is the commit path for inline (contentEditable)
+ * editing: the user types on the real rendered element, so what comes back is
+ * already the markup they want — paragraphs, links and bold runs intact — and
+ * the only job here is to splice it in without disturbing the surrounding
+ * document. `innerHtml` MUST already be sanitized by the caller
+ * (sanitizeEditedFragment); this function does no escaping of its own.
+ *
+ * Deliberately a string splice rather than a parse/re-serialize of the whole
+ * document: re-serializing would risk rewriting the doctype and Outlook
+ * conditional comments elsewhere in the email.
+ */
+export function replaceRegionInner(
+  html: string,
+  region: string,
+  occurrence: number,
+  innerHtml: string,
+): { html: string } | { error: string } {
+  const located = locateRegion(html, region, occurrence);
+  if (!located) {
+    return { error: "That section couldn't be found. Refresh and try again." };
+  }
+  return {
+    html: html.slice(0, located.innerStart) + innerHtml + html.slice(located.innerEnd),
+  };
 }
 
 /**
@@ -180,56 +292,4 @@ export function guessStyleValue(elementHtml: string, prop: keyof StyleChanges): 
   const re = new RegExp(`(?:^|;)\\s*${cssProp}\\s*:\\s*([^;]+)`, "i");
   const match = re.exec(styleAttrMatch[1]);
   return match ? match[1].trim() : undefined;
-}
-
-/**
- * Replaces the visible text of a located region, deterministically (no
- * model). Regions with a single flat text node (headline, eyebrow) get a
- * straight swap. "body" is re-paragraphed the same way the generator does
- * (blank-line-separated <p> blocks), reusing the first existing <p>'s style
- * so the native edit matches the template's own convention. "cta" swaps only
- * the wrapped <a>'s text, preserving its href/style. Any other structure
- * (nested tags this function doesn't know how to target safely, e.g.
- * header/footer's multi-element layout) returns null rather than risk
- * corrupting markup — callers should fall back to the AI rewrite path.
- */
-export function replaceRegionText(
-  outerHTML: string,
-  region: string,
-  newText: string,
-): string | null {
-  const openTagMatch = /^<[a-zA-Z][a-zA-Z0-9]*\b[^>]*>/.exec(outerHTML);
-  if (!openTagMatch) return null;
-  const openTag = openTagMatch[0];
-  const tag = /^<([a-zA-Z][a-zA-Z0-9]*)/.exec(openTag)?.[1]?.toLowerCase();
-  if (!tag) return null;
-  const closeTag = `</${tag}>`;
-  if (!outerHTML.toLowerCase().endsWith(closeTag)) return null;
-  const inner = outerHTML.slice(openTag.length, outerHTML.length - closeTag.length);
-
-  if (region === "body") {
-    const pStyleMatch = /<p\s+style="([^"]*)"/i.exec(inner);
-    const pStyle = pStyleMatch?.[1] ?? "margin:0 0 18px;font-size:16px;line-height:1.65;";
-    const paragraphs = newText
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (paragraphs.length === 0) return null;
-    const rebuilt = paragraphs
-      .map((p) => `<p style="${pStyle}">${escapeHtml(p)}</p>`)
-      .join("");
-    return openTag + rebuilt + outerHTML.slice(outerHTML.length - closeTag.length);
-  }
-
-  if (region === "cta") {
-    const anchorMatch = /(<a\s[^>]*>)([\s\S]*?)(<\/a>)/i.exec(inner);
-    if (!anchorMatch) return null;
-    const newInner = inner.replace(anchorMatch[0], `${anchorMatch[1]}${escapeHtml(newText)}${anchorMatch[3]}`);
-    return openTag + newInner + outerHTML.slice(outerHTML.length - closeTag.length);
-  }
-
-  // Simple regions (headline, eyebrow): only safe to swap wholesale when the
-  // inner content has no nested tags of its own.
-  if (/<[a-zA-Z]/.test(inner)) return null;
-  return openTag + escapeHtml(newText) + outerHTML.slice(outerHTML.length - closeTag.length);
 }

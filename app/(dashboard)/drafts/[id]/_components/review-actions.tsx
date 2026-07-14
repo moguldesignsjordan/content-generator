@@ -30,6 +30,7 @@ import {
   hasDarkModeSupport,
   type EmailPreviewMode,
 } from "@/lib/email/preview-mode";
+import { locateRegion } from "@/lib/email/inline-style";
 import { DesignChat } from "./design-chat";
 import { EmailPreview } from "./email-preview";
 import { PerformanceStats } from "./performance-stats";
@@ -84,14 +85,26 @@ interface ReviewActionsProps {
 /**
  * Swaps the href on the CTA button (the <a> inside the data-region="cta"
  * wrapper every template and model-designed email tags) so editing the CTA
- * link field updates the rendered button instantly, no model call needed.
+ * link field updates the rendered button, no model call needed.
+ *
+ * Scoped to the CTA region's own markup. The previous version matched
+ * `data-region="cta"[\s\S]*?<a ... href="` across the whole document, and that
+ * `[\s\S]*?` was unbounded: when the CTA region contained no anchor, the match
+ * ran straight past it and rewrote the first <a href> further down the
+ * email — in practice the unsubscribe link in the footer. Locating the region
+ * first means the replacement physically cannot leave it, and an anchorless CTA
+ * now leaves the document alone instead of corrupting it.
  */
 function applyCtaHref(html: string, url: string): string {
   const href = url.trim() || "#";
-  return html.replace(
-    /(data-region="cta"[\s\S]*?<a\s[^>]*\bhref=")[^"]*(")/,
-    `$1${href}$2`,
-  );
+  const located = locateRegion(html, "cta", 0);
+  if (!located) return html;
+
+  const anchorHref = /(<a\s[^>]*\bhref=")[^"]*(")/i;
+  if (!anchorHref.test(located.outerHTML)) return html;
+
+  const next = located.outerHTML.replace(anchorHref, `$1${href}$2`);
+  return html.slice(0, located.start) + next + html.slice(located.end);
 }
 
 export function ReviewActions({
@@ -131,9 +144,14 @@ export function ReviewActions({
   // Light/Dark rather than let them silently do nothing.
   const darkSupported = hasDarkModeSupport(html);
 
-  function handleCtaChange(value: string) {
-    setCtaUrl(value);
-    setHtml((h) => applyCtaHref(h, value));
+  /**
+   * Rewrites the button's href once the field is done being typed in, rather
+   * than on every keystroke: each keystroke used to run a document-wide regex
+   * over the email and mutate the html state, so a half-typed URL was being
+   * spliced in dozens of times per edit.
+   */
+  function commitCtaHref() {
+    setHtml((h) => applyCtaHref(h, ctaUrl));
   }
 
   function handleDownload() {
@@ -482,7 +500,7 @@ export function ReviewActions({
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <p className="text-[13px] font-medium text-muted">
-            Click any part of the email to edit it
+            Click a section to select it, double-click to type on it
           </p>
           <div className="flex items-center gap-3">
             <Tooltip
@@ -567,7 +585,8 @@ export function ReviewActions({
           <Input
             type="url"
             value={ctaUrl}
-            onChange={(e) => handleCtaChange(e.target.value)}
+            onChange={(e) => setCtaUrl(e.target.value)}
+            onBlur={() => commitCtaHref()}
             placeholder="https://…"
           />
         </Field>

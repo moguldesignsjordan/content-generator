@@ -416,7 +416,7 @@ export function BlogReviewActions({
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <p className="min-w-0 truncate text-[13px] font-medium text-muted">
-            Article preview: click any part of the text to edit it
+            Click a section to select it, double-click to type on it
           </p>
           <div className="flex shrink-0 items-center gap-3">
             {heroImage && heroImage.style !== "uploaded" && (
