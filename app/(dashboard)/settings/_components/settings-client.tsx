@@ -183,6 +183,14 @@ export function SettingsClient({
         </ListGroup>
       )}
 
+      <ListGroup label="Billing">
+        <ListRow
+          title="Plan & billing"
+          subtitle="Credits, plan, and payment"
+          href="/billing"
+        />
+      </ListGroup>
+
       <ListGroup label="Account">
         <form action={signOut}>
           <button

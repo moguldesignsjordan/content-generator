@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BlogIcon,
+  CreditIcon,
   FlyerIcon,
   GearIcon,
   HomeIcon,
@@ -58,6 +59,12 @@ export const NAV: NavItem[] = [
     label: "Create",
     Icon: PlusIcon,
     match: (p) => p.startsWith("/create"),
+  },
+  {
+    href: "/billing",
+    label: "Billing",
+    Icon: CreditIcon,
+    match: (p) => p.startsWith("/billing"),
   },
   {
     href: "/settings",

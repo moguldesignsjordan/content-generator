@@ -201,3 +201,10 @@ export const MoonIcon = (p: IconProps) => (
     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
   </Svg>
 );
+
+export const CreditIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v10M9.5 9.5c0-1.1 1.12-2 2.5-2s2.5.7 2.5 1.75-1.12 1.75-2.5 1.75-2.5.65-2.5 1.75S10.62 15 12 15s2.5-.9 2.5-2" />
+  </Svg>
+);

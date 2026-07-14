@@ -5,6 +5,7 @@ import {
   DEFAULT_BILLING_CONFIG,
   creditsForUsage,
   currentPeriod,
+  findPack,
   usageIdempotencyKey,
 } from "./credits";
 
@@ -104,6 +105,28 @@ describe("usageIdempotencyKey", () => {
     // Can't dedupe a replay without an id, but must never COLLIDE, which would
     // silently drop a real debit.
     expect(usageIdempotencyKey()).not.toBe(usageIdempotencyKey());
+  });
+});
+
+describe("findPack", () => {
+  const packs = [
+    { id: "pack_1000", credits: 1000, price_usd: 10, stripe_price_id: "price_a" },
+    { id: "pack_5000", credits: 5000, price_usd: 45, stripe_price_id: "price_b" },
+  ];
+
+  it("finds a configured pack by id", () => {
+    expect(findPack({ packs }, "pack_5000")).toEqual(packs[1]);
+  });
+
+  it("returns undefined for an unknown or removed pack", () => {
+    // The retune-mid-flight case: a customer's browser has a checkout page
+    // open for a pack that just got deleted from billing_config. The checkout
+    // route must reject this cleanly, not throw.
+    expect(findPack({ packs }, "pack_nonexistent")).toBeUndefined();
+  });
+
+  it("returns undefined against an empty pack list", () => {
+    expect(findPack({ packs: [] }, "pack_1000")).toBeUndefined();
   });
 });
 

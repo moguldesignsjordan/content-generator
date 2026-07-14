@@ -6,6 +6,7 @@ import type {
   AppLog,
   AppLogLevel,
   Brand,
+  BrandBilling,
   BrandGuidelines,
   BrandMemory,
   Cadence,
@@ -2382,4 +2383,44 @@ export async function getLogStats(): Promise<{
     usageCount24h,
     estimatedUsd24h: Number(estimatedUsd24h.toFixed(4)),
   };
+}
+
+// ── Billing (migration 019) ───────────────────────────────────────────────────
+
+/** A brand's Stripe mirror row, or null before it's ever bought/subscribed. */
+export async function getBrandBilling(brandId: string): Promise<BrandBilling | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_billing")
+    .select("*")
+    .eq("brand_id", brandId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as BrandBilling) ?? null;
+}
+
+/**
+ * Creates or updates the brand's Stripe mirror row. Callers pass only the
+ * fields they know changed; brand_id is the upsert key (one row per brand).
+ * Used by checkout (to persist a newly created Stripe Customer) and by the
+ * webhook handlers (to sync subscription id/status/plan/period).
+ */
+export async function upsertBrandBilling(
+  brandId: string,
+  patch: Partial<Omit<BrandBilling, "brand_id" | "updated_at">>,
+): Promise<BrandBilling> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_billing")
+    .upsert(
+      { brand_id: brandId, ...patch, updated_at: new Date().toISOString() },
+      { onConflict: "brand_id" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as BrandBilling;
 }

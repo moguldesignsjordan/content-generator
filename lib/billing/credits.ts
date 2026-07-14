@@ -43,6 +43,16 @@ export interface CreditPack {
   stripe_price_id: string;
 }
 
+/** Looks up a configured pack by its id, or undefined if it's unknown/removed.
+ *  Shared by the checkout route (validate what the client asked to buy) and its
+ *  tests; pure so it needs no mocking. */
+export function findPack(
+  config: Pick<BillingConfig, "packs">,
+  packId: string,
+): CreditPack | undefined {
+  return config.packs.find((p) => p.id === packId);
+}
+
 /** Used when billing_config can't be read (migration 019 not applied yet, or a
  *  DB hiccup). Same numbers as the migration's column defaults: the config row
  *  is the tuning knob, not the source of truth for whether billing works. */

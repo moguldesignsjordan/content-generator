@@ -861,3 +861,18 @@ export interface AppLog {
   estimated_usd: number | null;
   draft_id: string | null;
 }
+
+// Billing (migration 019). One row per brand, mirroring Stripe's own state so
+// the app never has to call Stripe just to answer "what plan is this brand
+// on". Kept in sync by the checkout/webhook routes in lib/billing/stripe.ts.
+export type PlanCode = "free" | "pro";
+
+export interface BrandBilling {
+  brand_id: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  plan_code: PlanCode;
+  status: string | null;
+  current_period_end: string | null;
+  updated_at: string;
+}
