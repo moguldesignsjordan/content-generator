@@ -4,6 +4,7 @@ import { getBrandWithIcps } from "@/lib/db/queries";
 import type { BrandImportProposal } from "@/lib/db/types";
 import { generateBrandIdentity } from "@/lib/pipeline/brand-identity";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // Cheap, non-thinking, single forced tool call: no scraping, no drafting
 // prose, just picking a palette and a font pairing. Comfortably fast on
@@ -24,7 +25,11 @@ export async function POST() {
     );
   }
   try {
-    const data = await getBrandWithIcps();
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(user.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }

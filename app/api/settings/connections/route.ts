@@ -9,6 +9,7 @@ import { getProvider, listProviders } from "@/lib/publishing/registry";
 import { describeConnection } from "@/lib/publishing/connections";
 import { encryptSecret } from "@/lib/crypto/secrets";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // Connections: per-brand publishing credentials (MailerLite API key, Sanity
 // project/token). Secrets are encrypted at rest (lib/crypto/secrets.ts); this
@@ -28,7 +29,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "brandId is required." }, { status: 400 });
   }
   try {
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    const brand = await getSingleBrand(user.id);
     if (!brand || brand.id !== brandId) {
       return NextResponse.json({ error: "Brand not found." }, { status: 404 });
     }
@@ -73,7 +76,9 @@ export async function PATCH(req: NextRequest) {
     if (!provider) {
       return NextResponse.json({ error: "Unknown provider." }, { status: 400 });
     }
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    const brand = await getSingleBrand(user.id);
     if (!brand || brand.id !== body.brandId) {
       return NextResponse.json({ error: "Brand not found." }, { status: 404 });
     }

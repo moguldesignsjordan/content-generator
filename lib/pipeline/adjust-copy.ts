@@ -53,6 +53,7 @@ export type AdjustCopyResult =
 
 async function attemptCopyEdit(
   draftId: string,
+  brandId: string,
   model: string,
   system: string,
   user: string,
@@ -66,7 +67,12 @@ async function attemptCopyEdit(
     tools: [ADJUST_COPY_TOOL],
     tool_choice: { type: "tool", name: "save_copy_patch" },
   });
-  logUsage("adjust-copy", model, response.usage, { draftId });
+  logUsage("adjust-copy", model, response.usage, {
+    draftId,
+    brandId,
+    metered: true,
+    requestId: response.id,
+  });
 
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_copy_patch",
@@ -120,12 +126,14 @@ export async function adjustCopy(
   // Same retry ladder as adjust-style: Haiku is enough for a scoped text swap,
   // but an exact-match find can miss on sampling variance, so retry once on
   // Haiku before escalating to Sonnet.
-  let attempt = await attemptCopyEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
+  const brandId = ctx.brand.id;
+  const html = draftCtx.content.html;
+  let attempt = await attemptCopyEdit(draftId, brandId, FAST_MODEL, system, user, html);
   if ("error" in attempt) {
-    attempt = await attemptCopyEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptCopyEdit(draftId, brandId, FAST_MODEL, system, user, html);
   }
   if ("error" in attempt) {
-    attempt = await attemptCopyEdit(draftId, DRAFT_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptCopyEdit(draftId, brandId, DRAFT_MODEL, system, user, html);
   }
   if ("error" in attempt) {
     return { ok: false, error: `${attempt.error} Try again.` };

@@ -57,26 +57,21 @@ import type {
 } from "./types";
 
 /**
- * Loads the brand's strategy tree for the dashboard: pillars → clusters →
- * topics (spokes). One round-trip via Supabase's nested select.
+ * Loads the given user's brand strategy tree for the dashboard: pillars →
+ * clusters → topics (spokes). One round-trip via Supabase's nested select.
  *
- * Returns null if no brand has been seeded yet.
+ * Returns null if the user has no brand yet (they should onboard).
  */
-export async function getBrandStrategy(): Promise<{
+export async function getBrandStrategy(userId: string): Promise<{
   brand: Brand;
   strategy: Strategy;
   pillars: PillarWithClusters[];
   latestDraftByTopic: Record<string, { id: string; state: string; version: number }>;
 } | null> {
-  const db = getAdminClient();
-
-  const { data: brand, error: brandErr } = await db
-    .from("brands")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-  if (brandErr) throw brandErr;
+  const brand = await getBrandForUser(userId);
   if (!brand) return null;
+
+  const db = getAdminClient();
 
   const { data: strategy, error: stratErr } = await db
     .from("strategies")
@@ -1048,26 +1043,76 @@ export async function getDraftForReview(
   };
 }
 
-// ── Settings queries ──────────────────────────────────────────────────────────
+// ── Brand resolution (multi-tenant: a brand belongs to its members) ──────────
 
-/** Returns the single brand row, or null if none has been created yet. */
-export async function getSingleBrand(): Promise<Brand | null> {
+/**
+ * The brand the given user owns/is a member of, or null if they have none (the
+ * UI then sends them to onboarding). Resolves through brand_members (migration
+ * 017) instead of "the first brand", so each customer's data is isolated at the
+ * query layer. The service-role client stays for now; RLS is the later
+ * defense-in-depth step (multi-tenancy-roadmap.md Step 3).
+ */
+export async function getBrandForUser(userId: string): Promise<Brand | null> {
   const db = getAdminClient();
   const { data, error } = await db
     .from("brands")
-    .select("*")
+    .select("*, brand_members!inner(user_id)")
+    .eq("brand_members.user_id", userId)
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
   if (error) throw error;
   return (data as Brand) ?? null;
 }
 
+/** A brand by id, for pipeline/cron paths that already hold a brand id. */
+export async function getBrandById(brandId: string): Promise<Brand | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brands")
+    .select("*")
+    .eq("id", brandId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Brand) ?? null;
+}
+
+/** The brand a draft belongs to (draft -> job -> brand). Used by publish and
+ *  performance, which act on a specific draft rather than the session user. */
+export async function getBrandByDraftId(draftId: string): Promise<Brand | null> {
+  const db = getAdminClient();
+  const { data: draft, error: draftErr } = await db
+    .from("drafts")
+    .select("job_id")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (draftErr) throw draftErr;
+  if (!draft?.job_id) return null;
+  const { data: job, error: jobErr } = await db
+    .from("content_jobs")
+    .select("brand_id")
+    .eq("id", draft.job_id)
+    .maybeSingle();
+  if (jobErr) throw jobErr;
+  if (!job?.brand_id) return null;
+  return getBrandById(job.brand_id);
+}
+
+// ── Settings queries ──────────────────────────────────────────────────────────
+
+/** Returns the given user's brand row, or null if they have none yet. */
+export async function getSingleBrand(userId: string): Promise<Brand | null> {
+  return getBrandForUser(userId);
+}
+
 /**
- * Creates a minimal brand row (name only), the first step of onboarding when
- * no brand exists yet. Subsequent onboarding steps fill in the profile via the
- * per-section update functions. Returns the new brand.
+ * Creates a minimal brand row (name only) and links the creating user as its
+ * owner (brand_members, migration 017). The first step of onboarding when a
+ * user has no brand; subsequent onboarding steps fill in the profile via the
+ * per-section update functions. Returns the new brand. Starter credits are
+ * granted separately by the billing layer once the ledger exists.
  */
-export async function createBrand(name: string): Promise<Brand> {
+export async function createBrand(name: string, userId: string): Promise<Brand> {
   const db = getAdminClient();
   const { data, error } = await db
     .from("brands")
@@ -1075,24 +1120,31 @@ export async function createBrand(name: string): Promise<Brand> {
     .select("*")
     .single();
   if (error) throw error;
-  return data as Brand;
+  const brand = data as Brand;
+  // The membership row is what makes the brand reachable: without it, every
+  // read (which resolves through brand_members) returns nothing and the user is
+  // stuck on onboarding with an orphaned brand. Clean up and fail loudly rather
+  // than leaving that behind.
+  const { error: memberErr } = await db
+    .from("brand_members")
+    .insert({ brand_id: brand.id, user_id: userId, role: "owner" });
+  if (memberErr) {
+    await db.from("brands").delete().eq("id", brand.id);
+    throw memberErr;
+  }
+  return brand;
 }
 
-/** Loads the brand, strategy, and all ICPs for the settings page. */
-export async function getBrandWithIcps(): Promise<{
+/** Loads the given user's brand, strategy, and all ICPs for the settings page. */
+export async function getBrandWithIcps(userId: string): Promise<{
   brand: Brand;
   strategy: Strategy | null;
   icps: Icp[];
 } | null> {
-  const db = getAdminClient();
-
-  const { data: brand, error: brandErr } = await db
-    .from("brands")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-  if (brandErr) throw brandErr;
+  const brand = await getBrandForUser(userId);
   if (!brand) return null;
+
+  const db = getAdminClient();
 
   const { data: strategy, error: stratErr } = await db
     .from("strategies")

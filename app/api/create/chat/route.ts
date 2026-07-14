@@ -65,6 +65,7 @@ import {
   stripMarkdown,
 } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -125,7 +126,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -224,7 +229,7 @@ export async function POST(req: NextRequest) {
         logError("api:/api/create/chat", err, { step });
         response = await call();
       }
-      logUsage("create-chat", DRAFT_MODEL, response.usage);
+      logUsage("create-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
 
       for (const block of response.content) {
         if (block.type === "text") replyParts.push(block.text);
@@ -259,7 +264,9 @@ export async function POST(req: NextRequest) {
           tools: CREATE_TOOLS,
           tool_choice: { type: "any" },
         });
-        logUsage("create-chat-forced", FAST_MODEL, forced.usage);
+        logUsage("create-chat-forced", FAST_MODEL, forced.usage, {
+          brandId: brand.id,
+        });
         messages.push({ role: "assistant", content: forced.content });
         const forcedParts: string[] = [];
         for (const block of forced.content) {

@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import { getBrandWithIcps, getCampaignPublishProgress, listCampaigns } from "@/lib/db/queries";
 import type { CampaignSummary } from "@/lib/db/types";
 import { Card, LinkButton } from "@/components/ui";
@@ -19,7 +21,10 @@ export default async function CampaignsPage() {
     );
   }
 
-  const data = await getBrandWithIcps();
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
+  const data = await getBrandWithIcps(user.id);
   if (!data) {
     return (
       <Card className="p-7 text-center">

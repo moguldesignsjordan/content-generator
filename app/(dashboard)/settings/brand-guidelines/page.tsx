@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getSingleBrand } from "@/lib/db/queries";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import { Card } from "@/components/ui";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { resolveBrandTokens } from "@/lib/email/templates/types";
@@ -31,9 +33,12 @@ export default async function BrandGuidelinesPage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   let brand: Awaited<ReturnType<typeof getSingleBrand>>;
   try {
-    brand = await getSingleBrand();
+    brand = await getSingleBrand(user.id);
   } catch (err) {
     return (
       <Card className="p-7">

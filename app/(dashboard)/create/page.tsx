@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import { getBrandStrategy } from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
@@ -20,9 +22,12 @@ export default async function CreatePage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   let data: Awaited<ReturnType<typeof getBrandStrategy>>;
   try {
-    data = await getBrandStrategy();
+    data = await getBrandStrategy(user.id);
   } catch (err) {
     return (
       <Card className="p-7">

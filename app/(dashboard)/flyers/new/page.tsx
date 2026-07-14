@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getSingleBrand, listStyleReferences, listTopics } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { Card } from "@/components/ui";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
@@ -24,7 +26,8 @@ export default async function NewFlyerPage() {
   let styles: Awaited<ReturnType<typeof listStyleReferences>> = [];
   try {
     topics = await listTopics();
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    const brand = user ? await getSingleBrand(user.id) : null;
     if (brand) styles = await listStyleReferences(brand.id);
   } catch {
     // Non-fatal: the form still works with an empty topic list (freeform path).

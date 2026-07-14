@@ -3,7 +3,7 @@ import {
   getBrandIntegrations,
   getDraftWithJobContext,
   getPublication,
-  getSingleBrand,
+  getBrandByDraftId,
   markJobPublished,
   recordPublication,
 } from "@/lib/db/queries";
@@ -52,8 +52,9 @@ export async function publishDraft(
 
   // Load the brand and its connections BEFORE provider selection: isConfigured
   // now needs (brand, integration), and the chosen provider's publish() needs
-  // the matching integration row.
-  const brand = await getSingleBrand();
+  // the matching integration row. Brand comes from the draft (draft -> job ->
+  // brand), not the session, since a draft's owner is intrinsic to it.
+  const brand = await getBrandByDraftId(draftId);
   if (!brand) throw new Error("No brand found.");
 
   const integrations = await getBrandIntegrations(brand.id);

@@ -18,6 +18,7 @@ import {
 } from "@/prompts/guidelines";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 120;
 
@@ -34,7 +35,11 @@ export async function POST() {
     );
   }
   try {
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -49,7 +54,9 @@ export async function POST() {
       tools: [GUIDELINES_TOOL],
       tool_choice: { type: "tool", name: "save_brand_guidelines" },
     });
-    logUsage("guidelines-synthesis", DRAFT_MODEL, response.usage);
+    logUsage("guidelines-synthesis", DRAFT_MODEL, response.usage, {
+      brandId: data.brand.id,
+    });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_brand_guidelines",

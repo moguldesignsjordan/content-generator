@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import {
   countScheduledAwaitingReview,
   getBrandStrategy,
@@ -41,9 +43,12 @@ export default async function DashboardPage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   let data: Awaited<ReturnType<typeof getBrandStrategy>>;
   try {
-    data = await getBrandStrategy();
+    data = await getBrandStrategy(user.id);
   } catch (err) {
     return (
       <SetupNotice
@@ -75,7 +80,7 @@ export default async function DashboardPage() {
   const [drafts, withIcps, products, activeCampaign, scheduledAwaitingReview] =
     await Promise.all([
       listDrafts().catch(() => []),
-      getBrandWithIcps().catch(() => null),
+      getBrandWithIcps(user.id).catch(() => null),
       listProducts(brand.id).catch(() => []),
       getLatestActiveCampaign(brand.id).catch(() => null),
       countScheduledAwaitingReview(brand.id).catch(() => 0),

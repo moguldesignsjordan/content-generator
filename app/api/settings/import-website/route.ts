@@ -18,6 +18,7 @@ import {
 } from "@/prompts/import-website";
 import { stripEmDashes } from "@/lib/text";
 import { logError, logWarn } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // Scrape (~45s budget) + one Claude call with a large input can be slow.
 export const maxDuration = 300;
@@ -59,7 +60,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -75,7 +80,9 @@ export async function POST(req: NextRequest) {
       tools: [IMPORT_TOOL],
       tool_choice: { type: "tool", name: "save_brand_extraction" },
     });
-    logUsage("import-website", DRAFT_MODEL, response.usage);
+    logUsage("import-website", DRAFT_MODEL, response.usage, {
+      brandId: data.brand.id,
+    });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_brand_extraction",

@@ -32,6 +32,7 @@ import {
 } from "@/prompts/onboarding";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 120;
 
@@ -53,7 +54,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
-    const data = await getBrandWithIcps();
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(user.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }

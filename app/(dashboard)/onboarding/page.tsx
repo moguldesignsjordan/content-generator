@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getBrandWithIcps } from "@/lib/db/queries";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import { Card } from "@/components/ui";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../_components/screen-header";
@@ -26,9 +28,12 @@ export default async function OnboardingPage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   let data: Awaited<ReturnType<typeof getBrandWithIcps>>;
   try {
-    data = await getBrandWithIcps();
+    data = await getBrandWithIcps(user.id);
   } catch (err) {
     return (
       <Card className="p-7">

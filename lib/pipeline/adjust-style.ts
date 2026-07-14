@@ -59,6 +59,7 @@ export type AdjustStyleResult =
  */
 async function attemptEdit(
   draftId: string,
+  brandId: string,
   model: string,
   system: string,
   user: string,
@@ -72,7 +73,12 @@ async function attemptEdit(
     tools: [ADJUST_STYLE_TOOL],
     tool_choice: { type: "tool", name: "save_style_patch" },
   });
-  logUsage("adjust-style", model, response.usage, { draftId });
+  logUsage("adjust-style", model, response.usage, {
+    draftId,
+    brandId,
+    metered: true,
+    requestId: response.id,
+  });
 
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_style_patch",
@@ -118,12 +124,14 @@ export async function adjustEmailStyle(
   // with fresh output matched fine), so retry once on the SAME cheap model
   // before escalating to DRAFT_MODEL (Sonnet) as a last resort. The user
   // only ever sees an error if all three attempts fail.
-  let attempt = await attemptEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
+  const brandId = ctx.brand.id;
+  const currentHtml = draftCtx.content.html;
+  let attempt = await attemptEdit(draftId, brandId, FAST_MODEL, system, user, currentHtml);
   if ("error" in attempt) {
-    attempt = await attemptEdit(draftId, FAST_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptEdit(draftId, brandId, FAST_MODEL, system, user, currentHtml);
   }
   if ("error" in attempt) {
-    attempt = await attemptEdit(draftId, DRAFT_MODEL, system, user, draftCtx.content.html);
+    attempt = await attemptEdit(draftId, brandId, DRAFT_MODEL, system, user, currentHtml);
   }
   if ("error" in attempt) {
     return { ok: false, error: `${attempt.error} Try rephrasing the request.` };

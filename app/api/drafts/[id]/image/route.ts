@@ -189,6 +189,8 @@ export async function POST(
 
       const generated = await generateContentImage({
         tokens: resolveBrandTokens(topicCtx.brand),
+        brandId: topicCtx.brand.id,
+        draftId: id,
         brandName: topicCtx.brand.name,
         topicTitle: topicCtx.topic.title,
         headline: isBlog

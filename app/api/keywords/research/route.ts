@@ -3,6 +3,7 @@ import { isDataForSeoConfigured } from "@/lib/clients/dataforseo";
 import { researchKeyword } from "@/lib/keyword/research";
 import { getSingleBrand } from "@/lib/db/queries";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
 
@@ -24,7 +25,11 @@ export async function POST(req: NextRequest) {
     if (!keyword?.trim()) {
       return NextResponse.json({ error: "No keyword given." }, { status: 400 });
     }
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
     if (!brand) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }

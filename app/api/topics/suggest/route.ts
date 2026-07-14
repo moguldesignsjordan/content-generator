@@ -21,6 +21,7 @@ import {
 } from "@/prompts/suggest-topics";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 120;
 
@@ -38,7 +39,11 @@ export async function POST() {
     );
   }
   try {
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -64,7 +69,9 @@ export async function POST() {
       tools: [SUGGEST_TOPICS_TOOL],
       tool_choice: { type: "tool", name: "save_topic_ideas" },
     });
-    logUsage("topics-suggest", DRAFT_MODEL, response.usage);
+    logUsage("topics-suggest", DRAFT_MODEL, response.usage, {
+      brandId: data.brand.id,
+    });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_topic_ideas",
@@ -112,7 +119,11 @@ export async function PUT(req: NextRequest) {
     if (!topics?.length) {
       return NextResponse.json({ error: "No topics to add." }, { status: 400 });
     }
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }

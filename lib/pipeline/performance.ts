@@ -3,7 +3,7 @@ import {
   getBrandIntegration,
   getLatestPerformance,
   getPublicationForDraft,
-  getSingleBrand,
+  getBrandByDraftId,
   recordPerformance,
 } from "@/lib/db/queries";
 import type { PerformanceMetric } from "@/lib/db/types";
@@ -33,7 +33,7 @@ export async function refreshPerformance(
     );
   }
 
-  const brand = await getSingleBrand();
+  const brand = await getBrandByDraftId(draftId);
   if (!brand) throw new Error("No brand found.");
   const integration = await getBrandIntegration(brand.id, provider.id).catch(
     () => null,

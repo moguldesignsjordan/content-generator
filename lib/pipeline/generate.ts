@@ -117,6 +117,7 @@ export async function generateEmailForTopicStreamed(
       lengthTarget,
       emailType,
       designReference,
+      brandId: ctx.brand.id,
     });
 
     const { content, copy, designSource } = renderEmailForContext(
@@ -260,6 +261,8 @@ export async function maybeAutoHeroImage(
   try {
     const generated = await generateContentImage({
       tokens: resolveBrandTokens(ctx.brand),
+      brandId: ctx.brand.id,
+      draftId: progress?.draftId,
       brandName: ctx.brand.name,
       topicTitle: ctx.topic.title,
       headline,
@@ -296,6 +299,8 @@ async function generateEmailCopy(
     lengthTarget?: EmailLengthTarget;
     emailType?: EmailType;
     designReference?: { data: string; mimeType: string } | null;
+    /** Who pays. Generation is metered: this is the headline charged call. */
+    brandId?: string;
   } = {},
 ): Promise<{ parsed: EmailDraftOutput; usageDeltas: UsageDelta[] }> {
   // The system prompt (brand guidelines/voice/positioning + the email design
@@ -366,7 +371,11 @@ async function generateEmailCopy(
 
   const runOnce = async (label: string, u: string): Promise<EmailDraftOutput> => {
     const resp = await call(u);
-    logUsage(label, DRAFT_MODEL, resp.usage);
+    logUsage(label, DRAFT_MODEL, resp.usage, {
+      brandId: opts.brandId,
+      metered: true,
+      requestId: resp.id,
+    });
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
     return extract(resp);
   };
@@ -559,7 +568,11 @@ async function runQaPass(
       tools: [QA_TOOL],
       tool_choice: { type: "tool", name: "qa_review" },
     });
-    logUsage("email-qa", FAST_MODEL, response.usage);
+    logUsage("email-qa", FAST_MODEL, response.usage, {
+      brandId: ctx.brand.id,
+      metered: true,
+      requestId: response.id,
+    });
     usageDeltas.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(
@@ -689,6 +702,7 @@ export async function regenerateEmailDraft(
     lengthTarget,
     emailType,
     designReference,
+    brandId: ctx.brand.id,
   });
 
   const { content, copy, designSource } = renderEmailForContext(

@@ -3,6 +3,7 @@ import { DRAFT_MODEL, getAnthropic, logUsage } from "@/lib/clients/anthropic";
 import { getBrandWithIcps } from "@/lib/db/queries";
 import { buildSuggestMessages, type SuggestField } from "@/prompts/suggest";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 300;
 
@@ -29,7 +30,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unknown field" }, { status: 400 });
     }
 
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -48,7 +53,9 @@ export async function POST(req: NextRequest) {
       system,
       messages: [{ role: "user", content: user }],
     });
-    logUsage("settings-suggest", DRAFT_MODEL, response.usage);
+    logUsage("settings-suggest", DRAFT_MODEL, response.usage, {
+      brandId: data.brand.id,
+    });
 
     const suggestion = response.content
       .filter((b) => b.type === "text")

@@ -70,6 +70,7 @@ export async function generateBlogForTopicStreamed(
     const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
       lengthTarget,
       blogType,
+      brandId: ctx.brand.id,
     });
 
     const copy = cleanBlogCopy(parsed);
@@ -167,6 +168,7 @@ export async function regenerateBlogDraft(
   const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
     lengthTarget,
     blogType,
+    brandId: ctx.brand.id,
   });
   const copy = cleanBlogCopy(parsed);
 
@@ -218,7 +220,12 @@ async function loadBrief(
 async function generateBlogCopy(
   system: string,
   user: string,
-  opts: { lengthTarget?: BlogLengthTarget; blogType?: BlogType } = {},
+  opts: {
+    lengthTarget?: BlogLengthTarget;
+    blogType?: BlogType;
+    /** Who pays. Generation is metered. */
+    brandId?: string;
+  } = {},
 ): Promise<{ parsed: BlogDraftOutput; usageDeltas: UsageDelta[] }> {
   const cachedSystem = cacheableSystem(system);
 
@@ -258,7 +265,11 @@ async function generateBlogCopy(
 
   const runOnce = async (label: string, u: string): Promise<BlogDraftOutput> => {
     const resp = await call(u);
-    logUsage(label, DRAFT_MODEL, resp.usage);
+    logUsage(label, DRAFT_MODEL, resp.usage, {
+      brandId: opts.brandId,
+      metered: true,
+      requestId: resp.id,
+    });
     usageDeltas.push({ model: DRAFT_MODEL, ...resp.usage });
     return extract(resp);
   };

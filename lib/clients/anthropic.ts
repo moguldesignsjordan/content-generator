@@ -1,6 +1,8 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import { logTokenUsage } from "@/lib/log";
+import { logTokenUsage, type UsageOpts } from "@/lib/log";
+
+export type { UsageOpts };
 
 export { DRAFT_MODEL, FAST_MODEL } from "./model-ids";
 
@@ -97,7 +99,7 @@ export function logUsage(
     cache_creation_input_tokens?: number | null;
     cache_read_input_tokens?: number | null;
   },
-  opts?: { draftId?: string },
+  opts?: UsageOpts,
 ): void {
   const input = usage.input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;

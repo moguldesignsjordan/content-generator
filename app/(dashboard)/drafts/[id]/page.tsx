@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   getBlogDraftFromEmail,
   getBrandIntegration,
@@ -9,6 +9,7 @@ import {
   getPublicationForDraft,
   getSingleBrand,
 } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { resolveSanityConfig } from "@/lib/clients/sanity";
 import { resolveMailerliteConfig } from "@/lib/publishing/providers/mailerlite";
 import { getPerformanceForDraft } from "@/lib/pipeline/performance";
@@ -28,6 +29,8 @@ export default async function DraftReviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
   const draft = await getDraftForReview(id);
   if (!draft) notFound();
 
@@ -67,13 +70,13 @@ export default async function DraftReviewPage({
   if (isFlyer) {
     // Flyers publish by download in v1; no provider config to probe.
   } else if (isBlog) {
-    const brand = await getSingleBrand().catch(() => null);
+    const brand = await getSingleBrand(user.id).catch(() => null);
     const integration = brand
       ? await getBrandIntegration(brand.id, "sanity").catch(() => null)
       : null;
     sanityConfigured = resolveSanityConfig(integration) !== null;
   } else {
-    const brand = await getSingleBrand().catch(() => null);
+    const brand = await getSingleBrand(user.id).catch(() => null);
     const integration = brand
       ? await getBrandIntegration(brand.id, "mailerlite").catch(() => null)
       : null;

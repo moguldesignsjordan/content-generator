@@ -13,6 +13,7 @@ import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import type { FlyerAspect } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // Starts a social flyer draft. Two entry shapes:
 //   { topicId }          — flyer from an existing topic
@@ -36,6 +37,11 @@ export async function POST(request: Request) {
       { error: "Image generation isn't set up yet: add GEMINI_API_KEY to .env.local." },
       { status: 503 },
     );
+  }
+
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   // Rate + daily-budget brake before any DB write or downstream model spend.
@@ -73,7 +79,7 @@ export async function POST(request: Request) {
     // the strategy's default cluster. The richer creative brief travels on
     // meta.flyer_brief.
     if (!topicId) {
-      const strategyData = await getBrandStrategy();
+      const strategyData = await getBrandStrategy(user.id);
       if (!strategyData) {
         return NextResponse.json(
           { error: "No brand strategy found. Seed or onboard a brand first." },

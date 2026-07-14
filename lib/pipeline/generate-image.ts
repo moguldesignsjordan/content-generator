@@ -6,7 +6,11 @@ import {
   getAnthropic,
   logUsage,
 } from "@/lib/clients/anthropic";
-import { generateGeminiImage, isGeminiConfigured } from "@/lib/clients/gemini-image";
+import {
+  IMAGE_MODEL,
+  generateGeminiImage,
+  isGeminiConfigured,
+} from "@/lib/clients/gemini-image";
 import { getAdminClient } from "@/lib/db/client";
 import { optimizeEmailImage } from "@/lib/images/optimize";
 import {
@@ -25,7 +29,7 @@ import type {
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
-import { logError } from "@/lib/log";
+import { logError, logImageUsage } from "@/lib/log";
 
 // AI hero images for emails and blogs. Cost discipline: this runs on explicit
 // user action from the review screen, or during generation ONLY when the
@@ -41,6 +45,10 @@ export { isGeminiConfigured };
 
 export interface GenerateContentImageArgs {
   tokens: BrandTokens;
+  /** Who pays: both the scene-crafting call and the render are metered. */
+  brandId?: string;
+  /** The draft this image belongs to, when there is one (attribution only). */
+  draftId?: string;
   brandName: string;
   topicTitle: string;
   headline?: string;
@@ -147,7 +155,12 @@ export async function generateContentImage(
       tools: [IMAGE_PROMPT_TOOL],
       tool_choice: { type: "tool", name: "save_image_prompt" },
     });
-    logUsage("image-prompt", FAST_MODEL, response.usage);
+    logUsage("image-prompt", FAST_MODEL, response.usage, {
+      brandId: args.brandId,
+      draftId: args.draftId,
+      metered: true,
+      requestId: response.id,
+    });
     usage.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(
@@ -176,6 +189,11 @@ export async function generateContentImage(
     reference,
   });
   usage.push({ model: FAST_MODEL, images: 1 });
+  logImageUsage("image-render", IMAGE_MODEL, 1, {
+    brandId: args.brandId,
+    draftId: args.draftId,
+    metered: true,
+  });
 
   // 3. Optimize for email (JPEG, 1200px, < ~150KB).
   const optimized = await optimizeEmailImage(rendered.data);

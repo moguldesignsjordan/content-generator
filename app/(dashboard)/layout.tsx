@@ -12,9 +12,14 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // When Supabase isn't configured at all, render the shell without a user so
-  // the per-page "Connect Supabase" guides still show (graceful degradation).
+  // In development with Supabase unconfigured, render the shell without a user
+  // so the per-page "Connect Supabase" guides still show (first-run setup). In
+  // production auth is mandatory (billing depends on it); middleware already
+  // returns 503 there, but defend in depth rather than render an anonymous shell.
   if (!isSupabaseAuthConfigured()) {
+    if (process.env.NODE_ENV !== "development") {
+      redirect("/login");
+    }
     return (
       <AppShell userEmail={null} role="user">
         {children}

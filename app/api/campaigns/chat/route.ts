@@ -45,6 +45,7 @@ import {
   stripMarkdown,
 } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 // A chat turn is short, but give the strategist headroom for thinking.
 export const maxDuration = 120;
@@ -66,7 +67,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
-    const data = await getBrandWithIcps();
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const data = await getBrandWithIcps(sessionUser.id);
     if (!data) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
@@ -143,7 +148,7 @@ export async function POST(req: NextRequest) {
       logError("api:/api/campaigns/chat", err);
       response = await call();
     }
-    logUsage("campaigns-chat", DRAFT_MODEL, response.usage);
+    logUsage("campaigns-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
 
     // Snapshot readiness BEFORE this turn's tool calls: if the brief was
     // already complete going in and the model produces a pure-text turn (no
@@ -182,7 +187,9 @@ export async function POST(req: NextRequest) {
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "any" },
         });
-        logUsage("campaigns-chat-forced", FAST_MODEL, forced.usage);
+        logUsage("campaigns-chat-forced", FAST_MODEL, forced.usage, {
+          brandId: brand.id,
+        });
         const forcedResult = await applyContentBlocks(forced.content, state, {
           brand,
           strategy,
@@ -231,7 +238,9 @@ export async function POST(req: NextRequest) {
           tools: CAMPAIGN_TOOLS,
           tool_choice: { type: "none" },
         });
-        logUsage("campaigns-chat-followup", FAST_MODEL, followUp.usage);
+        logUsage("campaigns-chat-followup", FAST_MODEL, followUp.usage, {
+          brandId: brand.id,
+        });
         const followUpParts: string[] = [];
         for (const block of followUp.content) {
           if (block.type === "text") followUpParts.push(block.text);

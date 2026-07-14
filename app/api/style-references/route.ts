@@ -9,6 +9,7 @@ import type { EmailDesignProfile, StyleReferenceKind } from "@/lib/db/types";
 import { extractEmailDesign } from "@/lib/pipeline/extract-design";
 import { prepareReferenceImage } from "@/lib/images/optimize";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 import sharp from "sharp";
 
 export const maxDuration = 60;
@@ -37,7 +38,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ styles: [] });
   }
   try {
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ styles: [] });
+    const brand = await getSingleBrand(user.id);
     if (!brand) return NextResponse.json({ styles: [] });
     const kind = parseKind(req.nextUrl.searchParams.get("kind"));
     const styles = await listStyleReferences(brand.id, kind);
@@ -79,7 +82,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Give the style a name." }, { status: 400 });
     }
 
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
     if (!brand) {
       return NextResponse.json({ error: "No brand found." }, { status: 404 });
     }

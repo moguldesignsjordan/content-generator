@@ -4,6 +4,7 @@ import type { VoiceExample, VoiceProfile } from "@/lib/db/types";
 import type { VoiceProposals } from "@/prompts/campaign";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 /**
  * The explicit-confirm write path for voice proposals from the campaign chat.
@@ -17,7 +18,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "proposals is required" }, { status: 400 });
     }
 
-    const brand = await getSingleBrand();
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
     if (!brand) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }

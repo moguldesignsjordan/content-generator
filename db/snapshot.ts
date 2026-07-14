@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 // cascades anyway).
 const TABLES = [
   "brands",
+  "brand_members",
   "strategies",
   "icps",
   "pillars",
@@ -25,6 +26,12 @@ const TABLES = [
   "approvals",
   "publications",
   "performance",
+  // Billing (migration 019). credit_transactions is the append-only ledger, so
+  // a restore that dropped it would lose the money trail, not just cached state.
+  "credit_transactions",
+  "credits_balance",
+  "brand_billing",
+  "billing_config",
 ] as const;
 
 function db() {

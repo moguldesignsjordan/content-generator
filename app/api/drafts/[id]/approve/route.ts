@@ -3,6 +3,7 @@ import { approveDraft, getDraftWithJobContext, getSingleBrand } from "@/lib/db/q
 import { findBannedTerms } from "@/lib/email/quality";
 import type { DraftMeta, EmailDraftContent } from "@/lib/db/types";
 import { logError } from "@/lib/log";
+import { getSessionUser } from "@/lib/supabase/server";
 
 export async function POST(
   req: NextRequest,
@@ -38,7 +39,9 @@ export async function POST(
     // this is the guarantee it can't ship. Re-scan the HTML that would actually
     // be approved (edits included) and refuse unless explicitly overridden.
     if (!body.force) {
-      const brand = await getSingleBrand();
+      const user = await getSessionUser();
+      if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+      const brand = await getSingleBrand(user.id);
       const terms = brand?.voice_profile?.banned_terms ?? [];
       if (terms.length) {
         const html = body.editedContent?.html ?? draftCtx.content?.html ?? "";

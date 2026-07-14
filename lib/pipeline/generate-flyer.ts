@@ -5,7 +5,11 @@ import {
   getAnthropic,
   logUsage,
 } from "@/lib/clients/anthropic";
-import { generateGeminiImage, isGeminiConfigured } from "@/lib/clients/gemini-image";
+import {
+  IMAGE_MODEL,
+  generateGeminiImage,
+  isGeminiConfigured,
+} from "@/lib/clients/gemini-image";
 import {
   getDraftWithJobContext,
   getEmailCopyForDraft,
@@ -42,7 +46,7 @@ import type {
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import type { GenerationEvent } from "./generate";
-import { logError, logWarn } from "@/lib/log";
+import { logError, logImageUsage, logWarn } from "@/lib/log";
 
 // Social flyer generation (content_jobs.type='social'): one FAST_MODEL call
 // writes the flyer copy + scene, one Gemini call renders the designed graphic
@@ -271,6 +275,11 @@ export async function regenerateFlyerImage(args: {
     reference,
   });
   usageDeltas.push({ model: FAST_MODEL, images: 1 });
+  logImageUsage("flyer-image-regenerate", IMAGE_MODEL, 1, {
+    brandId: args.ctx.brand.id,
+    draftId: args.draftId,
+    metered: true,
+  });
 
   const optimized = await optimizeFlyerImage(
     rendered.data,
@@ -320,6 +329,11 @@ async function renderFlyer(
     reference: reference ?? undefined,
   });
   opts.usageDeltas.push({ model: FAST_MODEL, images: 1 });
+  logImageUsage("flyer-image", IMAGE_MODEL, 1, {
+    brandId: ctx.brand.id,
+    draftId: opts.draftId,
+    metered: true,
+  });
 
   const optimized = await optimizeFlyerImage(
     rendered.data,
@@ -386,7 +400,11 @@ async function generateFlyerCopy(
       tools: [FLYER_COPY_TOOL],
       tool_choice: { type: "tool", name: "save_flyer_copy" },
     });
-    logUsage(label, FAST_MODEL, response.usage);
+    logUsage(label, FAST_MODEL, response.usage, {
+      brandId: ctx.brand.id,
+      metered: true,
+      requestId: response.id,
+    });
     opts.usageDeltas.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(

@@ -59,7 +59,12 @@ export async function rewriteRegion(
       tools: [REWRITE_REGION_TOOL],
       tool_choice: { type: "tool", name: "save_rewritten_text" },
     });
-    logUsage("rewrite-region", FAST_MODEL, response.usage, { draftId });
+    logUsage("rewrite-region", FAST_MODEL, response.usage, {
+      draftId,
+      brandId: ctx.brand.id,
+      metered: true,
+      requestId: response.id,
+    });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "save_rewritten_text",

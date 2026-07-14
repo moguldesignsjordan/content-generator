@@ -21,13 +21,24 @@ function isPublic(pathname: string): boolean {
 /**
  * Refreshes the Supabase auth session on every request and gates the app:
  * unauthenticated users are sent to /login; authenticated users hitting
- * /login are sent home. If Supabase isn't configured at all we pass through
- * so the app's existing "Connect Supabase" guide still renders (graceful
- * degradation), matching lib/db/client.ts.
+ * /login are sent home.
+ *
+ * Auth is mandatory in production: with billing attached, an unconfigured auth
+ * layer would mean free, unattributed AI spend. Only in development do we pass
+ * through unconfigured (so the per-page "Connect Supabase" guides still render
+ * for local first-run setup).
  */
 export async function updateSession(request: NextRequest) {
   if (!isSupabaseAuthConfigured()) {
-    return NextResponse.next({ request });
+    if (process.env.NODE_ENV === "development") {
+      return NextResponse.next({ request });
+    }
+    // Production with no auth configured: fail closed instead of serving the
+    // app (and its AI routes) to anyone.
+    return NextResponse.json(
+      { error: "Authentication is not configured." },
+      { status: 503 },
+    );
   }
 
   let supabaseResponse = NextResponse.next({ request });

@@ -43,6 +43,7 @@ const MAX_HISTORY = 10;
 // redesign within the cache window cost a fraction of full input price.
 async function attemptRedesign(
   draftId: string,
+  brandId: string,
   model: string,
   system: string,
   user: string,
@@ -55,7 +56,14 @@ async function attemptRedesign(
     tools: [REDESIGN_TOOL],
     tool_choice: { type: "tool", name: "save_redesigned_email" },
   });
-  logUsage("redesign", model, response.usage, { draftId });
+  // Metered per attempt, not per redesign: a retry is a real second call that
+  // costs real money, so the customer is charged for what was actually spent.
+  logUsage("redesign", model, response.usage, {
+    draftId,
+    brandId,
+    metered: true,
+    requestId: response.id,
+  });
   const tu = response.content.find(
     (b) => b.type === "tool_use" && b.name === "save_redesigned_email",
   );
@@ -100,9 +108,12 @@ export async function redesignEmail(
   // FAST_MODEL first (no copywriting judgment needed, just following the
   // design brief), retry once, then escalate to DRAFT_MODEL, mirroring the
   // adjust-style reliability pattern.
-  let attempt = await attemptRedesign(draftId, FAST_MODEL, system, user);
-  if ("error" in attempt) attempt = await attemptRedesign(draftId, FAST_MODEL, system, user);
-  if ("error" in attempt) attempt = await attemptRedesign(draftId, DRAFT_MODEL, system, user);
+  const brandId = ctx.brand.id;
+  let attempt = await attemptRedesign(draftId, brandId, FAST_MODEL, system, user);
+  if ("error" in attempt)
+    attempt = await attemptRedesign(draftId, brandId, FAST_MODEL, system, user);
+  if ("error" in attempt)
+    attempt = await attemptRedesign(draftId, brandId, DRAFT_MODEL, system, user);
   if ("error" in attempt) {
     return { ok: false, error: `${attempt.error} Try again.` };
   }

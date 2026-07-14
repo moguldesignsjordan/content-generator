@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/supabase/server";
 import {
   getBrandIntegrations,
   getBrandWithIcps,
@@ -25,9 +27,12 @@ export default async function SettingsPage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   let data: Awaited<ReturnType<typeof getBrandWithIcps>>;
   try {
-    data = await getBrandWithIcps();
+    data = await getBrandWithIcps(user.id);
   } catch (err) {
     return (
       <Card className="p-7">
