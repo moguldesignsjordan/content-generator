@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { regenerateEmailDraft } from "@/lib/pipeline/generate";
 import { regenerateBlogDraft } from "@/lib/pipeline/generate-blog";
 import { regenerateFlyerDraft } from "@/lib/pipeline/generate-flyer";
+import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { getDraftWithJobContext } from "@/lib/db/queries";
 import type { EmailTemplateId } from "@/lib/db/types";
 import { logError } from "@/lib/log";
@@ -39,6 +40,16 @@ export async function POST(
     const draftCtx = await getDraftWithJobContext(id);
     if (!draftCtx) {
       return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+
+    // A regenerate is a full second generation: the most expensive metered call
+    // in the app, and until now the only one with no guard in front of it.
+    const guard = await guardDraftAiRoute("generate", id, { limit: 8 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
     }
 
     if (draftCtx.jobType === "blog") {

@@ -23,12 +23,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Rate + daily-budget brake before any DB write or downstream model spend.
-  const guard = await guardAiRoute("generate", { limit: 8 });
-  if (!guard.ok) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-
   let topicId: string | undefined;
   let campaignId: string | undefined;
   let channel: "email" | "blog" = "email";
@@ -60,6 +54,19 @@ export async function POST(request: Request) {
     if (!ctx) {
       return NextResponse.json({ error: `Topic ${topicId} not found.` }, { status: 404 });
     }
+
+    // Rate + credits + daily-budget brake. Runs after the topic resolves because
+    // that's what tells us WHICH brand is paying, and before createDraftShell so
+    // a brand with no credits doesn't leave an empty draft behind that can never
+    // be generated. The real spend is guarded again in generate-stream.
+    const guard = await guardAiRoute("generate", { brandId: ctx.brand.id, limit: 8 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
+    }
+
     const draftId = await createDraftShell({
       ctx,
       campaignId,

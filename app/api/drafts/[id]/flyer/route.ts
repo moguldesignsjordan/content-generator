@@ -138,14 +138,18 @@ export async function POST(
     }
 
     // ── generate: re-render the design (the only AI-spending mode) ─────────
-    const guard = await guardAiRoute("image", { limit: 6 });
-    if (!guard.ok) {
-      return NextResponse.json({ error: guard.error }, { status: guard.status });
-    }
-
+    // Resolve the topic first: it's what tells us which brand is paying.
     const ctx = await getTopicContext(draftCtx.topicId);
     if (!ctx) {
       return NextResponse.json({ error: "Topic not found." }, { status: 404 });
+    }
+
+    const guard = await guardAiRoute("image", { brandId: ctx.brand.id, limit: 6 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
     }
 
     const headline =

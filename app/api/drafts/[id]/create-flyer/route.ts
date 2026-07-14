@@ -36,11 +36,6 @@ export async function POST(
     );
   }
 
-  const guard = await guardAiRoute("generate", { limit: 8 });
-  if (!guard.ok) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-
   const { id: sourceDraftId } = await params;
 
   const source = await getDraftWithJobContext(sourceDraftId);
@@ -54,6 +49,14 @@ export async function POST(
   const ctx = await getTopicContext(source.topicId);
   if (!ctx) {
     return NextResponse.json({ error: "Topic not found." }, { status: 404 });
+  }
+
+  const guard = await guardAiRoute("generate", { brandId: ctx.brand.id, limit: 8 });
+  if (!guard.ok) {
+    return NextResponse.json(
+      { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+      { status: guard.status },
+    );
   }
 
   try {

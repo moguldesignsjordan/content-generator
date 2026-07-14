@@ -7,6 +7,7 @@ import {
   createTopic,
   ensureDefaultCluster,
   getBrandStrategy,
+  getBrandForUser,
   getTopicContext,
 } from "@/lib/db/queries";
 import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
@@ -44,10 +45,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  // Rate + daily-budget brake before any DB write or downstream model spend.
-  const guard = await guardAiRoute("generate", { limit: 8 });
+  // Rate + credits + daily-budget brake before any DB write or model spend.
+  const brand = await getBrandForUser(user.id);
+  const guard = await guardAiRoute("generate", { brandId: brand?.id, limit: 8 });
   if (!guard.ok) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
+    return NextResponse.json(
+      { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+      { status: guard.status },
+    );
   }
 
   let topicId: string | undefined;

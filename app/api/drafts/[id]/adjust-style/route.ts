@@ -4,6 +4,7 @@ import {
   getStyleEditHistory,
   undoLastStyleEdit,
 } from "@/lib/pipeline/adjust-style";
+import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { logError } from "@/lib/log";
 
 // No thinking, no copy regeneration: comfortably faster than the full
@@ -61,6 +62,16 @@ export async function POST(
       region && regionLabel && snippet
         ? { region, label: regionLabel, snippet }
         : undefined;
+
+    // Only the POST spends: the GET (history) and the undo path are pure DB
+    // reads/writes and stay free.
+    const guard = await guardDraftAiRoute("adjust-style", id, { limit: 15 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
+    }
 
     const result = await adjustEmailStyle(id, instruction.trim(), regionCtx);
     if (!result.ok) {

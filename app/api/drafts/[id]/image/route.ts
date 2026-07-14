@@ -174,9 +174,15 @@ export async function POST(
           ? (rawUse as ReferenceUse)
           : undefined;
       // Only the generate mode spends AI money; move/upload stay unguarded.
-      const guard = await guardAiRoute("image", { limit: 6 });
+      const guard = await guardAiRoute("image", {
+        brandId: topicCtx.brand.id,
+        limit: 6,
+      });
       if (!guard.ok) {
-        return NextResponse.json({ error: guard.error }, { status: guard.status });
+        return NextResponse.json(
+          { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+          { status: guard.status },
+        );
       }
 
       const subject = (form.get("subject") as string | null)?.trim() || undefined;

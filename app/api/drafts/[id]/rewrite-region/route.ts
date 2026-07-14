@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { rewriteRegion } from "@/lib/pipeline/rewrite-region";
 import { logError } from "@/lib/log";
 
@@ -31,6 +32,14 @@ export async function POST(
       return NextResponse.json(
         { error: "Which part are you rewriting?" },
         { status: 400 },
+      );
+    }
+
+    const guard = await guardDraftAiRoute("rewrite-region", id, { limit: 15 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
       );
     }
 

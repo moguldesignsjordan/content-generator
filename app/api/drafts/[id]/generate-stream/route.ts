@@ -1,5 +1,6 @@
+import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { getDraftWithJobContext, getTopicContext } from "@/lib/db/queries";
-import { joinRun } from "@/lib/pipeline/generation-runs";
+import { isRunActive, joinRun } from "@/lib/pipeline/generation-runs";
 import type { GenerationEvent } from "@/lib/pipeline/generate";
 
 // A full generation (Claude + adaptive thinking) can take 30 to 90s; this
@@ -66,6 +67,24 @@ export async function GET(
       };
 
       try {
+        // This is where the real generation spend happens, so it's where the
+        // credit gate belongs. Guard only when this connection would START a
+        // run: a reconnecting tab (or a second tab) joining a run that's already
+        // in flight must never be turned away, or a reload mid-generation would
+        // lock the user out of watching work they already paid for.
+        if (!isRunActive(draftId)) {
+          const guard = await guardDraftAiRoute("generate", draftId, { limit: 8 });
+          if (!guard.ok) {
+            send("error", {
+              message: guard.error,
+              outOfCredits: guard.outOfCredits ?? false,
+              upgradeUrl: guard.upgradeUrl,
+            });
+            close();
+            return;
+          }
+        }
+
         const ctx = await getTopicContext(draftCtx.topicId);
         if (!ctx) throw new Error(`Topic ${draftCtx.topicId} not found`);
 

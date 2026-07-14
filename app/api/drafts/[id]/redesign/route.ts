@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { redesignEmail } from "@/lib/pipeline/redesign";
 import { logError } from "@/lib/log";
 
@@ -25,6 +26,15 @@ export async function POST(
     const { direction } = (await req.json().catch(() => ({}))) as {
       direction?: string;
     };
+
+    const guard = await guardDraftAiRoute("redesign", id, { limit: 8 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
+    }
+
     const result = await redesignEmail(id, direction?.trim() || undefined);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 502 });

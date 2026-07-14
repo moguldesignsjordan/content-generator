@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { guardAiRoute } from "@/lib/ai-guard";
 import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import {
@@ -43,6 +44,14 @@ export async function POST(
   const ctx = await getTopicContext(source.topicId);
   if (!ctx) {
     return NextResponse.json({ error: "Topic not found." }, { status: 404 });
+  }
+
+  const guard = await guardAiRoute("generate", { brandId: ctx.brand.id, limit: 8 });
+  if (!guard.ok) {
+    return NextResponse.json(
+      { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+      { status: guard.status },
+    );
   }
 
   try {
