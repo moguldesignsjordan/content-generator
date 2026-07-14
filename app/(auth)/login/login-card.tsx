@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Button, Field, Input, SegmentedControl, useToast } from "@/components/ui";
+import { signInWithPassword, type SignInState } from "@/lib/supabase/actions";
+import { Button, Checkbox, Field, Input, SegmentedControl, useToast } from "@/components/ui";
 
 type Mode = "signin" | "signup";
+
+const REMEMBERED_EMAIL_KEY = "mogul.lastEmail";
 
 export function LoginCard() {
   const router = useRouter();
@@ -18,43 +21,60 @@ export function LoginCard() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState<"pw" | "magic" | null>(null);
+  const [loading, setLoading] = useState<"signup" | "magic" | null>(null);
   const [magicSent, setMagicSent] = useState(false);
   const toast = useToast();
+
+  const [signInState, signInAction, signInPending] = useActionState<SignInState, FormData>(
+    signInWithPassword,
+    null,
+  );
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(REMEMBERED_EMAIL_KEY);
+    if (saved) setEmail(saved);
+  }, []);
+
+  useEffect(() => {
+    if (signInState?.error) toast.error(signInState.error);
+  }, [signInState, toast]);
+
+  function rememberEmail() {
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    try {
+      window.localStorage.setItem(REMEMBERED_EMAIL_KEY, trimmed);
+    } catch {
+      // Best-effort; ignore (private browsing can disable localStorage).
+    }
+  }
 
   function finish() {
     window.location.href = redirectTo;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) {
       toast.error("Enter your email and password.");
       return;
     }
-    setLoading("pw");
+    setLoading("signup");
     try {
-      const { error } =
-        mode === "signin"
-          ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-          : await supabase.auth.signUp({ email: email.trim(), password });
+      const { error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
 
-      if (mode === "signup") {
-        // signUp may return a session immediately (if confirmations off) or
-        // require email confirmation. Try to read the session.
-        const { data } = await supabase.auth.getSession();
-        if (data.session) {
-          finish();
-          return;
-        }
-        setMagicSent(true);
-        setLoading(null);
+      // signUp may return a session immediately (if confirmations off) or
+      // require email confirmation. Try to read the session.
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        finish();
         return;
       }
-      finish();
+      setMagicSent(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
       setLoading(null);
     }
   }
@@ -124,10 +144,17 @@ export function LoginCard() {
         ]}
       />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        {...(mode === "signin"
+          ? { action: signInAction }
+          : { onSubmit: handleSignup })}
+        className="space-y-4"
+      >
+        {mode === "signin" && <input type="hidden" name="redirectTo" value={redirectTo} />}
         <Field label="Email" htmlFor="email">
           <Input
             id="email"
+            name="email"
             type="email"
             autoComplete="email"
             placeholder="you@brand.com"
@@ -139,6 +166,7 @@ export function LoginCard() {
           <div className="relative">
             <Input
               id="password"
+              name="password"
               type={showPw ? "text" : "password"}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
               placeholder={mode === "signin" ? "Your password" : "Choose a password"}
@@ -158,7 +186,11 @@ export function LoginCard() {
         </Field>
 
         {mode === "signin" && (
-          <div className="text-right">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 text-[12px] font-medium text-muted">
+              <Checkbox name="remember" size="sm" defaultChecked />
+              Remember me
+            </label>
             <button
               type="button"
               onClick={() => router.push("/forgot-password")}
@@ -173,7 +205,8 @@ export function LoginCard() {
           type="submit"
           variant="gradient"
           size="lg"
-          loading={loading === "pw"}
+          loading={mode === "signin" ? signInPending : loading === "signup"}
+          onClick={mode === "signin" ? rememberEmail : undefined}
           className="w-full"
         >
           {mode === "signin" ? "Sign in" : "Create account"}
