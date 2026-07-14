@@ -25,6 +25,11 @@ export interface VoiceExample {
   content: string;
 }
 
+// Brand-level email length preference: scales the per-type word budgets in
+// prompts/generate-email.ts (see resolveLengthTarget). "standard" (or unset)
+// keeps the base EMAIL_LENGTH_TARGETS ranges.
+export type EmailLengthPreference = "short" | "standard" | "long";
+
 export interface VoiceProfile {
   voice?: string;
   tone?: string;
@@ -32,6 +37,7 @@ export interface VoiceProfile {
   examples?: VoiceExample[];
   banned_terms?: string[];
   cta_library?: Record<string, string>;
+  email_length?: EmailLengthPreference;
 }
 
 // ── Visual identity: deterministic tokens the email templates render ────────
@@ -305,6 +311,10 @@ export interface CampaignBrief {
   constraints?: string;
   /** Per-piece tone override; unset means the stored brand voice as-is. */
   tone?: string;
+  /** Full text of an example email the user pasted for THIS piece: generation
+   * matches its length, structure, and register, never its content. Kept
+   * verbatim (no em-dash stripping): it's the user's own reference material. */
+  style_example?: string;
 }
 
 /** One draft created as part of a multi-email series (plan_series), kept in
@@ -352,6 +362,9 @@ export interface TopicContext {
   strategy: Strategy;
   primaryIcp: Icp | null;
   product: Product | null;
+  /** The brand's reference email library (migration 015), newest first.
+   * Optional so pre-migration DBs and older call sites degrade to "none". */
+  referenceEmails?: ReferenceEmail[];
 }
 
 // What we store in drafts.content for an email draft.
@@ -565,6 +578,32 @@ export interface StyleReference {
   image_url: string;
   storage_path: string;
   notes: string | null;
+  created_at: string;
+}
+
+// ── Reference emails (migration 015) ────────────────────────────────────────
+
+/** The style traits Claude distills from one uploaded reference email
+ * (prompts/extract-style.ts). Injected into generation instead of re-analyzing
+ * the raw email on every draft. */
+export interface ReferenceEmailStyleProfile {
+  /** 2-3 sentences describing how this email is written. */
+  summary: string;
+  /** Short imperative style rules generation should follow, e.g.
+   * "Open with a one-line hook, no greeting". */
+  traits: string[];
+  /** Approximate body word count of the reference. */
+  approx_words?: number;
+}
+
+/** One row of reference_emails: a full email the user provided as "write like
+ * this", stored raw plus its distilled style profile. */
+export interface ReferenceEmail {
+  id: string;
+  brand_id: string;
+  name: string;
+  content: string;
+  style_profile: ReferenceEmailStyleProfile | null;
   created_at: string;
 }
 

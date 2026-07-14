@@ -4,6 +4,7 @@ import type {
   CampaignBrief,
   Icp,
   Product,
+  ReferenceEmail,
   Strategy,
   Topic,
   VoiceExampleChannel,
@@ -122,6 +123,56 @@ export function buildGuidelinesBlock(brand: Brand): string {
     lines.push(`  Never say things like: ${g.dont_language.join("; ")}`);
   }
   if (g.cta_philosophy) lines.push(`  Calls to action: ${g.cta_philosophy}`);
+  return lines.join("\n");
+}
+
+// How much of each raw reference email gets injected. Two full examples at
+// this size is plenty to imitate; more would bloat every generation prompt.
+const MAX_REFERENCE_CHARS = 2500;
+const MAX_FULL_REFERENCES = 2;
+
+/**
+ * Builds the reference-email block (migration 015): every stored reference's
+ * distilled style traits, plus the newest 1-2 raw emails in full so the model
+ * has something concrete to imitate, not just rules about it. Empty string
+ * when the library is empty, so callers' .filter(Boolean) drops it cleanly.
+ */
+export function buildReferenceEmailsBlock(
+  refs: ReferenceEmail[] | undefined,
+): string {
+  if (!refs?.length) return "";
+
+  const lines: string[] = [
+    "REFERENCE EMAILS (the user uploaded these as \"write my emails like",
+    "this\". Match their LENGTH, structure, rhythm, and register faithfully;",
+    "never their topic or wording. When these conflict with the voice",
+    "description above, the reference emails win: they are the ground truth",
+    "for how the finished email should read.):",
+  ];
+
+  for (const ref of refs) {
+    const p = ref.style_profile;
+    if (!p) continue;
+    lines.push("");
+    lines.push(
+      `  "${ref.name}"${p.approx_words ? ` (~${p.approx_words} words)` : ""}: ${p.summary}`,
+    );
+    for (const trait of p.traits ?? []) lines.push(`    - ${trait}`);
+  }
+
+  const full = refs.slice(0, MAX_FULL_REFERENCES);
+  for (let i = 0; i < full.length; i++) {
+    const body =
+      full[i].content.length > MAX_REFERENCE_CHARS
+        ? full[i].content.slice(0, MAX_REFERENCE_CHARS) + "\n  [truncated]"
+        : full[i].content;
+    lines.push("");
+    lines.push(`  FULL REFERENCE ${i + 1} of ${full.length} ("${full[i].name}"):`);
+    lines.push("  ---");
+    lines.push(body);
+    lines.push("  ---");
+  }
+
   return lines.join("\n");
 }
 
@@ -244,6 +295,9 @@ export function buildBriefStateBlock(
     `  Offer: ${brief.offer_slug ?? "(not set)"}`,
     `  Constraints: ${brief.constraints ?? "(none)"}`,
     `  Tone: ${brief.tone ?? "(brand voice as-is)"}`,
+    // Presence only: re-injecting the full example every turn would bloat the
+    // message; generation reads the real text via buildCampaignBriefBlock.
+    `  Style example: ${brief.style_example ? "attached (an email to emulate)" : "(none)"}`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }
@@ -263,6 +317,20 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
     lines.push(
       `  Tone for this piece: ${brief.tone} (shade the brand voice this way; it does not replace it)`,
     );
+  if (brief.style_example) {
+    const body =
+      brief.style_example.length > 3000
+        ? brief.style_example.slice(0, 3000) + "\n  [truncated]"
+        : brief.style_example;
+    lines.push(
+      "  STYLE EXAMPLE for THIS piece (the user provided this as \"make mine read",
+      "  like this\". Match its length, structure, rhythm, and register; NEVER",
+      "  copy its topic or wording. For style, it outranks every default above.):",
+      "  ---",
+      body,
+      "  ---",
+    );
+  }
   if (!lines.length) return "";
   return ["CAMPAIGN BRIEF (from the strategy conversation; serve this):", ...lines].join(
     "\n",

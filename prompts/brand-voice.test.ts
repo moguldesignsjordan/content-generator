@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildKeywordLines } from "./brand-voice";
+import type { ReferenceEmail } from "@/lib/db/types";
+import {
+  buildCampaignBriefBlock,
+  buildKeywordLines,
+  buildReferenceEmailsBlock,
+} from "./brand-voice";
 
 describe("buildKeywordLines", () => {
   it("falls back to the raw topic fields when the topic hasn't been researched", () => {
@@ -69,5 +74,80 @@ describe("buildKeywordLines", () => {
     expect(lines).toEqual([
       "TARGET KEYWORD (DataForSEO-validated): b2b newsletter ideas (~210/mo searches)",
     ]);
+  });
+});
+
+function makeReference(overrides: Partial<ReferenceEmail> = {}): ReferenceEmail {
+  return {
+    id: "r1",
+    brand_id: "b1",
+    name: "April promo",
+    content: "Hey there,\n\nShort and punchy body.\n\nJordan",
+    style_profile: {
+      summary: "Short, casual, first-person notes with one plain CTA.",
+      traits: ["Open with a one-line hook", "Keep paragraphs to 1-2 sentences"],
+      approx_words: 120,
+    },
+    created_at: "2026-07-13T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("buildReferenceEmailsBlock", () => {
+  it("returns an empty string when the library is empty or missing", () => {
+    expect(buildReferenceEmailsBlock(undefined)).toBe("");
+    expect(buildReferenceEmailsBlock([])).toBe("");
+  });
+
+  it("includes distilled traits and the raw email body", () => {
+    const block = buildReferenceEmailsBlock([makeReference()]);
+    expect(block).toContain("REFERENCE EMAILS");
+    expect(block).toContain("Short, casual, first-person notes");
+    expect(block).toContain("- Open with a one-line hook");
+    expect(block).toContain("Short and punchy body.");
+    expect(block).toContain("~120 words");
+  });
+
+  it("skips the traits section for a row whose extraction failed, but keeps its raw text", () => {
+    const block = buildReferenceEmailsBlock([
+      makeReference({ style_profile: null, content: "Raw only body text." }),
+    ]);
+    expect(block).toContain("Raw only body text.");
+  });
+
+  it("injects at most two full reference bodies", () => {
+    const refs = [1, 2, 3].map((n) =>
+      makeReference({ id: `r${n}`, name: `Ref ${n}`, content: `BODY_${n}` }),
+    );
+    const block = buildReferenceEmailsBlock(refs);
+    expect(block).toContain("BODY_1");
+    expect(block).toContain("BODY_2");
+    expect(block).not.toContain("BODY_3");
+  });
+
+  it("truncates an oversized reference body", () => {
+    const block = buildReferenceEmailsBlock([
+      makeReference({ content: "x".repeat(5000) }),
+    ]);
+    expect(block).toContain("[truncated]");
+    expect(block.length).toBeLessThan(5000);
+  });
+});
+
+describe("buildCampaignBriefBlock style_example", () => {
+  it("injects the per-piece style example with the match-style instruction", () => {
+    const block = buildCampaignBriefBlock({
+      goal: "Book calls",
+      style_example: "Subject: hi\n\nA tiny example email.",
+    });
+    expect(block).toContain("STYLE EXAMPLE");
+    expect(block).toContain("A tiny example email.");
+    expect(block).toContain("NEVER");
+  });
+
+  it("omits the style section when no example was given", () => {
+    expect(buildCampaignBriefBlock({ goal: "Book calls" })).not.toContain(
+      "STYLE EXAMPLE",
+    );
   });
 });

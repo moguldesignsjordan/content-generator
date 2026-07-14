@@ -25,11 +25,13 @@ import { FunnelForm } from "./funnel-form";
 import { IcpForm } from "./icp-form";
 import { ConnectionForm } from "./connection-form";
 import { SchedulesForm } from "./schedules-form";
+import { ReferenceEmailsForm } from "./reference-emails-form";
 
 type SectionKey =
   | "import"
   | "basics"
   | "voice"
+  | "references"
   | "positioning"
   | "visual"
   | "guidelines"
@@ -92,6 +94,11 @@ export function SettingsClient({
           title="Voice"
           subtitle="Personality and guardrails for every draft"
           onClick={() => setOpen("voice")}
+        />
+        <ListRow
+          title="Reference emails"
+          subtitle="Paste emails you love; new drafts match their style and length"
+          onClick={() => setOpen("references")}
         />
         <ListRow
           title="Positioning"
@@ -218,6 +225,16 @@ export function SettingsClient({
           brandId={brand.id}
           voiceProfile={brand.voice_profile}
         />
+      </Sheet>
+
+      <Sheet
+        open={open === "references"}
+        onClose={close}
+        title="Reference emails"
+        description="Full emails you want yours to read like. Each one is analyzed once; every new draft then matches the style, length, and rhythm."
+        size="xl"
+      >
+        <ReferenceEmailsForm />
       </Sheet>
 
       <Sheet

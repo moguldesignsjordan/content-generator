@@ -13,6 +13,7 @@ import {
   resolveEmailLayout,
   resolveEmailTemplateId,
   resolveEmailType,
+  resolveLengthTarget,
 } from "./generate-email";
 
 // Minimal topic factory: only the fields resolveEmailType reads (funnel_stage,
@@ -216,5 +217,49 @@ describe("EMAIL_LENGTH_TARGETS", () => {
     expect(EMAIL_LENGTH_TARGETS.newsletter.words[0]).toBeGreaterThan(
       EMAIL_LENGTH_TARGETS.promotional.words[1],
     );
+  });
+});
+
+describe("resolveLengthTarget", () => {
+  const types = ["newsletter", "product", "service", "promotional", "announcement"] as const;
+
+  it("returns the base target untouched for standard or unset preference", () => {
+    expect(resolveLengthTarget("newsletter", undefined)).toEqual(
+      EMAIL_LENGTH_TARGETS.newsletter,
+    );
+    expect(resolveLengthTarget("newsletter", "standard")).toEqual(
+      EMAIL_LENGTH_TARGETS.newsletter,
+    );
+  });
+
+  it("roughly halves the word budget for short, for every type, keeping order", () => {
+    for (const t of types) {
+      const base = EMAIL_LENGTH_TARGETS[t];
+      const short = resolveLengthTarget(t, "short");
+      expect(short.words[0]).toBeLessThan(base.words[0]);
+      expect(short.words[1]).toBeLessThan(base.words[1]);
+      expect(short.words[0]).toBeLessThan(short.words[1]);
+      expect(short.sections[0]).toBeLessThanOrEqual(short.sections[1]);
+    }
+  });
+
+  it("stretches the budget for long without shrinking sections", () => {
+    for (const t of types) {
+      const base = EMAIL_LENGTH_TARGETS[t];
+      const long = resolveLengthTarget(t, "long");
+      expect(long.words[0]).toBeGreaterThan(base.words[0]);
+      expect(long.words[1]).toBeGreaterThan(base.words[1]);
+      expect(long.sections).toEqual(base.sections);
+    }
+  });
+
+  it("appends the preference to the directive so the model hears the why", () => {
+    expect(resolveLengthTarget("newsletter", "short").directive).toContain("SHORT");
+    expect(resolveLengthTarget("newsletter", "long").directive).toContain("LONGER");
+  });
+
+  it("never drops below the 50-word floor on the tightest type", () => {
+    const short = resolveLengthTarget("promotional", "short");
+    expect(short.words[0]).toBeGreaterThanOrEqual(50);
   });
 });

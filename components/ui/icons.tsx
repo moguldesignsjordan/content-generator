@@ -97,6 +97,12 @@ export const MegaphoneIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const PaperclipIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m21 11.5-8.9 8.9a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.67 3.67 0 0 1 5.2 5.2l-8.9 8.9a1.83 1.83 0 0 1-2.6-2.6l8.2-8.2" />
+  </Svg>
+);
+
 export const SendIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4.5 12 20 4l-5 16-3.5-6.5z" />

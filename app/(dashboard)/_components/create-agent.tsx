@@ -16,6 +16,7 @@ import {
   BlogIcon,
   MailIcon,
   MegaphoneIcon,
+  PaperclipIcon,
   PlusIcon,
   SendIcon,
 } from "@/components/ui/icons";
@@ -156,6 +157,39 @@ export function CreateAgent({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Attach an example email (.txt/.html/.eml…) into the composer as text: the
+  // agent saves it to the brief as style_example so generation matches how it
+  // reads. HTML exports are flattened client-side so the chat never sees soup.
+  function handleAttachFile(file: File) {
+    file
+      .text()
+      .then((raw) => {
+        let text = raw;
+        if (/<[a-z][^>]*>/i.test(raw)) {
+          const doc = new DOMParser().parseFromString(raw, "text/html");
+          text = doc.body?.textContent ?? raw;
+        }
+        text = text
+          .replace(/\r\n/g, "\n")
+          .replace(/[ \t]{2,}/g, " ")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim()
+          .slice(0, 8000);
+        if (!text) {
+          toast.error("That file looks empty.");
+          return;
+        }
+        setInput(
+          (cur) =>
+            (cur.trim() ? cur.trimEnd() + "\n\n" : "") +
+            "Here's an example email I want mine to read like (match its style, not its content):\n\n" +
+            text,
+        );
+        inputRef.current?.focus();
+      })
+      .catch(() => toast.error("Couldn't read that file."));
+  }
 
   const empty = messages.length === 0;
 
@@ -337,6 +371,7 @@ export function CreateAgent({
               }}
               onSend={() => send(input)}
               onPlus={() => setActionsOpen((v) => !v)}
+              onAttachFile={handleAttachFile}
               ready={ready}
               disabled={loading || generating}
               placeholderCycle={PROMPT_IDEAS[phIndex]}
@@ -442,6 +477,7 @@ export function CreateAgent({
                 }
               }}
               onSend={() => send(input)}
+              onAttachFile={handleAttachFile}
               ready={ready}
               disabled={loading || generating}
             />
@@ -459,6 +495,7 @@ function ComposerBar({
   onKeyDown,
   onSend,
   onPlus,
+  onAttachFile,
   ready,
   disabled,
   placeholderCycle,
@@ -469,12 +506,16 @@ function ComposerBar({
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
   onPlus?: () => void;
+  /** Attach a text/HTML/eml file whose contents drop into the composer as an
+   * example email for the agent to save as the brief's style_example. */
+  onAttachFile?: (file: File) => void;
   ready: boolean;
   disabled: boolean;
   /** When set (landing), the placeholder cycles through example prompts as a
    * faded-in overlay; the native placeholder is suppressed in its favor. */
   placeholderCycle?: string;
 }) {
+  const attachRef = useRef<HTMLInputElement>(null);
   const cycling = placeholderCycle !== undefined && !ready;
   const hasText = Boolean(input.trim());
   return (
@@ -488,6 +529,30 @@ function ComposerBar({
         >
           <PlusIcon size={20} />
         </button>
+      )}
+      {onAttachFile && (
+        <>
+          <button
+            type="button"
+            onClick={() => attachRef.current?.click()}
+            aria-label="Attach an example email to match its style"
+            title="Attach an example email"
+            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+          >
+            <PaperclipIcon size={18} />
+          </button>
+          <input
+            ref={attachRef}
+            type="file"
+            accept=".txt,.md,.html,.htm,.eml"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onAttachFile(file);
+              e.target.value = "";
+            }}
+          />
+        </>
       )}
       <div className="relative min-w-0 flex-1 self-center">
         <textarea

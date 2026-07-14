@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Field, Textarea, useToast } from "@/components/ui";
-import type { VoiceProfile } from "@/lib/db/types";
+import {
+  Button,
+  Card,
+  Field,
+  SegmentedControl,
+  Textarea,
+  useToast,
+} from "@/components/ui";
+import type { EmailLengthPreference, VoiceProfile } from "@/lib/db/types";
 import { ListInput } from "./list-input";
 
 interface BrandVoiceFormProps {
@@ -18,6 +25,9 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
   );
   const [bannedTerms, setBannedTerms] = useState<string[]>(
     voiceProfile.banned_terms ?? [],
+  );
+  const [emailLength, setEmailLength] = useState<EmailLengthPreference>(
+    voiceProfile.email_length ?? "standard",
   );
   const [ctaLibrary, setCtaLibrary] = useState({
     newsletter_signup: voiceProfile.cta_library?.newsletter_signup ?? "",
@@ -38,6 +48,7 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
         example_posts: examplePosts.filter(Boolean),
         banned_terms: bannedTerms.filter(Boolean),
         cta_library: ctaLibrary,
+        email_length: emailLength,
       };
       const res = await fetch("/api/settings/brand-voice", {
         method: "PATCH",
@@ -71,6 +82,21 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
           rows={2}
           value={tone}
           onChange={(e) => setTone(e.target.value)}
+        />
+      </Field>
+
+      <Field
+        label="Email length"
+        hint="How long generated emails run. Short roughly halves the word budget; every draft is still checked against it."
+      >
+        <SegmentedControl
+          value={emailLength}
+          onChange={setEmailLength}
+          options={[
+            { value: "short", label: "Short" },
+            { value: "standard", label: "Standard" },
+            { value: "long", label: "Long" },
+          ]}
         />
       </Field>
 

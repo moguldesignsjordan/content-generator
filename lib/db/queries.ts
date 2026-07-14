@@ -41,6 +41,8 @@ import type {
   Positioning,
   Product,
   PublicationRecord,
+  ReferenceEmail,
+  ReferenceEmailStyleProfile,
   BrandIntegration,
   SeoDefaults,
   Strategy,
@@ -203,12 +205,17 @@ export async function getTopicContext(
     product = (productRow as Product) ?? null;
   }
 
+  // The reference email library steers every email's style; a pre-migration-
+  // 015 DB just means an empty library, never a broken generation.
+  const referenceEmails = await listReferenceEmails(brand.id);
+
   return {
     topic: topic as Topic,
     brand: brand as Brand,
     strategy: strategy as Strategy,
     primaryIcp: (icps?.[0] as Icp) ?? null,
     product,
+    referenceEmails,
   };
 }
 
@@ -1902,6 +1909,52 @@ export async function createStyleReference(args: {
 export async function deleteStyleReference(id: string): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("style_references").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Reference emails (migration 015) ────────────────────────────────────────
+
+export async function listReferenceEmails(
+  brandId: string,
+): Promise<ReferenceEmail[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("reference_emails")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    // Pre-migration-015 DBs have no table yet; the library is just empty.
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as ReferenceEmail[];
+}
+
+export async function createReferenceEmail(args: {
+  brandId: string;
+  name: string;
+  content: string;
+  styleProfile: ReferenceEmailStyleProfile | null;
+}): Promise<ReferenceEmail> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("reference_emails")
+    .insert({
+      brand_id: args.brandId,
+      name: args.name.trim(),
+      content: args.content,
+      style_profile: args.styleProfile,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as ReferenceEmail;
+}
+
+export async function deleteReferenceEmail(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("reference_emails").delete().eq("id", id);
   if (error) throw error;
 }
 

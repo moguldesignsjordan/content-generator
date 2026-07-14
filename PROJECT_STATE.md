@@ -664,6 +664,59 @@ confirm the dashboard chat now starts blank after logging back in.
   roles (`owner`/`editor`/`viewer`) later; that roadmap's `brand_members`
   table is unrelated to this one and not built yet.
 
+## Session 2026-07-13: style context — reference emails, length control, chat style examples
+
+Jordan's feedback after the print-product campaign: emails came out too wordy
+and off-voice, and there was no way to hand the engine an example email to
+match. Three features shipped together (typecheck + 194 tests + build green;
+uncommitted; **migration 015 not yet applied**):
+
+1. **Reference email library** (`db/migrations/015_reference_emails.sql`,
+   `reference_emails` table). Settings → "Reference emails": paste or upload
+   (.txt/.md/.html/.eml) a full email you want yours to read like. On save,
+   `lib/pipeline/extract-style.ts` runs ONE Claude call (DRAFT_MODEL, forced
+   `save_style_profile` tool) distilling summary/traits/approx_words into
+   `style_profile` jsonb; extraction failure still saves the raw email
+   (non-fatal by design). `getTopicContext` now loads the library
+   (missing-table degrades to empty), and `buildReferenceEmailsBlock`
+   (prompts/brand-voice.ts) injects all rows' traits + the 2 newest raw
+   emails (2500 chars each) into every email generation's system prompt,
+   with "references outrank the voice description for style". API:
+   `/api/reference-emails` (GET/POST, maxDuration 60) + `[id]` DELETE.
+2. **Email length preference** (`voice_profile.email_length`:
+   short/standard/long, no migration needed). Settings → Voice → segmented
+   control. `resolveLengthTarget` (prompts/generate-email.ts) scales the
+   per-type word budgets (~55% for short, 130% for long, 50-word floor;
+   short also drops one section off the ceiling) and appends the why to the
+   directive. `buildEmailMessages` now RETURNS `lengthTarget`; both
+   generate.ts callsites (fresh + regenerate) and the QA length check use
+   it, so prompt, too-short retry, and QA all agree. Key context: the old
+   system only enforced a MINIMUM (retry-if-short), which is why emails ran
+   long.
+3. **Per-piece style example in chat** (`brief.style_example`). The create
+   agent's stage 4 is now TONE AND STYLE: it invites pasting a whole email
+   ("theirs or anyone's") and saves it VERBATIM via
+   `update_brief.style_example` (new tool field; both create + campaign
+   routes' `mergeBrief` flatten HTML via `emailHtmlToText` in lib/text.ts,
+   cap 8000 chars, and deliberately DON'T strip em-dashes, it's the user's
+   own reference). `buildCampaignBriefBlock` injects it (3000-char cap) with
+   match-style-never-content instructions; `plan_series` carries it into
+   every `series_brief`. Brief-state block shows presence only (token
+   thrift). ComposerBar grew a paperclip attach (new `PaperclipIcon`):
+   reads the file client-side, flattens HTML via DOMParser, drops it into
+   the input prefixed "Here's an example email I want mine to read like".
+
+Still open from this session:
+- **Apply `db/migrations/015_reference_emails.sql`** in the Supabase SQL
+  editor (app degrades gracefully until then: empty library).
+- Live click-through: add a reference email in Settings (watch the
+  "Analyzing style…" save), set length to Short, generate an email, confirm
+  it's tighter and echoes the reference's rhythm; paste an example email in
+  the create chat and confirm the agent saves it as style_example (brief
+  tool result says "attached").
+- Brief card UI doesn't show/clear style_example (model-side only); add a
+  row later if Jordan wants to see/remove it per piece.
+
 ## Next step (backlog, still open)
 
 1. Apply `db/migrations/013_user_roles.sql` in the Supabase SQL editor, then

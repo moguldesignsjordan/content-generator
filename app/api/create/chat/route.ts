@@ -56,7 +56,7 @@ import {
 } from "@/prompts/create-agent";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
-import { stripEmDashes } from "@/lib/text";
+import { emailHtmlToText, stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
@@ -360,6 +360,11 @@ async function dispatchTool(
       )
         .filter((k) => typeof input[k] === "string" && input[k]!.trim())
         .map((k) => `${k}=${state.brief[k]}`);
+      // Presence only: echoing the whole pasted email back as a tool result
+      // would just re-spend its tokens.
+      if (typeof input.style_example === "string" && input.style_example.trim()) {
+        saved.push("style_example=(attached, generation will match its style)");
+      }
       return saved.length ? `Saved: ${saved.join("; ")}` : "No new fields to save.";
     }
     case "select_topic": {
@@ -476,6 +481,9 @@ async function dispatchTool(
             ...(state.brief.constraints
               ? { constraints: state.brief.constraints }
               : {}),
+            ...(state.brief.style_example
+              ? { style_example: state.brief.style_example }
+              : {}),
             ...(item.key_message ? { key_message: item.key_message } : {}),
             ...(item.angle ? { angle: item.angle } : {}),
             ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
@@ -580,6 +588,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     if (typeof value === "string" && value.trim()) {
       next[key] = stripEmDashes(value.trim());
     }
+  }
+  // Kept verbatim (no em-dash stripping): it's the user's own reference
+  // email, not copy this engine produced. Flattened and capped so a pasted
+  // HTML export or thread can't balloon the stored brief.
+  if (typeof input.style_example === "string" && input.style_example.trim()) {
+    next.style_example = emailHtmlToText(input.style_example).slice(0, 8000);
   }
   return next;
 }

@@ -29,6 +29,7 @@ export interface UpdateBriefInput {
   angle?: string;
   constraints?: string;
   tone?: string;
+  style_example?: string;
 }
 
 export interface SelectTopicInput {
@@ -87,6 +88,15 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         description:
           "Tone adjustment for THIS piece only (e.g. more playful, urgent, " +
           "formal). Leave unset to write in the stored brand voice as-is.",
+      },
+      style_example: {
+        type: "string",
+        description:
+          "When the user pastes a whole email as an example of how they want " +
+          "theirs to READ (its style, length, structure), pass that email " +
+          "VERBATIM here. Generation will match its style, never its content. " +
+          "Not for notes, offers, or rough drafts of the piece itself: those " +
+          "belong in key_message/angle/constraints.",
       },
     },
   },
@@ -290,6 +300,10 @@ export function buildCampaignSystem(args: {
     "- Ask ONE focused question at a time (two only when tightly related). Short turns.",
     "- Acknowledge answers briefly and specifically; never re-ask what's stored or in the brief.",
     "- When an answer gives brief data, call update_brief with exactly those fields.",
+    "- If the user pastes a whole email as an example of how they want theirs to",
+    "  read, save it VERBATIM with update_brief.style_example (generation matches",
+    "  its style, never its content). Offer this once when discussing tone:",
+    "  they can paste an email they love, theirs or anyone's.",
     "- Once you understand the goal, call suggest_options with 1 to 3 fitting topics",
     "  from the list (kind: \"topic\", id = the topic's exact id, label = its title) so",
     "  the user can tap one instead of typing it out. When the user picks one (by tap",

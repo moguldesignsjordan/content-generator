@@ -21,7 +21,6 @@ import {
 import {
   EMAIL_TOOL,
   EmailDraftSchema,
-  EMAIL_LENGTH_TARGETS,
   buildEmailMessages,
   countEmailWords,
   type EmailDraftOutput,
@@ -103,18 +102,14 @@ export async function generateEmailForTopicStreamed(
       opts.seedIndex === undefined
         ? await getRecentEmailStyleVariants(ctx.brand.id)
         : { styles: [], layouts: [] };
-    const { system, user, emailType, templateId, styleId } = buildEmailMessages(
-      ctx,
-      tokens,
-      {
+    const { system, user, emailType, templateId, styleId, lengthTarget } =
+      buildEmailMessages(ctx, tokens, {
         brief,
         emailTypeOverride: opts.emailTypeOverride,
         seedIndex: opts.seedIndex,
         recentStyles: recent.styles,
         recentLayouts: recent.layouts,
-      },
-    );
-    const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
+      });
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
       lengthTarget,
       emailType,
@@ -598,10 +593,8 @@ export async function regenerateEmailDraft(
   // style (like the hero image above) instead of rotating again. An explicit
   // opts.templateOverride (the reviewer picked a different layout in the UI)
   // still wins over the stored one. Only a FRESH generation rotates.
-  const { system, user, emailType, templateId, styleId } = buildEmailMessages(
-    ctx,
-    tokens,
-    {
+  const { system, user, emailType, templateId, styleId, lengthTarget } =
+    buildEmailMessages(ctx, tokens, {
       brief,
       templateOverride: opts.templateOverride ?? draftCtx.meta.email_template_id,
       styleOverride: draftCtx.meta.email_style_variant,
@@ -612,9 +605,7 @@ export async function regenerateEmailDraft(
         previousSubject: draftCtx.content.subject,
         previousPreheader: draftCtx.content.preheader,
       },
-    },
-  );
-  const lengthTarget = EMAIL_LENGTH_TARGETS[emailType];
+    });
 
   const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
     lengthTarget,

@@ -38,7 +38,7 @@ import {
   type VoiceProposals,
 } from "@/prompts/campaign";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
-import { stripEmDashes } from "@/lib/text";
+import { emailHtmlToText, stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A chat turn is short, but give the strategist headroom for thinking.
@@ -378,6 +378,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     if (typeof value === "string" && value.trim()) {
       next[key] = stripEmDashes(value.trim());
     }
+  }
+  // Kept verbatim (no em-dash stripping): it's the user's own reference
+  // email, not copy this engine produced. Flattened and capped so a pasted
+  // HTML export or thread can't balloon the stored brief.
+  if (typeof input.style_example === "string" && input.style_example.trim()) {
+    next.style_example = emailHtmlToText(input.style_example).slice(0, 8000);
   }
   return next;
 }

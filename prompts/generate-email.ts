@@ -3,6 +3,7 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   CampaignBrief,
   ContentImage,
+  EmailLengthPreference,
   EmailStyleId,
   EmailTemplateId,
   EmailType,
@@ -17,6 +18,7 @@ import {
   buildGuidelinesBlock,
   buildKeywordLines,
   buildPositioningBlock,
+  buildReferenceEmailsBlock,
 } from "./brand-voice";
 import { buildEmailDesignBrief } from "./email-design";
 import { EMAIL_STYLES, pickEmailStyle, pickRotation } from "./email-styles";
@@ -260,6 +262,39 @@ export const EMAIL_LENGTH_TARGETS: Record<EmailType, EmailLengthTarget> = {
   },
 };
 
+/**
+ * Applies the brand's email-length preference (Settings → Voice) to the base
+ * per-type budget. "short" roughly halves the word range (Jordan's "too many
+ * words" lever), "long" stretches it ~30%; both keep the type's shape and
+ * intent. The result flows everywhere EMAIL_LENGTH_TARGETS used to: the
+ * prompt's hard constraint, the too-short retry, and the QA length check, so
+ * the whole pipeline agrees on one target.
+ */
+export function resolveLengthTarget(
+  emailType: EmailType,
+  pref: EmailLengthPreference | undefined,
+): EmailLengthTarget {
+  const base = EMAIL_LENGTH_TARGETS[emailType];
+  if (!pref || pref === "standard") return base;
+
+  const scale = pref === "short" ? 0.55 : 1.3;
+  const scaled = (n: number) => Math.max(50, Math.round((n * scale) / 10) * 10);
+  const words: [number, number] = [scaled(base.words[0]), scaled(base.words[1])];
+  // Short emails also drop a section off the ceiling so the budget cut comes
+  // from fewer ideas, not the same outline starved of words.
+  const sections: [number, number] =
+    pref === "short"
+      ? [base.sections[0], Math.max(base.sections[0], base.sections[1] - 1)]
+      : base.sections;
+  const directive =
+    base.directive +
+    (pref === "short"
+      ? " The user prefers SHORT emails: tight and skimmable, every sentence earns its place. Stay near the bottom of the word range and cut anything that does not serve the one core idea."
+      : " The user prefers LONGER, meatier emails: use the extra room for depth (examples, reasoning, specifics), never for filler.");
+
+  return { words, sections, directive };
+}
+
 // Service-y keywords in a product name/description. Agency brands (Mogul
 // included) sell services far more often than products, so a mapped offer that
 // reads like a service is typed as `service` (its own length budget) rather
@@ -405,11 +440,13 @@ export function buildEmailMessages(
   emailType: EmailType;
   templateId: EmailTemplateId;
   styleId: EmailStyleId;
+  lengthTarget: EmailLengthTarget;
 } {
   const { topic, brand } = ctx;
   const guidelinesBlock = buildGuidelinesBlock(brand);
   const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "email");
   const positioningBlock = buildPositioningBlock(brand);
+  const referenceBlock = buildReferenceEmailsBlock(ctx.referenceEmails);
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const { ctaText } = resolveCta(ctx);
   const emailType = resolveEmailType(topic, {
@@ -417,7 +454,7 @@ export function buildEmailMessages(
     product: ctx.product,
     override: opts.emailTypeOverride,
   });
-  const length = EMAIL_LENGTH_TARGETS[emailType];
+  const length = resolveLengthTarget(emailType, brand.voice_profile?.email_length);
   const templateId =
     opts.templateOverride ??
     resolveEmailLayout(emailType, topic, {
@@ -440,6 +477,7 @@ export function buildEmailMessages(
     guidelinesBlock,
     voiceBlock,
     positioningBlock,
+    referenceBlock,
     "",
     designBrief,
     "",
@@ -508,5 +546,5 @@ export function buildEmailMessages(
     .filter(Boolean)
     .join("\n");
 
-  return { system, user, emailType, templateId, styleId };
+  return { system, user, emailType, templateId, styleId, lengthTarget: length };
 }
