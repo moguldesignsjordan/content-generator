@@ -11,6 +11,27 @@ export function stripEmDashes(text: string): string {
 }
 
 /**
+ * Joins the text blocks of one agent turn into the single message the user
+ * reads. A turn can span several tool round-trips, each contributing its own
+ * text block, so concatenating them raw produced two bugs the chat actually
+ * shipped: no separator ("Got it!Who is this email for?") and the same question
+ * emitted twice across steps, printed twice.
+ *
+ * Blank segments are dropped, repeats are dropped (the model re-stating its
+ * question after a tool result is not new information), and what's left is
+ * separated by a blank line.
+ */
+export function joinReplySegments(segments: string[]): string {
+  const kept: string[] = [];
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (!trimmed || kept.includes(trimmed)) continue;
+    kept.push(trimmed);
+  }
+  return kept.join("\n\n");
+}
+
+/**
  * Strips markdown emphasis and heading syntax from text that will be shown as
  * PLAIN text: the chat bubbles and the email/flyer copy fields, which are
  * rendered literally, so a stray ** reaches the reader as two asterisks. The

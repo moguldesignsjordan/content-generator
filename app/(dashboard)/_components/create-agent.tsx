@@ -593,9 +593,11 @@ function ComposerBar({
           <input
             ref={attachRef}
             type="file"
-            // Text-ish files become "write like this"; images become "look like
-            // this" (uploaded to the email design library).
-            accept=".txt,.md,.html,.htm,.eml,image/png,image/jpeg,image/webp"
+            // image/* first and unrestricted: a phone screenshot can be HEIC,
+            // and naming only png/jpeg/webp made the picker grey out real
+            // photos. Text-ish files become "write like this"; images become
+            // "look like this" (uploaded to the email design library).
+            accept="image/*,.txt,.md,.html,.htm,.eml,text/plain,text/html,message/rfc822"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

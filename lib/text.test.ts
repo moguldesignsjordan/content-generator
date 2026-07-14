@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { emailHtmlToText, stripEmDashes, stripMarkdown } from "./text";
+import {
+  emailHtmlToText,
+  joinReplySegments,
+  stripEmDashes,
+  stripMarkdown,
+} from "./text";
+
+describe("joinReplySegments", () => {
+  it("separates text blocks that came from different tool steps", () => {
+    // The shipped bug: "Got it!Who is this email for?"
+    expect(joinReplySegments(["Got it!", "Who is this email for?"])).toBe(
+      "Got it!\n\nWho is this email for?",
+    );
+  });
+
+  it("prints a repeated question once", () => {
+    // The other shipped bug: the same question emitted on two steps, twice.
+    const q = "What's the one thing this email should tell people?";
+    expect(joinReplySegments([q, q])).toBe(q);
+  });
+
+  it("drops blank and whitespace-only blocks", () => {
+    expect(joinReplySegments(["", "  ", "Ready?"])).toBe("Ready?");
+    expect(joinReplySegments([])).toBe("");
+  });
+});
 
 describe("stripEmDashes", () => {
   it("replaces the unicode em-dash and both HTML entities", () => {

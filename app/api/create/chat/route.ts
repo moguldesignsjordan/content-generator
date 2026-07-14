@@ -58,7 +58,12 @@ import {
 } from "@/prompts/create-agent";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
-import { emailHtmlToText, stripEmDashes, stripMarkdown } from "@/lib/text";
+import {
+  emailHtmlToText,
+  joinReplySegments,
+  stripEmDashes,
+  stripMarkdown,
+} from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
@@ -206,7 +211,10 @@ export async function POST(req: NextRequest) {
         tool_choice: { type: "auto" },
       });
 
-    let reply = "";
+    // One turn can span several tool round-trips, each with its own text block.
+    // Collected, then joined (see joinReplySegments): raw concatenation ran them
+    // together and printed a repeated question twice.
+    const replyParts: string[] = [];
     let calledAnyTool = false;
     for (let step = 0; step < MAX_STEPS; step++) {
       let response;
@@ -219,7 +227,7 @@ export async function POST(req: NextRequest) {
       logUsage("create-chat", DRAFT_MODEL, response.usage);
 
       for (const block of response.content) {
-        if (block.type === "text") reply += block.text;
+        if (block.type === "text") replyParts.push(block.text);
       }
       messages.push({ role: "assistant", content: response.content });
 
@@ -253,25 +261,30 @@ export async function POST(req: NextRequest) {
         });
         logUsage("create-chat-forced", FAST_MODEL, forced.usage);
         messages.push({ role: "assistant", content: forced.content });
-        let forcedReply = "";
+        const forcedParts: string[] = [];
         for (const block of forced.content) {
-          if (block.type === "text") forcedReply += block.text;
+          if (block.type === "text") forcedParts.push(block.text);
           if (block.type === "tool_use") {
             await dispatchTool(block, state, dispatchCtx);
           }
         }
-        if (forcedReply.trim()) reply = forcedReply;
+        const forcedReply = joinReplySegments(forcedParts);
+        if (forcedReply) {
+          replyParts.length = 0;
+          replyParts.push(forcedReply);
+        }
       } catch (err) {
         logError("api:/api/create/chat:forced-action", err);
       }
     }
 
-    if (!reply.trim()) {
+    let reply = joinReplySegments(replyParts);
+    if (!reply) {
       reply = state.draftId
         ? "Done, opening your draft now."
         : state.series
           ? "Your series is ready below. Open each email to review it."
-          : "Got it. What's the one thing this email needs to land?";
+          : "What's the one thing this email needs to land?";
     }
     // Chat bubbles render as plain text, so any markdown the model slipped in
     // would reach the user as literal asterisks. The prompt forbids it; this

@@ -38,7 +38,12 @@ import {
   type VoiceProposals,
 } from "@/prompts/campaign";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
-import { emailHtmlToText, stripEmDashes, stripMarkdown } from "@/lib/text";
+import {
+  emailHtmlToText,
+  joinReplySegments,
+  stripEmDashes,
+  stripMarkdown,
+} from "@/lib/text";
 import { logError } from "@/lib/log";
 
 // A chat turn is short, but give the strategist headroom for thinking.
@@ -227,9 +232,12 @@ export async function POST(req: NextRequest) {
           tool_choice: { type: "none" },
         });
         logUsage("campaigns-chat-followup", FAST_MODEL, followUp.usage);
+        const followUpParts: string[] = [];
         for (const block of followUp.content) {
-          if (block.type === "text") reply += block.text;
+          if (block.type === "text") followUpParts.push(block.text);
         }
+        const followUpReply = joinReplySegments(followUpParts);
+        if (followUpReply) reply = joinReplySegments([reply, followUpReply]);
       } catch (err) {
         logError("api:/api/campaigns/chat:follow-up", err);
       }
@@ -237,8 +245,8 @@ export async function POST(req: NextRequest) {
 
     if (!reply.trim()) {
       reply = state.readyToGenerate
-        ? "Great, the brief is set. Kicking off your draft now."
-        : "Got it, let's keep going. What's next?";
+        ? "The brief is set. Kicking off your draft now."
+        : "What's next?";
     }
     // Chat bubbles render as plain text: strip markdown the model slipped in.
     reply = stripMarkdown(stripEmDashes(reply));
@@ -296,12 +304,14 @@ async function applyContentBlocks(
     topics: CampaignTopicOption[];
   },
 ): Promise<{ reply: string; calledAnyTool: boolean }> {
-  let reply = "";
+  // Collected and joined, not concatenated: raw += ran separate text blocks
+  // together ("Got it!Who is this for?") and printed repeats twice.
+  const replyParts: string[] = [];
   let calledAnyTool = false;
 
   for (const block of content) {
     if (block.type === "text") {
-      reply += block.text;
+      replyParts.push(block.text);
       continue;
     }
     if (block.type !== "tool_use") continue;
@@ -360,7 +370,7 @@ async function applyContentBlocks(
     }
   }
 
-  return { reply, calledAnyTool };
+  return { reply: joinReplySegments(replyParts), calledAnyTool };
 }
 
 /** Merges only the fields the model actually passed onto the stored brief. */
