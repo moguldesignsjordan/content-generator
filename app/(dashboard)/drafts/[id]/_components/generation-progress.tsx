@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, Progress } from "@/components/ui";
+import { Button, Card, LinkButton, Progress } from "@/components/ui";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 
 /**
@@ -47,9 +47,15 @@ export function GenerationProgress({
           <p className="mt-2 text-[13px] text-danger">
             {state.error ?? "Something went wrong."}
           </p>
-          <Button className="mt-4" onClick={state.retry}>
-            Retry
-          </Button>
+          {state.outOfCredits ? (
+            <LinkButton href={state.upgradeUrl ?? "/billing"} variant="gradient" className="mt-4">
+              Buy credits
+            </LinkButton>
+          ) : (
+            <Button className="mt-4" onClick={state.retry}>
+              Retry
+            </Button>
+          )}
         </>
       ) : (
         <>

@@ -12,6 +12,7 @@ import {
   Textarea,
   useToast,
 } from "@/components/ui";
+import { toastApiError } from "@/lib/billing/toast-error";
 import { StylePicker, type StyleOption } from "./style-library";
 
 // Aspect labels mirror FLYER_ASPECTS in prompts/generate-flyer.ts; kept
@@ -67,11 +68,20 @@ export function NewFlyerForm({
           styleReferenceId: styleId || undefined,
         }),
       });
-      const data = (await res.json()) as { draftId?: string; error?: string };
-      if (!res.ok || !data.draftId) throw new Error(data.error ?? "Generation failed.");
+      const data = (await res.json()) as {
+        draftId?: string;
+        error?: string;
+        outOfCredits?: boolean;
+        upgradeUrl?: string;
+      };
+      if (!res.ok || !data.draftId) {
+        toastApiError(toast, data, "Generation failed.");
+        setBusy(false);
+        return;
+      }
       router.push(`/drafts/${data.draftId}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed.");
+    } catch {
+      toast.error("Generation failed.");
       setBusy(false);
     }
   }

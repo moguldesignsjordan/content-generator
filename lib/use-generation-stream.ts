@@ -7,6 +7,11 @@ export interface GenerationStreamState {
   phase: string;
   label: string;
   error?: string;
+  /** True when the error is "you're out of credits" (see guardDraftAiRoute in
+   *  the generate-stream route), not a generic failure — the UI shows a Buy
+   *  credits CTA instead of a plain Retry. */
+  outOfCredits?: boolean;
+  upgradeUrl?: string;
 }
 
 /**
@@ -56,14 +61,26 @@ export function useGenerationStream(
               else if (line.startsWith("data:")) data = line.slice(5).trim();
             }
             if (!data) continue;
-            const parsed = JSON.parse(data) as { phase?: string; label?: string; message?: string };
+            const parsed = JSON.parse(data) as {
+              phase?: string;
+              label?: string;
+              message?: string;
+              outOfCredits?: boolean;
+              upgradeUrl?: string;
+            };
 
             if (event === "phase") {
               setState({ status: "generating", phase: parsed.phase!, label: parsed.label! });
             } else if (event === "done") {
               setState((s) => ({ ...s, status: "ready" }));
             } else if (event === "error") {
-              setState((s) => ({ ...s, status: "error", error: parsed.message }));
+              setState((s) => ({
+                ...s,
+                status: "error",
+                error: parsed.message,
+                outOfCredits: parsed.outOfCredits,
+                upgradeUrl: parsed.upgradeUrl,
+              }));
             }
           }
         }

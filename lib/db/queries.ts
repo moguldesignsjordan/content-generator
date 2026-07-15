@@ -42,6 +42,7 @@ import type {
   OnboardingState,
   PerformanceMetric,
   PillarWithClusters,
+  PlanCode,
   Positioning,
   Product,
   PublicationRecord,
@@ -2423,4 +2424,155 @@ export async function upsertBrandBilling(
     .single();
   if (error) throw error;
   return data as BrandBilling;
+}
+
+/** Looks up a brand's Stripe mirror row by their Stripe Customer id. Used by
+ *  the subscription/invoice webhook handlers, which only carry a customer id,
+ *  never a brand id (Stripe has no notion of our brands). */
+export async function getBrandBillingByCustomerId(
+  stripeCustomerId: string,
+): Promise<BrandBilling | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_billing")
+    .select("*")
+    .eq("stripe_customer_id", stripeCustomerId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as BrandBilling) ?? null;
+}
+
+export interface BrandAllowanceState {
+  brandId: string;
+  planCode: PlanCode;
+  lastAllowancePeriod: string | null;
+}
+
+/**
+ * Every brand's plan and last-granted allowance period, for the daily
+ * allowance cron to walk. Three flat selects joined in JS rather than a
+ * Postgres join: at the brand counts this app runs at, the simplicity beats
+ * the query, and it keeps the missing-table degrade (pre-019 DBs) trivial to
+ * reason about per table instead of inside a join.
+ */
+export async function listBrandsForAllowance(): Promise<BrandAllowanceState[]> {
+  const db = getAdminClient();
+  const { data: brands, error: brandsErr } = await db.from("brands").select("id");
+  if (brandsErr) throw brandsErr;
+  if (!brands?.length) return [];
+
+  const ids = brands.map((b) => b.id as string);
+  const [billingRes, balanceRes] = await Promise.all([
+    db.from("brand_billing").select("brand_id, plan_code").in("brand_id", ids),
+    db.from("credits_balance").select("brand_id, last_allowance_period").in("brand_id", ids),
+  ]);
+  if (billingRes.error && !isMissingTableError(billingRes.error)) throw billingRes.error;
+  if (balanceRes.error && !isMissingTableError(balanceRes.error)) throw balanceRes.error;
+
+  const planByBrand = new Map<string, PlanCode>(
+    (billingRes.data ?? []).map((r) => [r.brand_id as string, r.plan_code as PlanCode]),
+  );
+  const periodByBrand = new Map<string, string | null>(
+    (balanceRes.data ?? []).map((r) => [r.brand_id as string, r.last_allowance_period as string | null]),
+  );
+
+  return ids.map((brandId) => ({
+    brandId,
+    planCode: planByBrand.get(brandId) ?? "free",
+    lastAllowancePeriod: periodByBrand.get(brandId) ?? null,
+  }));
+}
+
+export interface UsageBreakdownRow {
+  /** The `source` label passed to logUsage/logTokenUsage (e.g. "generate-email",
+   *  "redesign", "adjust-style") — this app's closest thing to an action type. */
+  source: string;
+  count: number;
+  estimatedUsd: number;
+}
+
+/** This month's `app_logs` usage rows for a brand, grouped by action type
+ *  (the `source` column) and summed. Powers the /billing usage breakdown
+ *  chart. Grouped in JS rather than a Postgres `group by`: at one brand's
+ *  monthly row count this is cheap, and it keeps the missing-table/column
+ *  degrade (pre-018 DBs) as simple as every other billing query here. */
+export async function getUsageBreakdown(brandId: string): Promise<UsageBreakdownRow[]> {
+  const db = getAdminClient();
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  const { data, error } = await db
+    .from("app_logs")
+    .select("source, estimated_usd")
+    .eq("brand_id", brandId)
+    .eq("level", "usage")
+    .gte("created_at", monthStart);
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) return [];
+    throw error;
+  }
+
+  const totals = new Map<string, { count: number; estimatedUsd: number }>();
+  for (const row of (data ?? []) as { source: string; estimated_usd: number | null }[]) {
+    const entry = totals.get(row.source) ?? { count: 0, estimatedUsd: 0 };
+    entry.count += 1;
+    entry.estimatedUsd += row.estimated_usd ?? 0;
+    totals.set(row.source, entry);
+  }
+  return Array.from(totals.entries())
+    .map(([source, v]) => ({ source, count: v.count, estimatedUsd: Number(v.estimatedUsd.toFixed(4)) }))
+    .sort((a, b) => b.estimatedUsd - a.estimatedUsd);
+}
+
+export interface CreditTransactionRow {
+  id: string;
+  delta: number;
+  reason: string;
+  sourceId: string | null;
+  usdReference: number | null;
+  createdAt: string;
+}
+
+/** A brand's credit ledger, newest first. Powers the /billing transaction
+ *  history table. Reads straight off credit_transactions, the append-only
+ *  audit table, never off the cached balance. */
+export async function listCreditTransactions(
+  brandId: string,
+  limit = 50,
+): Promise<CreditTransactionRow[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("credit_transactions")
+    .select("id, delta, reason, source_id, usd_reference, created_at")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    delta: r.delta as number,
+    reason: r.reason as string,
+    sourceId: r.source_id as string | null,
+    usdReference: r.usd_reference as number | null,
+    createdAt: r.created_at as string,
+  }));
+}
+
+/** Stamps the period a brand's monthly allowance was last granted for, without
+ *  touching its balance (grant_credits already moved that). Upsert only sets
+ *  the columns passed, so an existing balance is never clobbered. */
+export async function markAllowanceGranted(brandId: string, period: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("credits_balance")
+    .upsert(
+      { brand_id: brandId, last_allowance_period: period, updated_at: new Date().toISOString() },
+      { onConflict: "brand_id" },
+    );
+  if (error) throw error;
 }

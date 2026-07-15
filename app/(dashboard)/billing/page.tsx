@@ -2,7 +2,12 @@ import { redirect } from "next/navigation";
 import { getBalance, getBillingConfig } from "@/lib/billing/credits";
 import { isStripeConfigured } from "@/lib/clients/stripe";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getBrandBilling, getBrandForUser } from "@/lib/db/queries";
+import {
+  getBrandBilling,
+  getBrandForUser,
+  getUsageBreakdown,
+  listCreditTransactions,
+} from "@/lib/db/queries";
 import { getSessionUser } from "@/lib/supabase/server";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
@@ -40,10 +45,12 @@ export default async function BillingPage() {
     );
   }
 
-  const [balance, config, billing] = await Promise.all([
+  const [balance, config, billing, usage, transactions] = await Promise.all([
     getBalance(brand.id),
     getBillingConfig(),
     getBrandBilling(brand.id),
+    getUsageBreakdown(brand.id),
+    listCreditTransactions(brand.id),
   ]);
 
   return (
@@ -56,6 +63,9 @@ export default async function BillingPage() {
         planCode={billing?.plan_code ?? "free"}
         hasStripeCustomer={Boolean(billing?.stripe_customer_id)}
         stripeConfigured={isStripeConfigured()}
+        proPlanConfigured={Boolean(process.env.STRIPE_PRO_PRICE_ID)}
+        usage={usage}
+        transactions={transactions}
       />
     </>
   );

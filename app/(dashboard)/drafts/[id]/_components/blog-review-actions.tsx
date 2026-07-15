@@ -10,11 +10,13 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  LinkButton,
   Sheet,
   Textarea,
   Tooltip,
   useToast,
 } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
   BlogCopy,
@@ -93,6 +95,7 @@ export function BlogReviewActions({
   const [feedback, setFeedback] = useState("");
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [regenUpgradeUrl, setRegenUpgradeUrl] = useState<string | null>(null);
   const [newDraftId, setNewDraftId] = useState<string | null>(null);
   const [rejectedThisDraft, setRejectedThisDraft] = useState(false);
 
@@ -115,6 +118,7 @@ export function BlogReviewActions({
     setRejectedThisDraft(true);
     setRegenerating(true);
     setRegenError(null);
+    setRegenUpgradeUrl(null);
 
     (async () => {
       try {
@@ -124,8 +128,8 @@ export function BlogReviewActions({
           body: JSON.stringify({ feedback: sentFeedback }),
         });
         if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? "Failed to regenerate.");
+          const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
+          throw new ApiError(data.error ?? "Failed to regenerate.", data);
         }
         const data = (await res.json()) as {
           newDraftId?: string;
@@ -146,6 +150,9 @@ export function BlogReviewActions({
         if (data.newDraftId) setNewDraftId(data.newDraftId);
       } catch (e) {
         setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
+        if (e instanceof ApiError && e.outOfCredits) {
+          setRegenUpgradeUrl(e.upgradeUrl ?? "/billing");
+        }
       } finally {
         setRegenerating(false);
       }
@@ -177,14 +184,17 @@ export function BlogReviewActions({
         method: "POST",
         body: form,
       });
-      const data = (await res.json()) as { html?: string; image?: ContentImage; error?: string };
+      const data = (await res.json()) as ApiErrorBody & {
+        html?: string;
+        image?: ContentImage;
+      };
       if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't regenerate the image.");
+        throw new ApiError(data.error ?? "Couldn't regenerate the image.", data);
       }
       setHtml(data.html);
       setHeroImage(data.image ?? null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't regenerate the image.");
+      toastApiError(toast, err instanceof ApiError ? err : null, "Couldn't regenerate the image.");
     } finally {
       setRegeneratingImage(false);
     }
@@ -537,7 +547,14 @@ export function BlogReviewActions({
             </>
           )}
           {!regenerating && regenError && (
-            <p className="text-sm text-danger">{regenError}</p>
+            <>
+              <p className="text-sm text-danger">{regenError}</p>
+              {regenUpgradeUrl && (
+                <LinkButton href={regenUpgradeUrl} variant="gradient" size="sm">
+                  Buy credits
+                </LinkButton>
+              )}
+            </>
           )}
         </Card>
       )}

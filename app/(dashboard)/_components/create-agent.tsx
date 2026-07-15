@@ -21,6 +21,7 @@ import {
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { toastApiError } from "@/lib/billing/toast-error";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 import type { BlogType, EmailType, FunnelStage, SeriesDraftRef } from "@/lib/db/types";
 
@@ -371,13 +372,20 @@ export function CreateAgent({
           blogType: blogType || undefined,
         }),
       });
-      const data = (await res.json()) as { draftId?: string; error?: string };
+      const data = (await res.json()) as {
+        draftId?: string;
+        error?: string;
+        outOfCredits?: boolean;
+        upgradeUrl?: string;
+      };
       if (!res.ok || !data.draftId) {
-        throw new Error(data.error ?? "Generation failed.");
+        toastApiError(toast, data, "Generation failed.");
+        setGenerating(false);
+        return;
       }
       router.push(`/drafts/${data.draftId}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed.");
+    } catch {
+      toast.error("Generation failed.");
       setGenerating(false);
     }
   }

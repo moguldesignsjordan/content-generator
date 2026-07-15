@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AccentSpinner, Button, Card, Input } from "@/components/ui";
+import { AccentSpinner, Button, Card, Input, LinkButton } from "@/components/ui";
+import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
 import { cn } from "@/lib/cn";
 
 // Lightweight, single-shot style adjustments for the current draft: "change
@@ -19,6 +20,7 @@ type Entry = {
   status: "applying" | "done" | "error";
   error?: string;
   caveat?: string;
+  upgradeUrl?: string;
 };
 
 interface DesignChatProps {
@@ -71,14 +73,13 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction }),
       });
-      const data = (await res.json()) as {
+      const data = (await res.json()) as ApiErrorBody & {
         html?: string;
         history?: unknown[];
         caveat?: string;
-        error?: string;
       };
       if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't apply that change.");
+        throw new ApiError(data.error ?? "Couldn't apply that change.", data);
       }
       onHtmlChange(data.html);
       setCanUndo(true);
@@ -95,6 +96,10 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
                 ...entry,
                 status: "error",
                 error: err instanceof Error ? err.message : "Failed.",
+                upgradeUrl:
+                  err instanceof ApiError && err.outOfCredits
+                    ? (err.upgradeUrl ?? "/billing")
+                    : undefined,
               }
             : entry,
         ),
@@ -125,9 +130,9 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ direction: direction || undefined }),
       });
-      const data = (await res.json()) as { html?: string; error?: string };
+      const data = (await res.json()) as ApiErrorBody & { html?: string };
       if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Redesign failed.");
+        throw new ApiError(data.error ?? "Redesign failed.", data);
       }
       onHtmlChange(data.html);
       setCanUndo(true);
@@ -138,7 +143,15 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
       setEntries((e) =>
         e.map((entry, i) =>
           i === e.length - 1
-            ? { ...entry, status: "error", error: err instanceof Error ? err.message : "Failed." }
+            ? {
+                ...entry,
+                status: "error",
+                error: err instanceof Error ? err.message : "Failed.",
+                upgradeUrl:
+                  err instanceof ApiError && err.outOfCredits
+                    ? (err.upgradeUrl ?? "/billing")
+                    : undefined,
+              }
             : entry,
         ),
       );
@@ -226,6 +239,16 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
                 {entry.status === "error" && entry.error && (
                   <span className="block text-[12px] text-danger">
                     {entry.error}
+                    {entry.upgradeUrl && (
+                      <LinkButton
+                        href={entry.upgradeUrl}
+                        variant="gradient"
+                        size="sm"
+                        className="ml-2 inline-flex"
+                      >
+                        Buy credits
+                      </LinkButton>
+                    )}
                   </span>
                 )}
                 {entry.caveat && (

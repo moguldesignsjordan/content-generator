@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AccentSpinner, Button, Input, Sheet } from "@/components/ui";
+import { AccentSpinner, Button, Input, LinkButton, Sheet } from "@/components/ui";
+import { ApiError } from "@/lib/billing/toast-error";
 
 // The AI rewrite, as a deliberate step instead of a surprise.
 //
@@ -40,12 +41,14 @@ export function RewriteModal({
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [upgradeUrl, setUpgradeUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setInstruction("");
       setProposed(null);
       setError(null);
+      setUpgradeUrl(null);
       setLoading(false);
       setApplying(false);
     }
@@ -54,11 +57,13 @@ export function RewriteModal({
   async function request(withInstruction?: string) {
     setLoading(true);
     setError(null);
+    setUpgradeUrl(null);
     try {
       const text = await onRequest(withInstruction ?? (instruction.trim() || undefined));
       setProposed(text);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't write a new version.");
+      if (err instanceof ApiError && err.outOfCredits) setUpgradeUrl(err.upgradeUrl ?? "/billing");
     } finally {
       setLoading(false);
     }
@@ -68,11 +73,13 @@ export function RewriteModal({
     if (!proposed) return;
     setApplying(true);
     setError(null);
+    setUpgradeUrl(null);
     try {
       await onAccept(proposed);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't apply that.");
+      if (err instanceof ApiError && err.outOfCredits) setUpgradeUrl(err.upgradeUrl ?? "/billing");
       setApplying(false);
     }
   }
@@ -150,7 +157,16 @@ export function RewriteModal({
         </div>
       </div>
 
-      {error && <p className="mt-3 text-xs text-danger">{error}</p>}
+      {error && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-danger">{error}</p>
+          {upgradeUrl && (
+            <LinkButton href={upgradeUrl} variant="gradient" size="sm">
+              Buy credits
+            </LinkButton>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 flex items-center gap-2">
         <Button

@@ -6,16 +6,25 @@ import { cn } from "@/lib/cn";
 
 export type ToastTone = "neutral" | "success" | "warning" | "danger" | "info";
 
+export interface ToastAction {
+  label: string;
+  href: string;
+}
+
 interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: ToastAction;
 }
 
 export interface ToastHandle {
-  show: (message: string, opts?: { tone?: ToastTone; duration?: number }) => void;
+  show: (
+    message: string,
+    opts?: { tone?: ToastTone; duration?: number; action?: ToastAction },
+  ) => void;
   success: (message: string, duration?: number) => void;
-  error: (message: string, duration?: number) => void;
+  error: (message: string, duration?: number, action?: ToastAction) => void;
   warning: (message: string, duration?: number) => void;
   info: (message: string, duration?: number) => void;
 }
@@ -46,9 +55,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const show = React.useCallback<ToastHandle["show"]>(
     (message, opts) => {
       const id = ++idCounter;
-      const duration = opts?.duration ?? 4000;
+      // An actioned toast (e.g. "Buy credits") needs time to read and click;
+      // don't auto-dismiss it out from under the user.
+      const duration = opts?.duration ?? (opts?.action ? 8000 : 4000);
       const tone = opts?.tone ?? "neutral";
-      setToasts((prev) => [...prev, { id, message, tone }]);
+      setToasts((prev) => [...prev, { id, message, tone, action: opts?.action }]);
       if (duration > 0) setTimeout(() => dismiss(id), duration);
     },
     [dismiss],
@@ -58,7 +69,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     () => ({
       show,
       success: (message, duration) => show(message, { tone: "success", duration }),
-      error: (message, duration) => show(message, { tone: "danger", duration }),
+      error: (message, duration, action) => show(message, { tone: "danger", duration, action }),
       warning: (message, duration) => show(message, { tone: "warning", duration }),
       info: (message, duration) => show(message, { tone: "info", duration }),
     }),
@@ -85,7 +96,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   TONE_CLS[t.tone],
                 )}
               >
-                {t.message}
+                <div className="flex items-center justify-between gap-3">
+                  <span>{t.message}</span>
+                  {t.action && (
+                    <a
+                      href={t.action.href}
+                      className="shrink-0 rounded-[var(--radius-sm)] underline underline-offset-2 hover:no-underline"
+                    >
+                      {t.action.label}
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </div>,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toastApiError } from "@/lib/billing/toast-error";
 import { Button, useToast } from "@/components/ui";
 import { BoltIcon } from "@/components/ui/icons";
 
@@ -20,10 +21,14 @@ export function GenerateButton({ topicId }: { topicId: string }) {
         body: JSON.stringify({ topicId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Generation failed.");
+      if (!res.ok) {
+        toastApiError(toast, data, "Generation failed.");
+        setBusy(false);
+        return;
+      }
       router.push(`/drafts/${data.draftId}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed.");
+    } catch {
+      toast.error("Generation failed.");
       setBusy(false);
     }
   }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toastApiError } from "@/lib/billing/toast-error";
 import { Badge, Button, Card, Select, useToast } from "@/components/ui";
 import type { EmailType } from "@/lib/db/types";
 
@@ -41,11 +42,20 @@ export function QuickGenerate({ topics }: { topics: TopicOption[] }) {
           emailType: emailType || undefined,
         }),
       });
-      const data = (await res.json()) as { draftId?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Generation failed.");
+      const data = (await res.json()) as {
+        draftId?: string;
+        error?: string;
+        outOfCredits?: boolean;
+        upgradeUrl?: string;
+      };
+      if (!res.ok) {
+        toastApiError(toast, data, "Generation failed.");
+        setBusy(false);
+        return;
+      }
       router.push(`/drafts/${data.draftId}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed.");
+    } catch {
+      toast.error("Generation failed.");
       setBusy(false);
     }
   }

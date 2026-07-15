@@ -1,3 +1,6 @@
 {
-  "crons": [{ "path": "/api/cron/run-schedules", "schedule": "0 13 * * *" }]
+  "crons": [
+    { "path": "/api/cron/run-schedules", "schedule": "0 13 * * *" },
+    { "path": "/api/cron/grant-allowances", "schedule": "0 6 * * *" }
+  ]
 }
