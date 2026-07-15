@@ -9,12 +9,14 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  LinkButton,
   SegmentedControl,
   Sheet,
   Textarea,
   Tooltip,
   useToast,
 } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
   DraftMeta,
@@ -138,7 +140,12 @@ export function ReviewActions({
   const [html, setHtml] = useState(initialContent.html);
   const initialCtaUrl = initialMeta.email_copy?.cta_url ?? "";
   const [ctaUrl, setCtaUrl] = useState(initialCtaUrl);
-  const [previewMode, setPreviewMode] = useState<EmailPreviewMode>("auto");
+  // Open locked to LIGHT, not "auto": most subscribers read email in light
+  // mode, and reviewers on a dark system kept seeing (and judging) the dark
+  // variant first. Falls back to "auto" for drafts with no dark CSS to force.
+  const [previewMode, setPreviewMode] = useState<EmailPreviewMode>(() =>
+    hasDarkModeSupport(initialContent.html) ? "light" : "auto",
+  );
   // Older drafts, and any model-authored draft that skipped the dark-mode CSS
   // the prompt asks for, have nothing for the toggle to force — disable
   // Light/Dark rather than let them silently do nothing.
@@ -184,6 +191,7 @@ export function ReviewActions({
   // for you next time you open this topic or check Emails.
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [regenUpgradeUrl, setRegenUpgradeUrl] = useState<string | null>(null);
   const [newDraftId, setNewDraftId] = useState<string | null>(null);
   const [rejectedThisDraft, setRejectedThisDraft] = useState(false);
 
@@ -289,6 +297,7 @@ export function ReviewActions({
     setRejectedThisDraft(true);
     setRegenerating(true);
     setRegenError(null);
+    setRegenUpgradeUrl(null);
 
     (async () => {
       try {
@@ -298,8 +307,8 @@ export function ReviewActions({
           body: JSON.stringify({ feedback: sentFeedback }),
         });
         if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? "Failed to regenerate.");
+          const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
+          throw new ApiError(data.error ?? "Failed to regenerate.", data);
         }
         const data = (await res.json()) as {
           newDraftId?: string;
@@ -320,6 +329,9 @@ export function ReviewActions({
         if (data.newDraftId) setNewDraftId(data.newDraftId);
       } catch (e) {
         setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
+        if (e instanceof ApiError && e.outOfCredits) {
+          setRegenUpgradeUrl(e.upgradeUrl ?? "/billing");
+        }
       } finally {
         setRegenerating(false);
       }
@@ -382,14 +394,14 @@ export function ReviewActions({
         method: "POST",
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to start blog post.");
+        const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
+        throw new ApiError(data.error ?? "Failed to start blog post.", data);
       }
       const data = (await res.json()) as { draftId?: string };
       if (!data.draftId) throw new Error("Failed to start blog post.");
       router.push(`/drafts/${data.draftId}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to start blog post.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Failed to start blog post.");
       setCreatingBlog(false);
     }
   }
@@ -403,14 +415,14 @@ export function ReviewActions({
         method: "POST",
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to start the flyer.");
+        const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
+        throw new ApiError(data.error ?? "Failed to start the flyer.", data);
       }
       const data = (await res.json()) as { draftId?: string };
       if (!data.draftId) throw new Error("Failed to start the flyer.");
       router.push(`/drafts/${data.draftId}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to start the flyer.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Failed to start the flyer.");
       setCreatingFlyer(false);
     }
   }
@@ -695,7 +707,14 @@ export function ReviewActions({
             </>
           )}
           {!regenerating && regenError && (
-            <p className="text-sm text-danger">{regenError}</p>
+            <>
+              <p className="text-sm text-danger">{regenError}</p>
+              {regenUpgradeUrl && (
+                <LinkButton href={regenUpgradeUrl} variant="gradient" size="sm">
+                  Buy credits
+                </LinkButton>
+              )}
+            </>
           )}
         </Card>
       )}

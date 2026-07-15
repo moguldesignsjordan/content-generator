@@ -284,6 +284,74 @@ export function applyStyleChanges(elementHtml: string, changes: StyleChanges): s
   return newOpenTag + rest;
 }
 
+/** Style props that belong on the CTA's <a> button itself, not its wrapper. */
+const CTA_BUTTON_PROPS: (keyof StyleChanges)[] = [
+  "color",
+  "background",
+  "fontSize",
+  "fontWeight",
+];
+
+/**
+ * Styles the CTA region, splitting the changes between its two elements: the
+ * wrapper (spacing, alignment) and the <a> button inside it (text color, fill,
+ * size, weight). Styling only the wrapper — what applyStyleChanges alone did —
+ * couldn't change the button at all: its own inline styles kept winning, and a
+ * "background" painted the whole row instead of the button.
+ */
+export function applyCtaStyleChanges(elementHtml: string, changes: StyleChanges): string {
+  const wrapper: StyleChanges = {};
+  const button: StyleChanges = {};
+  for (const [key, value] of Object.entries(changes) as [keyof StyleChanges, string | undefined][]) {
+    if (value === undefined || value === "") continue;
+    if (CTA_BUTTON_PROPS.includes(key)) button[key] = value;
+    else wrapper[key] = value;
+  }
+
+  let out = Object.keys(wrapper).length ? applyStyleChanges(elementHtml, wrapper) : elementHtml;
+  if (Object.keys(button).length) {
+    const anchorIdx = out.search(/<a[\s>]/i);
+    if (anchorIdx === -1) {
+      // No <a> in this CTA (unusual, but model designs vary): the wrapper is
+      // the only element there is.
+      return applyStyleChanges(out, button);
+    }
+    out = out.slice(0, anchorIdx) + applyStyleChanges(out.slice(anchorIdx), button);
+  }
+  return out;
+}
+
+/**
+ * Replaces the CTA button's visible label — the text inside its <a> — with
+ * escaped plain text, leaving every attribute and the surrounding wrapper
+ * byte-identical. This is the no-AI "change the button wording" path: the new
+ * label travels as TEXT, never as markup, so the button element (and its
+ * display/border-radius/padding styling, which the contentEditable sanitizer
+ * would strip) cannot be damaged by a text change. Falls back to replacing the
+ * wrapper's inner content when the region has no <a> at all.
+ */
+export function replaceCtaText(elementHtml: string, text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const anchorIdx = elementHtml.search(/<a[\s>]/i);
+  if (anchorIdx !== -1) {
+    const openEnd = findTagEnd(elementHtml, anchorIdx);
+    if (openEnd === -1) return elementHtml;
+    // Anchors cannot nest, so the first closing tag after the opener is ours.
+    const closeIdx = elementHtml.toLowerCase().indexOf("</a", openEnd);
+    if (closeIdx === -1) return elementHtml;
+    return elementHtml.slice(0, openEnd) + escaped + elementHtml.slice(closeIdx);
+  }
+
+  const innerStart = findTagEnd(elementHtml, 0);
+  const innerEnd = elementHtml.lastIndexOf("</");
+  if (innerStart === -1 || innerEnd <= innerStart) return elementHtml;
+  return elementHtml.slice(0, innerStart) + escaped + elementHtml.slice(innerEnd);
+}
+
 /** Best-effort readers for pre-filling native controls from an element's current inline style. Not authoritative. */
 export function guessStyleValue(elementHtml: string, prop: keyof StyleChanges): string | undefined {
   const cssProp = PROP_NAMES[prop];

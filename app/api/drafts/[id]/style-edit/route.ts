@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDraftWithJobContext } from "@/lib/db/queries";
-import { applyStyleChanges, locateRegion, type StyleChanges } from "@/lib/email/inline-style";
+import {
+  applyCtaStyleChanges,
+  applyStyleChanges,
+  locateRegion,
+  replaceCtaText,
+  type StyleChanges,
+} from "@/lib/email/inline-style";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import { logError } from "@/lib/log";
 
@@ -19,11 +25,14 @@ const CHANGE_KEYS: (keyof StyleChanges)[] = [
 ];
 
 /**
- * POST { region, regionIndex, regionLabel, changes }: applies one or more
- * CSS property changes to the region's own opening tag in place (no new
- * draft version). `regionIndex` is the region's 0-based occurrence in the
- * document (a region like "body" can repeat) — the element is located by
- * scanning the stored HTML, never by a client-sent snippet.
+ * POST { region, regionIndex, regionLabel, changes?, buttonText? }: applies
+ * one or more CSS property changes to the region's own opening tag in place
+ * (no new draft version). `regionIndex` is the region's 0-based occurrence in
+ * the document (a region like "body" can repeat) — the element is located by
+ * scanning the stored HTML, never by a client-sent snippet. `buttonText`
+ * (CTA only) relabels the button's <a> with plain text — the deterministic
+ * no-AI wording change, kept out of the contentEditable save path so the
+ * button markup can never be damaged.
  */
 export async function POST(
   req: NextRequest,
@@ -36,6 +45,7 @@ export async function POST(
       regionIndex?: number;
       regionLabel?: string;
       changes?: StyleChanges;
+      buttonText?: string;
     };
 
     if (!body.region || !body.regionLabel || typeof body.regionIndex !== "number") {
@@ -50,7 +60,11 @@ export async function POST(
       const value = body.changes?.[key];
       if (value) changes[key] = value;
     }
-    if (Object.keys(changes).length === 0) {
+    const buttonText =
+      body.region === "cta" && typeof body.buttonText === "string"
+        ? body.buttonText.trim().slice(0, 200)
+        : "";
+    if (Object.keys(changes).length === 0 && !buttonText) {
       return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
     }
 
@@ -65,7 +79,13 @@ export async function POST(
       );
     }
 
-    const newElement = applyStyleChanges(located.outerHTML, changes);
+    // The CTA is two elements (wrapper + <a> button); its text/fill styling
+    // must land on the button itself to be visible.
+    let newElement =
+      body.region === "cta"
+        ? applyCtaStyleChanges(located.outerHTML, changes)
+        : applyStyleChanges(located.outerHTML, changes);
+    if (buttonText) newElement = replaceCtaText(newElement, buttonText);
     const newHtml =
       draftCtx.content.html.slice(0, located.start) +
       newElement +
@@ -74,7 +94,9 @@ export async function POST(
     const result = await commitHtmlEdit({
       draftCtx,
       html: newHtml,
-      label: `Styled ${body.regionLabel.toLowerCase()}`,
+      label: buttonText
+        ? `Changed the button to "${buttonText}"`
+        : `Styled ${body.regionLabel.toLowerCase()}`,
       type: "style",
     });
     if (!result.ok) {

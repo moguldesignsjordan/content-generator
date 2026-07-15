@@ -33,6 +33,7 @@ import {
   resolveBrandTokens,
 } from "@/lib/email/templates";
 import { hasDarkModeSupport } from "@/lib/email/preview-mode";
+import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
 import type {
   CampaignBrief,
   ContentImage,
@@ -483,7 +484,9 @@ function renderEmailForContext(
   let html: string;
   if (modelHtml && hasDarkModeSupport(modelHtml)) {
     designSource = "model";
-    html = modelHtml;
+    // The model's dark-mode CSS routinely misses elements (black text on the
+    // dark card); repair coverage mechanically rather than trusting the prompt.
+    html = ensureDarkModeReadability(modelHtml);
   } else {
     logWarn(
       "pipeline:generate:html-fallback",

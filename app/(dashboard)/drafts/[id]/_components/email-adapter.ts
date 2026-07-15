@@ -37,6 +37,22 @@ export function createEmailAdapter(args: {
       "Couldn't save that edit.",
     );
 
+  // Button wording travels as plain TEXT to the style-edit route, which
+  // splices it inside the <a> server-side. Never through the contentEditable
+  // save path: sanitizing the anchor there strips its button styling, and a
+  // select-all-delete could remove the element itself.
+  const applyButtonText = (target: EditTarget, text: string) =>
+    postJson<SaveResult>(
+      `/api/drafts/${draftId}/style-edit`,
+      {
+        region: target.marker,
+        regionIndex: target.index,
+        regionLabel: target.label,
+        buttonText: text,
+      },
+      "Couldn't save the button text.",
+    );
+
   return {
     markerAttr: "data-region",
 
@@ -45,6 +61,11 @@ export function createEmailAdapter(args: {
     // The image has its own controls (generate / upload / move / remove); there
     // is no text in it to type on.
     isEditable: (marker) => marker !== "image",
+
+    // The button edits through the Design panel's text field, never
+    // contentEditable: typing on the wrapper let a select-all-delete remove
+    // the <a> itself, and the button vanished with it.
+    usesFormEditor: (marker) => marker === "cta",
 
     // Body blocks can carry links and emphasis; a headline or a button label is
     // just words.
@@ -87,6 +108,14 @@ export function createEmailAdapter(args: {
 
       const escape = (s: string) =>
         s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+      // A button keeps its <a> markup no matter what: the text goes through
+      // the dedicated relabel path (server splices it inside the anchor).
+      // Splicing plain text over the whole section (the generic path below)
+      // would delete the button element itself.
+      if (target.marker === "cta") {
+        return applyButtonText(target, paragraphs.join(" "));
+      }
 
       // Does this section hold block-level content (a body), or is it a single
       // run of text (a headline, an eyebrow, a button label)?
@@ -138,6 +167,8 @@ export function createEmailAdapter(args: {
         },
         "Couldn't apply that change.",
       ),
+
+    applyButtonText,
 
     image: { initial: initialImage },
   };

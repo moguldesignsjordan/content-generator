@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccentSpinner, Skeleton, useToast } from "@/components/ui";
+import { ApiError, toastApiError } from "@/lib/billing/toast-error";
 import type { StyleChanges } from "@/lib/email/inline-style";
 import { DesignPopover } from "./design-popover";
 import { RewriteModal } from "./rewrite-modal";
@@ -42,6 +43,8 @@ import type { EditableAdapter, EditTarget, SaveResult } from "./editable-adapter
 
 /** How far below a section its toolbar sits. */
 const TOOLBAR_GAP = 8;
+/** A click this close to a section still selects it — the gaps between regions used to eat clicks. */
+const NEAR_MISS_PX = 14;
 /** Toolbar height, and the Design panel's box — used to keep the panel inside the clipped preview. */
 const TOOLBAR_HEIGHT = 34;
 const DESIGN_PANEL_WIDTH = 268;
@@ -62,6 +65,10 @@ interface InlinePreviewProps {
   title: string;
   /** Rendered above the hotspots, e.g. the email's image controls. */
   overlay?: React.ReactNode;
+  /** Markers that aren't text-editable but respond to a click (the email image opens its sheet). */
+  activatableMarkers?: string[];
+  /** Called when the user clicks one of `activatableMarkers`. */
+  onRegionActivate?: (marker: string) => void;
 }
 
 interface Rect {
@@ -80,6 +87,8 @@ export function InlinePreview({
   height = 600,
   title,
   overlay,
+  activatableMarkers,
+  onRegionActivate,
 }: InlinePreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -209,7 +218,7 @@ export function InlinePreview({
       // Put the section back exactly as it was, so a failed save can't leave a
       // half-applied edit sitting in the preview.
       el.innerHTML = editSnapshot.current;
-      toast.error(err instanceof Error ? err.message : "Couldn't save that edit.");
+      toastApiError(toast, err instanceof ApiError ? err : null, "Couldn't save that edit.");
     } finally {
       setBusy(false);
       committing.current = false;
@@ -224,6 +233,12 @@ export function InlinePreview({
     el.classList.remove("__ie-editing");
     editingEl.current = null;
     setEditing(false);
+  }, []);
+
+  /** Form-edited sections (the CTA button) open the Design panel instead of a caret. */
+  const openFormEditor = useCallback(() => {
+    setDesignOpen(true);
+    setConfirmingDelete(false);
   }, []);
 
   const beginEdit = useCallback(
@@ -274,13 +289,29 @@ export function InlinePreview({
   const handlers = useRef({
     commitEdit,
     beginEdit,
+    openFormEditor,
     cancelEdit,
     clearSelection,
     measure,
     targetOf,
     adapter,
+    activatableMarkers,
+    onRegionActivate,
+    selected,
   });
-  handlers.current = { commitEdit, beginEdit, cancelEdit, clearSelection, measure, targetOf, adapter };
+  handlers.current = {
+    commitEdit,
+    beginEdit,
+    openFormEditor,
+    cancelEdit,
+    clearSelection,
+    measure,
+    targetOf,
+    adapter,
+    activatableMarkers,
+    onRegionActivate,
+    selected,
+  };
 
   useEffect(() => {
     setLoaded(false);
@@ -323,30 +354,79 @@ export function InlinePreview({
         getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() ||
         "#e2327d";
 
+      // outline-offset stays small (2px): adjacent regions sit flush in email
+      // markup, and a wider ring visually bled into (and appeared to "cover")
+      // the neighboring section.
       const style = doc.createElement("style");
       style.id = "__ie-style";
       style.textContent = `
-        [${markerAttr}] { transition: outline-color .12s ease, background-color .12s ease; outline: 1.5px solid transparent; outline-offset: 4px; border-radius: 2px; }
+        [${markerAttr}] { transition: outline-color .12s ease, background-color .12s ease; outline: 1.5px solid transparent; outline-offset: 2px; border-radius: 2px; }
         [${markerAttr}]:hover { outline-color: color-mix(in srgb, ${accent} 40%, transparent); cursor: text; }
         .__ie-selected { outline-color: ${accent} !important; }
         .__ie-editing { outline-color: ${accent} !important; background-color: color-mix(in srgb, ${accent} 5%, transparent); }
         .__ie-editing:focus { outline-color: ${accent} !important; }
+        ${(h().activatableMarkers ?? [])
+          .map(
+            (m) =>
+              `[${markerAttr}="${m}"]:hover { outline-color: color-mix(in srgb, ${accent} 40%, transparent); cursor: pointer; }`,
+          )
+          .join("\n")}
       `;
       doc.head?.appendChild(style);
 
-      const findTarget = (node: EventTarget | null): HTMLElement | null => {
-        // The event target belongs to the IFRAME's realm, so `instanceof
-        // HTMLElement` against the parent's constructor is always false here.
-        // Duck-type on closest() instead.
+      // The event target belongs to the IFRAME's realm, so `instanceof
+      // HTMLElement` against the parent's constructor is always false here.
+      // Duck-type on closest() instead.
+      const closestOf = (node: EventTarget | null, selector: string): HTMLElement | null => {
         const candidate = node as { closest?: (s: string) => HTMLElement | null } | null;
-        const el = candidate?.closest?.(`[${markerAttr}]`) ?? null;
+        return candidate?.closest?.(selector) ?? null;
+      };
+
+      const findTarget = (node: EventTarget | null): HTMLElement | null => {
+        const el = closestOf(node, `[${markerAttr}]`);
         if (!el) return null;
         const marker = el.getAttribute(markerAttr) ?? "";
         return h().adapter.isEditable(marker) ? el : null;
       };
 
+      // A click that lands in the sliver between sections still selects the
+      // nearest editable one, so tight layouts (eyebrow over headline) don't
+      // eat clicks.
+      const nearestEditable = (x: number, y: number): HTMLElement | null => {
+        let best: HTMLElement | null = null;
+        let bestDist = NEAR_MISS_PX + 1;
+        doc.querySelectorAll<HTMLElement>(`[${markerAttr}]`).forEach((el) => {
+          const marker = el.getAttribute(markerAttr) ?? "";
+          if (!h().adapter.isEditable(marker)) return;
+          const r = el.getBoundingClientRect();
+          const dx = Math.max(r.left - x, 0, x - r.right);
+          const dy = Math.max(r.top - y, 0, y - r.bottom);
+          const dist = Math.max(dx, dy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = el;
+          }
+        });
+        return best;
+      };
+
       const onClick = (e: MouseEvent) => {
-        const el = findTarget(e.target);
+        // Never let a link navigate the preview: the CTA button is an <a>, and
+        // one stray click used to replace the document mid-edit.
+        if (closestOf(e.target, "a[href]")) e.preventDefault();
+
+        // Non-editable but clickable regions (the email image) hand off to the
+        // page instead of selecting — one click opens the image tools.
+        const marked = closestOf(e.target, `[${markerAttr}]`);
+        const marker = marked?.getAttribute(markerAttr) ?? "";
+        if (marked && !h().adapter.isEditable(marker) && h().activatableMarkers?.includes(marker)) {
+          if (editingEl.current) void h().commitEdit();
+          h().clearSelection();
+          h().onRegionActivate?.(marker);
+          return;
+        }
+
+        const el = findTarget(e.target) ?? nearestEditable(e.clientX, e.clientY);
 
         // Clicked away from any editable section: commit and deselect.
         if (!el) {
@@ -376,7 +456,8 @@ export function InlinePreview({
         setConfirmingDelete(false);
 
         if (alreadySelected) {
-          h().beginEdit(el, doc, { x: e.clientX, y: e.clientY });
+          if (h().adapter.usesFormEditor?.(target.marker)) h().openFormEditor();
+          else h().beginEdit(el, doc, { x: e.clientX, y: e.clientY });
         }
       };
 
@@ -390,7 +471,8 @@ export function InlinePreview({
         selectedElRef.current = el;
         setSelected(target);
         setSelectedRect(h().measure(el));
-        h().beginEdit(el, doc, { x: e.clientX, y: e.clientY });
+        if (h().adapter.usesFormEditor?.(target.marker)) h().openFormEditor();
+        else h().beginEdit(el, doc, { x: e.clientX, y: e.clientY });
       };
 
       const onKeyDown = (e: KeyboardEvent) => {
@@ -419,6 +501,26 @@ export function InlinePreview({
       win.addEventListener("scroll", reposition);
       win.addEventListener("resize", reposition);
       doc.fonts?.ready?.then(reposition).catch(() => {});
+
+      // Re-bind any live selection to the FRESH document. Every save remounts
+      // the iframe, and a selection ref left pointing at the old document's
+      // node would feed stale markup into the next apply (a chained
+      // color-then-text edit would silently undo the color).
+      const current = h().selected;
+      if (current) {
+        const el =
+          doc.querySelectorAll<HTMLElement>(`[${markerAttr}="${current.marker}"]`)[
+            current.index
+          ] ?? null;
+        if (el) {
+          el.classList.add("__ie-selected");
+          selectedElRef.current = el;
+          setSelectedRect(h().measure(el));
+        } else {
+          selectedElRef.current = null;
+          h().clearSelection();
+        }
+      }
 
       setLoaded(true);
 
@@ -464,7 +566,7 @@ export function InlinePreview({
     try {
       adoptResult(await fn());
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : failure);
+      toastApiError(toast, err instanceof ApiError ? err : null, failure);
     } finally {
       setBusy(false);
     }
@@ -475,6 +577,20 @@ export function InlinePreview({
     await runAdapter(
       () => adapter.applyStyle!(selected, changes),
       "Couldn't apply that change.",
+    );
+  }
+
+  /**
+   * "Button text" apply from the Design panel. The text goes to the adapter's
+   * dedicated relabel path (a server-side splice inside the <a>), so the
+   * button element itself can never be lost — which is exactly what
+   * contentEditable's select-all-delete used to do to it.
+   */
+  async function handleFormText(text: string) {
+    if (!selected || !adapter.applyButtonText || !text.trim()) return;
+    await runAdapter(
+      () => adapter.applyButtonText!(selected, text.trim()),
+      "Couldn't save the button text.",
     );
   }
 
@@ -507,8 +623,12 @@ export function InlinePreview({
   const deleteBlocked =
     selected && doc ? adapter.deleteBlockedReason?.(selected, doc) ?? null : null;
 
-  const toolbarTop = selectedRect ? selectedRect.top + selectedRect.height + TOOLBAR_GAP : 0;
-  const toolbarLeft = selectedRect ? selectedRect.left : 0;
+  // Clamped inside the preview: a section at the very bottom used to push its
+  // toolbar into the clipped overflow where the buttons couldn't be reached.
+  const toolbarTop = selectedRect
+    ? Math.min(selectedRect.top + selectedRect.height + TOOLBAR_GAP, height - TOOLBAR_HEIGHT - 6)
+    : 0;
+  const toolbarLeft = selectedRect ? Math.max(6, selectedRect.left) : 0;
   const showToolbar = !!selected && !!selectedRect && !editing && !rewriteOpen;
 
   // The Design panel is portalled to <body>, so this is in VIEWPORT coordinates,
@@ -571,10 +691,13 @@ export function InlinePreview({
         </div>
       )}
 
+      {/* pointer-events-none on the pill, auto on its buttons: the toolbar sits
+          over the next section, and its inert parts (label, padding) must not
+          steal the click that selects that section. */}
       {showToolbar && selected && (
         <div
           style={{ top: toolbarTop, left: toolbarLeft }}
-          className="absolute z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 px-1.5 py-1 shadow-lg backdrop-blur"
+          className="pointer-events-none absolute z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 px-1.5 py-1 shadow-lg backdrop-blur"
         >
           <span className="px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">
             {selected.label}
@@ -583,7 +706,7 @@ export function InlinePreview({
             type="button"
             disabled={busy}
             onClick={() => setRewriteOpen(true)}
-            className="rounded-full px-2.5 py-1 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+            className="pointer-events-auto rounded-full px-2.5 py-1 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
           >
             Rewrite
           </button>
@@ -592,11 +715,11 @@ export function InlinePreview({
               type="button"
               disabled={busy}
               onClick={() => setDesignOpen((v) => !v)}
-              className={`rounded-full px-2.5 py-1 text-[12.5px] font-medium transition-colors disabled:opacity-50 ${
+              className={`pointer-events-auto rounded-full px-2.5 py-1 text-[12.5px] font-medium transition-colors disabled:opacity-50 ${
                 designOpen ? "bg-surface-3 text-foreground" : "text-foreground hover:bg-surface-3"
               }`}
             >
-              Design
+              {adapter.usesFormEditor?.(selected.marker) ? "Edit button" : "Design"}
             </button>
           )}
           {canDelete &&
@@ -605,7 +728,7 @@ export function InlinePreview({
                 type="button"
                 disabled={busy}
                 onClick={() => void handleDelete()}
-                className="rounded-full bg-danger px-2.5 py-1 text-[12.5px] font-semibold text-white transition-colors hover:bg-danger/90 disabled:opacity-50"
+                className="pointer-events-auto rounded-full bg-danger px-2.5 py-1 text-[12.5px] font-semibold text-white transition-colors hover:bg-danger/90 disabled:opacity-50"
               >
                 Delete?
               </button>
@@ -614,7 +737,7 @@ export function InlinePreview({
                 type="button"
                 disabled={busy}
                 onClick={() => setConfirmingDelete(true)}
-                className="rounded-full px-2.5 py-1 text-[12.5px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+                className="pointer-events-auto rounded-full px-2.5 py-1 text-[12.5px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
               >
                 Delete
               </button>
@@ -628,6 +751,25 @@ export function InlinePreview({
       {designOpen && selected && selectedRect && adapter.applyStyle && (
         <DesignPopover
           snippet={selectedElRef.current?.outerHTML ?? ""}
+          // The CTA region is a wrapper around its <a> button; text styling
+          // (color, size, weight, the button's fill) lives on the anchor, and
+          // the panel doubles as the button's no-AI wording editor.
+          textSnippet={
+            adapter.usesFormEditor?.(selected.marker)
+              ? selectedElRef.current?.querySelector("a")?.outerHTML
+              : undefined
+          }
+          buttonMode={adapter.usesFormEditor?.(selected.marker) ?? false}
+          initialText={
+            adapter.usesFormEditor?.(selected.marker)
+              ? (selectedElRef.current?.querySelector("a")?.textContent ?? selected.text).trim()
+              : undefined
+          }
+          onApplyText={
+            adapter.usesFormEditor?.(selected.marker)
+              ? (text) => void handleFormText(text)
+              : undefined
+          }
           anchor={designLayout.anchor}
           maxHeight={designLayout.maxHeight}
           busy={busy}

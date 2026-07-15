@@ -1,5 +1,6 @@
 import type { BlogCopy, ContentImage } from "@/lib/db/types";
 import type { StyleChanges } from "@/lib/email/inline-style";
+import { ApiError } from "@/lib/billing/toast-error";
 
 // The seam between the ONE inline editor (inline-preview.tsx) and the two
 // things it can edit. Email and blog get the same component, the same
@@ -41,6 +42,13 @@ export interface EditableAdapter {
   labelFor(marker: string): string;
   /** Whether this element may be edited inline at all (an image can't). */
   isEditable(marker: string): boolean;
+  /**
+   * Whether this element is edited through a form instead of typing on it.
+   * A button is the case in point: contentEditable on the CTA let a
+   * select-all-delete remove the <a> itself, vaporizing the button. These
+   * markers open the Design panel (with a text field) on the second click.
+   */
+  usesFormEditor?(marker: string): boolean;
   /** Whether light markdown (bold/links/bullets) is meaningful in this element. */
   allowsMarkdown(marker: string): boolean;
   /** Whether this element may be deleted, given the whole document's current state. */
@@ -72,6 +80,13 @@ export interface EditableAdapter {
    */
   applyStyle?(target: EditTarget, changes: StyleChanges): Promise<SaveResult>;
 
+  /**
+   * Relabels a button with plain text, server-side and deterministic (no AI,
+   * no contentEditable round-trip). Present for the markers usesFormEditor
+   * returns true for — the Design panel's "Button text" field calls this.
+   */
+  applyButtonText?(target: EditTarget, text: string): Promise<SaveResult>;
+
   /** Email only: the hero image controls hang off the same preview. */
   image?: {
     initial?: ContentImage;
@@ -90,8 +105,12 @@ export async function sendJson<T>(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? fallbackError);
+  const data = (await res.json().catch(() => ({}))) as T & {
+    error?: string;
+    outOfCredits?: boolean;
+    upgradeUrl?: string;
+  };
+  if (!res.ok) throw new ApiError(data.error ?? fallbackError, data);
   return data;
 }
 

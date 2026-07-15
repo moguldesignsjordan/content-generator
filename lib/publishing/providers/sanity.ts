@@ -58,9 +58,12 @@ async function uploadMainImage(
     throw new Error("Couldn't fetch the post's hero image to send to Sanity.");
   }
   const bytes = Buffer.from(await res.arrayBuffer());
+  const filename = hero.url.split("/").pop() ?? "hero.jpg";
+  // Uploaded PNGs (transparency preserved) are stored as .png; everything
+  // else in the bucket is JPEG.
   const asset = await client.assets.upload("image", bytes, {
-    filename: hero.url.split("/").pop() ?? "hero.jpg",
-    contentType: "image/jpeg",
+    filename,
+    contentType: filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg",
   });
   return {
     _type: "image" as const,

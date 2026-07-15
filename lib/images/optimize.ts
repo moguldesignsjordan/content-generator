@@ -10,27 +10,57 @@ const TARGET_WIDTH = 1200;
 const MAX_BYTES = 150 * 1024;
 const QUALITY_LADDER = [82, 72, 62, 52, 42];
 
+// PNG's budget ladder is palette quantization instead of JPEG quality.
+const PNG_QUALITY_LADDER = [100, 80, 60, 40];
+
 export interface OptimizedImage {
   data: Buffer;
   width: number;
   height: number;
+  format: "jpeg" | "png";
 }
 
 /**
- * Resizes to the email column width (never enlarging), flattens transparency
- * onto white (JPEG has no alpha), and compresses to JPEG under ~150KB.
+ * Resizes to the email column width (never enlarging) and compresses under
+ * ~150KB. Sources WITH transparency stay PNG (alpha intact — a transparent
+ * logo used to come back flattened into a white box); everything else is
+ * flattened onto white and encoded as JPEG (Outlook-safe, no WebP).
  */
 export async function optimizeEmailImage(input: Buffer): Promise<OptimizedImage> {
-  const base = sharp(input)
+  const meta = await sharp(input).metadata();
+  const resized = sharp(input)
     .rotate() // honor EXIF orientation
-    .resize({ width: TARGET_WIDTH, withoutEnlargement: true })
-    .flatten({ background: "#ffffff" });
+    .resize({ width: TARGET_WIDTH, withoutEnlargement: true });
 
+  if (meta.hasAlpha) {
+    const full = await resized.clone().png({ compressionLevel: 9 }).toBuffer();
+    let data = full;
+    if (full.length > MAX_BYTES) {
+      for (const quality of PNG_QUALITY_LADDER) {
+        data = await resized.clone().png({ palette: true, quality }).toBuffer();
+        if (data.length <= MAX_BYTES) break;
+      }
+    }
+    const outMeta = await sharp(data).metadata();
+    return {
+      data,
+      width: outMeta.width ?? TARGET_WIDTH,
+      height: outMeta.height ?? 0,
+      format: "png",
+    };
+  }
+
+  const base = resized.flatten({ background: "#ffffff" });
   for (const quality of QUALITY_LADDER) {
     const data = await base.clone().jpeg({ quality, mozjpeg: true }).toBuffer();
     if (data.length <= MAX_BYTES || quality === QUALITY_LADDER.at(-1)) {
-      const meta = await sharp(data).metadata();
-      return { data, width: meta.width ?? TARGET_WIDTH, height: meta.height ?? 0 };
+      const outMeta = await sharp(data).metadata();
+      return {
+        data,
+        width: outMeta.width ?? TARGET_WIDTH,
+        height: outMeta.height ?? 0,
+        format: "jpeg",
+      };
     }
   }
   // Unreachable (the last ladder step always returns), but keeps TS honest.
@@ -65,7 +95,7 @@ export async function optimizeFlyerImage(
   for (const quality of FLYER_QUALITY_LADDER) {
     const data = await base.clone().jpeg({ quality, mozjpeg: true }).toBuffer();
     if (data.length <= FLYER_MAX_BYTES || quality === FLYER_QUALITY_LADDER.at(-1)) {
-      return { data, width: target.width, height: target.height };
+      return { data, width: target.width, height: target.height, format: "jpeg" };
     }
   }
   throw new Error("Image optimization failed.");

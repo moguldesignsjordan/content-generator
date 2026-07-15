@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AccentSpinner, useToast } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { ImageSheet } from "./image-sheet";
 import { InlinePreview } from "./inline-preview";
 import { createEmailAdapter } from "./email-adapter";
@@ -56,13 +57,15 @@ export function EmailPreview({
       form.set("style", image.style);
       form.set("placement", image.placement ?? "top");
       const res = await fetch(`/api/drafts/${draftId}/image`, { method: "POST", body: form });
-      const data = (await res.json()) as { html?: string; image?: ContentImage; error?: string };
-      if (!res.ok || !data.html) throw new Error(data.error ?? "Couldn't regenerate the image.");
+      const data = (await res.json()) as ApiErrorBody & { html?: string; image?: ContentImage };
+      if (!res.ok || !data.html) {
+        throw new ApiError(data.error ?? "Couldn't regenerate the image.", data);
+      }
       onHtmlChange(data.html);
       setImage(data.image ?? null);
       onEdited?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't regenerate the image.");
+      toastApiError(toast, err instanceof ApiError ? err : null, "Couldn't regenerate the image.");
     } finally {
       setRegenerating(false);
     }
@@ -77,6 +80,10 @@ export function EmailPreview({
       transformHtml={(h) => forceColorScheme(h, previewMode)}
       height={600}
       title="Email preview"
+      // Clicking the image itself opens the image tools — the top-right
+      // buttons still work, but they're no longer the only way in.
+      activatableMarkers={["image"]}
+      onRegionActivate={() => setImageOpen(true)}
       overlay={
         <>
           {!hasImage ? (

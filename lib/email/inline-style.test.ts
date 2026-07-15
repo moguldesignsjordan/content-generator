@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCtaStyleChanges,
   applyStyleChanges,
+  replaceCtaText,
   countRegion,
   guessStyleValue,
   locateRegion,
@@ -220,5 +222,75 @@ describe("removeRegion", () => {
   it("errors when the occurrence index doesn't exist", () => {
     const res = removeRegion(TAGGED, "body", 9);
     expect("error" in res).toBe(true);
+  });
+});
+
+describe("applyCtaStyleChanges", () => {
+  const CTA =
+    `<div data-region="cta" style="text-align:center;margin:36px 0 8px;">` +
+    `<a href="https://example.com" style="display:inline-block;background:#e2327d;color:#ffffff;font-size:16px;">Book a call</a>` +
+    `</div>`;
+
+  it("puts text/fill styling on the <a> button, not the wrapper", () => {
+    const out = applyCtaStyleChanges(CTA, { background: "#0a6cff", color: "#000000" });
+    const anchor = out.slice(out.indexOf("<a"));
+    expect(anchor).toContain("background:#0a6cff");
+    expect(anchor).toContain("color:#000000");
+    // The wrapper's own style is untouched by button props.
+    const wrapperTag = out.slice(0, out.indexOf(">") + 1);
+    expect(wrapperTag).not.toContain("#0a6cff");
+  });
+
+  it("puts spacing and alignment on the wrapper", () => {
+    const out = applyCtaStyleChanges(CTA, { textAlign: "left", margin: "12px 0" });
+    const wrapperTag = out.slice(0, out.indexOf(">") + 1);
+    expect(wrapperTag).toContain("text-align:left");
+    expect(wrapperTag).toContain("margin:12px 0");
+    // The button keeps its own styles exactly.
+    expect(out).toContain(`style="display:inline-block;background:#e2327d;color:#ffffff;font-size:16px;"`);
+  });
+
+  it("splits a mixed change across both elements", () => {
+    const out = applyCtaStyleChanges(CTA, { textAlign: "right", fontSize: "18px" });
+    const wrapperTag = out.slice(0, out.indexOf(">") + 1);
+    expect(wrapperTag).toContain("text-align:right");
+    expect(wrapperTag).not.toContain("font-size");
+    expect(out.slice(out.indexOf("<a"))).toContain("font-size:18px");
+  });
+
+  it("falls back to the wrapper when the region has no <a>", () => {
+    const plain = `<div data-region="cta" style="text-align:center;">Call us</div>`;
+    const out = applyCtaStyleChanges(plain, { color: "#123456" });
+    expect(out.slice(0, out.indexOf(">") + 1)).toContain("color:#123456");
+  });
+});
+
+describe("replaceCtaText", () => {
+  const CTA =
+    `<div data-region="cta" style="text-align:center;margin:36px 0 8px;">` +
+    `<a href="https://example.com" style="display:inline-block;background:#e2327d;color:#ffffff;` +
+    `padding:15px 36px;border-radius:10px;">Book a call</a>` +
+    `</div>`;
+
+  it("replaces only the label, keeping the anchor's attributes byte-identical", () => {
+    const out = replaceCtaText(CTA, "Get the guide");
+    expect(out).toBe(CTA.replace(">Book a call<", ">Get the guide<"));
+  });
+
+  it("escapes markup in the new label", () => {
+    const out = replaceCtaText(CTA, "Save <20% & more>");
+    expect(out).toContain(">Save &lt;20% &amp; more&gt;<");
+    expect(out).not.toContain("<20%");
+  });
+
+  it("replaces the wrapper's content when the region has no <a>", () => {
+    const plain = `<div data-region="cta" style="text-align:center;">Call us</div>`;
+    const out = replaceCtaText(plain, "Email us");
+    expect(out).toBe(`<div data-region="cta" style="text-align:center;">Email us</div>`);
+  });
+
+  it("returns the input unchanged when the anchor never closes", () => {
+    const broken = `<div data-region="cta"><a href="#">Go`;
+    expect(replaceCtaText(broken, "New")).toBe(broken);
   });
 });

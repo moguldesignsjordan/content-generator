@@ -25,14 +25,19 @@ const SPACING_MARGIN: Record<SpacingPreset, string> = {
   roomy: "40px 0",
 };
 
-/** Best-effort read of a section's current inline style, to seed the controls. */
-function guessDesignState(snippet: string) {
-  const color = guessStyleValue(snippet, "color");
-  const background = guessStyleValue(snippet, "background");
+/**
+ * Best-effort read of a section's current inline style, to seed the controls.
+ * `textSnippet` is the element that actually carries the text styling when it
+ * differs from the section wrapper — the CTA's <a> button — while spacing and
+ * alignment always come from the wrapper.
+ */
+function guessDesignState(snippet: string, textSnippet = snippet) {
+  const color = guessStyleValue(textSnippet, "color");
+  const background = guessStyleValue(textSnippet, "background");
   const margin = guessStyleValue(snippet, "margin");
-  const fontSizeRaw = guessStyleValue(snippet, "fontSize");
+  const fontSizeRaw = guessStyleValue(textSnippet, "fontSize");
   const align = guessStyleValue(snippet, "textAlign");
-  const weight = guessStyleValue(snippet, "fontWeight");
+  const weight = guessStyleValue(textSnippet, "fontWeight");
 
   const marginNums = margin ? margin.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [] : [];
   const maxMargin = marginNums.length ? Math.max(...marginNums) : 20;
@@ -51,6 +56,18 @@ function guessDesignState(snippet: string) {
 interface DesignPopoverProps {
   /** The section's current outerHTML, for seeding the controls. */
   snippet: string;
+  /** The inner element carrying the text styling, when it isn't the wrapper (the CTA's <a>). */
+  textSnippet?: string;
+  /** Relabels the color controls for a button section ("Button color" instead of "Background"). */
+  buttonMode?: boolean;
+  /** The button's current label, seeding the text field. */
+  initialText?: string;
+  /**
+   * Saves new button wording (buttons never use contentEditable — typing on
+   * the wrapper could delete the <a> itself). Rendering the field is gated on
+   * this being present.
+   */
+  onApplyText?: (text: string) => void;
   /** Where to anchor, in VIEWPORT coordinates (the panel is portalled to body). */
   anchor: { top: number; left: number };
   /** Hard cap so a tall panel scrolls instead of running off the bottom of the screen. */
@@ -62,6 +79,10 @@ interface DesignPopoverProps {
 
 export function DesignPopover({
   snippet,
+  textSnippet,
+  buttonMode = false,
+  initialText,
+  onApplyText,
   anchor,
   maxHeight,
   busy,
@@ -69,7 +90,9 @@ export function DesignPopover({
   onClose,
 }: DesignPopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const initial = guessDesignState(snippet);
+  const initial = guessDesignState(snippet, textSnippet);
+  const [text, setText] = useState(initialText ?? "");
+  const textDirty = text.trim() !== (initialText ?? "").trim();
   const [color, setColor] = useState(initial.color);
   const [background, setBackground] = useState(initial.background);
   const [spacing, setSpacing] = useState<SpacingPreset>(initial.spacing);
@@ -104,15 +127,43 @@ export function DesignPopover({
       style={{ top: anchor.top, left: anchor.left, maxHeight: maxHeight ?? undefined }}
       className="fixed z-50 w-[268px] space-y-3 overflow-y-auto rounded-xl border border-border bg-surface-2/95 p-3 shadow-2xl backdrop-blur"
     >
+      {onApplyText && (
+        <div>
+          <p className="mb-1 text-[11px] font-medium text-muted">Button text</p>
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && text.trim() && textDirty && !busy) {
+                  onApplyText(text.trim());
+                }
+              }}
+              disabled={busy}
+              placeholder="e.g. Book a call"
+              className="h-7 flex-1 text-[12px]"
+            />
+            <Button
+              variant="gradient"
+              size="sm"
+              disabled={busy || !text.trim() || !textDirty}
+              onClick={() => onApplyText(text.trim())}
+            >
+              Apply
+            </Button>
+          </div>
+        </div>
+      )}
+
       <ColorRow
-        label="Text"
+        label={buttonMode ? "Text color" : "Text"}
         value={color}
         onChange={setColor}
         onApply={() => onApply({ color })}
         busy={busy}
       />
       <ColorRow
-        label="Background"
+        label={buttonMode ? "Button color" : "Background"}
         value={background}
         onChange={setBackground}
         onApply={() => onApply({ background })}

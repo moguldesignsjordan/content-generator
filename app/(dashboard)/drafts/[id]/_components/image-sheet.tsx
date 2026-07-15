@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, SegmentedControl, Sheet } from "@/components/ui";
+import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
+import { Button, Input, LinkButton, SegmentedControl, Sheet } from "@/components/ui";
 import type { ContentImage, HeroPlacement } from "@/lib/db/types";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
@@ -188,6 +189,7 @@ export function ImageSheet({
   const [placement, setPlacement] = useState<HeroPlacement>(currentPlacement ?? "top");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [upgradeUrl, setUpgradeUrl] = useState<string | null>(null);
 
   // Fresh sheet every time it opens; placement mirrors where the image is now.
   useEffect(() => {
@@ -217,6 +219,7 @@ export function ImageSheet({
     }
     setBusy(true);
     setError(null);
+    setUpgradeUrl(null);
     try {
       let init: RequestInit;
       if (action === "remove") {
@@ -241,19 +244,21 @@ export function ImageSheet({
         init = { method: "POST", body: form };
       }
       const res = await fetch(`/api/drafts/${draftId}/image`, init);
-      const data = (await res.json()) as {
+      const data = (await res.json()) as ApiErrorBody & {
         html?: string;
         image?: ContentImage;
-        error?: string;
       };
       if (!res.ok || !data.html) {
-        throw new Error(data.error ?? "Couldn't update the image.");
+        throw new ApiError(data.error ?? "Couldn't update the image.", data);
       }
       onApplied(data.html, action === "remove" ? null : (data.image ?? null));
       onEdited?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't update the image.");
+      if (err instanceof ApiError && err.outOfCredits) {
+        setUpgradeUrl(err.upgradeUrl ?? "/billing");
+      }
     } finally {
       setBusy(false);
     }
@@ -496,12 +501,21 @@ export function ImageSheet({
             {removeButton}
           </div>
           <p className="mt-2 text-[11px] text-muted">
-            Resized and compressed automatically (JPEG, under 150KB).
+            Resized and compressed automatically. PNGs with transparency stay PNG.
           </p>
         </>
       )}
 
-      {error && <p className="mt-3 text-xs text-danger">{error}</p>}
+      {error && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-danger">{error}</p>
+          {upgradeUrl && (
+            <LinkButton href={upgradeUrl} variant="gradient" size="sm">
+              Buy credits
+            </LinkButton>
+          )}
+        </div>
+      )}
     </Sheet>
   );
 }

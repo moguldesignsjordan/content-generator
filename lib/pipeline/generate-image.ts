@@ -195,11 +195,11 @@ export async function generateContentImage(
     metered: true,
   });
 
-  // 3. Optimize for email (JPEG, 1200px, < ~150KB).
+  // 3. Optimize for email (1200px, < ~150KB).
   const optimized = await optimizeEmailImage(rendered.data);
 
   // 4. Host on the public content-images bucket.
-  const url = await uploadContentImage(optimized.data);
+  const url = await uploadContentImage(optimized.data, optimized.format);
 
   return {
     image: {
@@ -216,7 +216,8 @@ export async function generateContentImage(
 
 /**
  * The no-AI path: takes a user-uploaded image, optimizes it for email (same
- * JPEG/size budget as generated ones), hosts it, and returns the ContentImage.
+ * size budget as generated ones; PNGs with transparency stay PNG), hosts it,
+ * and returns the ContentImage.
  */
 export async function saveUploadedHeroImage(args: {
   file: Buffer;
@@ -228,7 +229,7 @@ export async function saveUploadedHeroImage(args: {
   } catch {
     throw new Error("That file isn't a readable image. Try a JPEG or PNG.");
   }
-  const url = await uploadContentImage(optimized.data);
+  const url = await uploadContentImage(optimized.data, optimized.format);
   return {
     url,
     alt: stripEmDashes(args.alt.trim()).slice(0, 160),
@@ -238,15 +239,20 @@ export async function saveUploadedHeroImage(args: {
   };
 }
 
-/** Uploads a JPEG to the content-images bucket, creating it if missing.
+/** Uploads an image to the content-images bucket, creating it if missing.
  * Exported for the flyer pipeline (lib/pipeline/generate-flyer.ts), which
  * hosts its renders in the same bucket. */
-export async function uploadContentImage(data: Buffer): Promise<string> {
+export async function uploadContentImage(
+  data: Buffer,
+  format: "jpeg" | "png" = "jpeg",
+): Promise<string> {
   const db = getAdminClient();
-  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const ext = format === "png" ? "png" : "jpg";
+  const contentType = format === "png" ? "image/png" : "image/jpeg";
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
   let { error } = await db.storage.from(BUCKET).upload(path, data, {
-    contentType: "image/jpeg",
+    contentType,
     cacheControl: "31536000", // content-addressed-ish names; safe to cache hard
     upsert: false,
   });
@@ -255,7 +261,7 @@ export async function uploadContentImage(data: Buffer): Promise<string> {
     // Self-heal: first-ever image on a fresh project creates the bucket.
     await db.storage.createBucket(BUCKET, { public: true }).catch(() => {});
     ({ error } = await db.storage.from(BUCKET).upload(path, data, {
-      contentType: "image/jpeg",
+      contentType,
       cacheControl: "31536000",
       upsert: false,
     }));

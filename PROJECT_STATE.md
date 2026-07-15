@@ -7,7 +7,7 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-06.
+Last updated: 2026-07-14 (editor bug sweep).
 
 ## Locked decisions
 
@@ -817,6 +817,114 @@ Still open from this session:
   the prompt cache) on later turns. The stored `style_example` is still capped
   at 8000 chars after extraction. Tighten the composer cap if it ever bites.
 
+## Session 2026-07-14: billing slices 5 and 6 (subscriptions + billing UI)
+
+Full plan at `~/.claude/plans/i-m-going-to-be-lazy-cocke.md`. Slices 1 to 4
+(multi-tenancy, credit ledger, paywall, Stripe Checkout for packs) were
+already committed and pushed (`7767194`, `87c5971`, `06122ec`). This session
+built the remaining two slices, uncommitted at time of writing:
+
+- **Slice 5, subscriptions + monthly allowance cron:**
+  `app/api/billing/checkout/route.ts` now takes `{plan:"pro"}` alongside
+  `{packId}` and creates a subscription-mode Checkout Session against
+  `STRIPE_PRO_PRICE_ID` (new env var, not yet set locally, no Stripe account
+  exists yet). `app/api/stripe/webhook/route.ts` gained
+  `customer.subscription.updated`/`.deleted` and `invoice.paid` handlers plus
+  the subscription branch of `checkout.session.completed`; all four are
+  live-verified only via the mocked webhook test suite (11 tests,
+  `route.test.ts` rewritten), never against a real Stripe event, since there
+  is still no Stripe account. One real gotcha found and worked around: this
+  Stripe SDK version (22.3.1, a newer "flexible billing" API) has **no
+  top-level `current_period_end` on `Subscription`** (it moved to
+  `subscription.items.data[0].current_period_end`) and **no top-level
+  `subscription` on `Invoice`** (it moved to
+  `invoice.parent.subscription_details.subscription`) — both handled via
+  small helpers (`subscriptionPeriodEnd`, the `parent.subscription_details`
+  read in `handleInvoicePaid`). New `app/api/cron/grant-allowances/route.ts`
+  (CRON_SECRET bearer, same fail-closed pattern as `run-schedules`) walks
+  every brand via new `lib/db/queries.ts` helpers
+  (`listBrandsForAllowance`, `markAllowanceGranted`,
+  `getBrandBillingByCustomerId`) and grants the free or paid monthly
+  allowance, idempotent on `allowance:{brandId}:{period}`. New cron entry in
+  `vercel.json` (06:00 UTC daily, separate from `run-schedules`' 13:00 UTC).
+  **Live-verified against the real Supabase DB** (not just unit tests): ran
+  the cron via curl with the real `CRON_SECRET` twice, first run granted
+  1000 free credits to the one real brand (Moguls) and stamped
+  `last_allowance_period = "2026-07"`, second run in the same period
+  correctly granted 0 and skipped 1, confirming idempotency live.
+
+- **Slice 6, billing UI:** `/billing` already had a shell from slice 4
+  (balance, buy-credits, a bare "Manage subscription" button); this session
+  added an "Upgrade to Pro" button (only when `STRIPE_PRO_PRICE_ID` is set),
+  a usage-this-month bar chart grouping `app_logs` usage rows by action type
+  (new `lib/billing/usage-labels.ts`, pure + unit-tested: `bucketUsage` maps
+  raw `source` strings like `email-copy`/`redesign`/`flyer-image` to human
+  categories, caps to 6 rows + "Other"), and a transaction history table
+  reading straight off `credit_transactions` (new `getUsageBreakdown` /
+  `listCreditTransactions` in `queries.ts`). The usage chart follows the
+  dataviz skill: single-hue horizontal bars (the existing brand `--cyan`
+  token), 4px rounded data-ends, direct labels (name + $ at the tip), no
+  legend needed since it's one series — chosen over a categorical palette
+  because this app's existing 4-hue brand palette (amber/magenta/violet/cyan)
+  **fails** `validate_palette.js`'s lightness-band check in both light and
+  dark mode, and a single-hue magnitude bar sidesteps that requirement
+  entirely rather than shipping a chart that fails its own accessibility
+  gate. **Live-verified against the real DB** via a throwaway `tsx` script:
+  `getUsageBreakdown` correctly returned the one real "redesign" usage row
+  ($0.0144), `listCreditTransactions` returned the real 3-row ledger (starter
+  2000, usage -3, and the allowance +1000 granted above) in the right shape.
+  Settings' "Plan & billing" row already existed (shipped with slice 4),
+  nothing to add there.
+
+  Also wired the **out-of-credits paywall CTA** everywhere a metered call can
+  429 with `outOfCredits`, per the plan's slice-6 scope: new
+  `lib/billing/toast-error.ts` (`ApiError` class carries `outOfCredits`/
+  `upgradeUrl` through a throw/catch; `toastApiError` shows a "Buy credits"
+  toast action; `components/ui/toast.tsx` gained an optional `action{label,
+  href}` on error toasts, 8s duration instead of 4s so there's time to click).
+  Wired into: `generate-button.tsx`, `quick-generate.tsx`, `create-agent.tsx`
+  (both the direct `/api/generate` path and the `generate-stream` SSE path
+  via `use-generation-stream.ts` + `generation-progress.tsx`, which is the
+  main "generating..." screen most drafts actually go through),
+  `review-actions.tsx`/`blog-review-actions.tsx`/`flyer-review-actions.tsx`
+  (reject/regenerate, create-blog, create-flyer, image regenerate),
+  `image-sheet.tsx`, `design-chat.tsx` (adjust-style, redesign),
+  `email-preview.tsx` (image regenerate), `new-flyer-form.tsx`, and — the
+  highest-value one — `rewrite-modal.tsx` + `editable-adapter.ts`'s shared
+  `sendJson` (the one chokepoint both the email and blog inline-editor
+  adapters funnel every save/rewrite through), so the AI Rewrite propose
+  step shows the CTA correctly without touching either adapter file directly.
+
+  `npm run typecheck` + `npx vitest run` (**285 tests**, up from 278) +
+  `npm run build` all pass. Not committed yet.
+
+**Still open (needs Jordan, not code):**
+1. **No Stripe account exists yet** (same blocker as slice 4's session) — the
+   whole subscription path (checkout, webhook, Customer Portal) is
+   type-correct and unit-tested but has never touched a real Stripe API call.
+   Needs: a Stripe account, one recurring Price for Pro
+   (`STRIPE_PRO_PRICE_ID`), N one-time Prices for packs
+   (`billing_config.packs`), `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in
+   `.env.local`, then `stripe listen --forward-to
+   localhost:3000/api/stripe/webhook` + `stripe trigger` to exercise the
+   webhook handlers for real (`checkout.session.completed` both modes,
+   `customer.subscription.updated`/`.deleted`, `invoice.paid`) — the mocked
+   test suite proves the routing logic, not the real signature/shape
+   round-trip.
+2. **`vercel.json`'s new cron entry needs a deploy** to actually fire in
+   production (same as `run-schedules` before it); `CRON_SECRET` is already
+   a real value in `.env.local` and just needs to be a Vercel project env var
+   too (per the still-open item from the automation session).
+3. **Browser click-through of `/billing`'s new UI** (usage chart rendering
+   with more than one category, the transaction table, the Upgrade to Pro
+   button's redirect, light + dark) — not done this session; the auth hatch
+   is locked (multi-tenancy slice 1), so there's no login-free path to it
+   anymore, needs Jordan's own session.
+4. Decide the real `billing_config.packs` and Pro plan pricing before this
+   goes live — today `packs` is `[]` (empty) and `STRIPE_PRO_PRICE_ID` is
+   unset, so both the pack grid and the Upgrade button show their
+   "not configured yet" states rather than anything purchasable.
+
 ## Next step (backlog, still open)
 
 1. Apply `db/migrations/013_user_roles.sql` in the Supabase SQL editor, then
@@ -839,6 +947,39 @@ Still open from this session:
    MailerLite "Send now"/"Schedule" click-through (Jordan's call, not done
    yet — still testing), and Plan 4's actual cross-instance lock race test
    now that migration 009 is confirmed applied.
+
+## Session 2026-07-14 (late): editor bug sweep (uncommitted)
+
+Six reported editor bugs fixed in one pass; typecheck + build + all 299
+Vitest tests green. Browser click-through still pending (needs a real login).
+
+1. Dark-mode black text: new `lib/email/dark-mode.ts`
+   (`ensureDarkModeReadability`, unit-tested) mechanically repairs model
+   emails whose dark-mode CSS misses elements — dark inline colors get a
+   generated class + appended dark-media rule (hue-preserving lighten).
+   Runs at fresh generation and inside `commitHtmlEdit`, so old drafts heal
+   on their next edit.
+2. Email preview now opens locked to Light (was "auto" = followed system).
+3. Section selection: floating toolbar no longer steals clicks from the
+   section below it (pointer-events pass-through except its buttons), is
+   clamped inside the preview, ring offset tightened, and near-miss clicks
+   (≤14px) snap to the closest section.
+4. CTA buttons are directly editable without AI: link clicks in the preview
+   no longer navigate the iframe away, and the Design panel now styles the
+   inner `<a>` (color/fill/size/weight) instead of the wrapper
+   (`applyCtaStyleChanges`, unit-tested). Follow-up in the same session: the
+   button is now FORM-edited, never contentEditable (select-all-delete used
+   to remove the `<a>` itself and the button vanished). Second click opens
+   the Design panel, which gained a "Button text" field; the label travels
+   as plain text to `/style-edit` (`buttonText` → `replaceCtaText`,
+   unit-tested), so the anchor markup can't be damaged or have its styling
+   stripped by the contentEditable sanitizer. Selection is also re-bound to
+   the fresh iframe document after every save, so chained applies
+   (color → text) no longer read stale markup.
+5. Clicking the email image opens the image sheet directly
+   (`activatableMarkers` on InlinePreview).
+6. PNG uploads with transparency stay PNG end to end (optimize → storage
+   contentType/extension → Sanity publish); opaque images still JPEG.
 
 ## How to verify this doc against reality
 
