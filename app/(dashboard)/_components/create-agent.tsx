@@ -13,7 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AccentSpinner, Button, Logo, Select, useToast } from "@/components/ui";
 import {
-  BlogIcon,
+  FlyerIcon,
   MailIcon,
   MegaphoneIcon,
   PaperclipIcon,
@@ -55,9 +55,9 @@ interface Msg {
 const PROMPT_IDEAS = [
   "What do you want to make?",
   "Draft a win-back email for past clients",
-  "Write a blog post about our latest build",
+  "Make a square flyer for Instagram",
   "Announce a new service to the list",
-  "Turn our best email into a blog post",
+  "Turn our best email into a flyer",
   "Plan a launch campaign for this month",
 ];
 
@@ -431,7 +431,7 @@ export function CreateAgent({
             {actionsOpen && (
               <ActionGrid
                 onEmail={() => send("I want to create an email")}
-                onBlog={() => send("I want to write a blog post")}
+                onImage={() => send("I want to create an image: a social flyer")}
                 onCampaign={() =>
                   send("I want to plan a campaign: a series of emails")
                 }
@@ -661,13 +661,13 @@ function ComposerBar({
 
 function ActionGrid({
   onEmail,
-  onBlog,
+  onImage,
   onCampaign,
   disabled,
   className,
 }: {
   onEmail: () => void;
-  onBlog: () => void;
+  onImage: () => void;
   onCampaign: () => void;
   disabled: boolean;
   className?: string;
@@ -681,9 +681,9 @@ function ActionGrid({
         disabled={disabled}
       />
       <ActionButton
-        icon={<BlogIcon size={15} />}
-        label="Blog post"
-        onClick={onBlog}
+        icon={<FlyerIcon size={15} />}
+        label="Image"
+        onClick={onImage}
         disabled={disabled}
       />
       <ActionButton

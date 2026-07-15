@@ -8,9 +8,10 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 // none of these six are relevant there, so they don't belong in that file.
 
 export interface GenerateContentInput {
-  channel: "email" | "blog";
+  channel: "email" | "blog" | "social";
   email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
   blog_type?: "pillar" | "how_to" | "listicle" | "case_study" | "thought_leadership" | "landing";
+  flyer_aspect?: "1:1" | "4:5" | "9:16";
 }
 
 /**
@@ -31,8 +32,10 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
     properties: {
       channel: {
         type: "string",
-        enum: ["email", "blog"],
-        description: "Which pipeline to generate into.",
+        enum: ["email", "blog", "social"],
+        description:
+          "Which pipeline to generate into. \"social\" is a standalone image " +
+          "(a social media flyer) built from the brief and topic.",
       },
       email_type: {
         type: "string",
@@ -45,6 +48,13 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
         enum: ["pillar", "how_to", "listicle", "case_study", "thought_leadership", "landing"],
         description:
           "Optional override for the blog post's format/length budget. Omit to let generation derive it from the topic.",
+      },
+      flyer_aspect: {
+        type: "string",
+        enum: ["1:1", "4:5", "9:16"],
+        description:
+          "Shape of a social image (channel \"social\" only): 1:1 square post, " +
+          "4:5 feed portrait, 9:16 story/reel. Defaults to 1:1.",
       },
     },
     required: ["channel"],
@@ -59,6 +69,7 @@ export interface PlanSeriesItem {
   offer_slug?: string;
   email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
   funnel_stage?: "awareness" | "consideration" | "decision" | "brand";
+  include_image?: boolean;
 }
 
 export interface PlanSeriesInput {
@@ -124,6 +135,12 @@ export const PLAN_SERIES_TOOL: Anthropic.Tool = {
               type: "string",
               enum: ["awareness", "consideration", "decision", "brand"],
               description: "Funnel stage this email serves, if a new topic is created.",
+            },
+            include_image: {
+              type: "boolean",
+              description:
+                "Whether THIS email gets a picture, when it should differ from " +
+                "the campaign-wide answer. Omit to follow the campaign answer.",
             },
           },
           required: ["title"],

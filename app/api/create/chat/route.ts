@@ -57,6 +57,7 @@ import {
   type UpdateBriefInput,
 } from "@/prompts/create-agent";
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
+import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
 import {
   emailHtmlToText,
@@ -438,12 +439,35 @@ async function dispatchTool(
       }
       const topicCtx = await getTopicContext(state.topicId);
       if (!topicCtx) return "That topic no longer exists.";
+      // A standalone social image rides the flyer pipeline: the brief's
+      // message/angle/goal become the flyer brief the same way the /flyers/new
+      // form's free-text brief does.
+      const flyerBrief =
+        input.channel === "social"
+          ? [
+              state.brief.key_message,
+              state.brief.angle,
+              state.brief.goal ? `Goal: ${state.brief.goal}` : "",
+              state.brief.tone ? `Tone: ${state.brief.tone}` : "",
+              state.brief.constraints,
+            ]
+              .filter(Boolean)
+              .join("\n") || undefined
+          : undefined;
       const draftId = await createDraftShell({
         ctx: topicCtx,
         campaignId: ctx.campaignId,
         type: input.channel,
         emailType: input.email_type,
         blogType: input.blog_type,
+        ...(input.channel === "social"
+          ? {
+              flyerAspect: isFlyerAspect(input.flyer_aspect)
+                ? input.flyer_aspect
+                : DEFAULT_FLYER_ASPECT,
+              flyerBrief,
+            }
+          : {}),
       });
       state.draftId = draftId;
       state.channel = input.channel;
@@ -489,9 +513,11 @@ async function dispatchTool(
         }
         const topicCtx = await getTopicContext(topicId);
         if (!topicCtx) continue;
-        // Campaign-level context (goal, audience, constraints) carries over;
-        // message, angle, and offer are per email so the series doesn't
+        // Campaign-level context (goal, audience, constraints, tone, length,
+        // image choice, style example) carries over; message, angle, offer,
+        // and a per-email image override are per email so the series doesn't
         // flatten onto one shared brief.
+        const includeImage = item.include_image ?? state.brief.include_image;
         const draftId = await createDraftShell({
           ctx: topicCtx,
           campaignId: ctx.campaignId,
@@ -506,8 +532,13 @@ async function dispatchTool(
             ...(state.brief.constraints
               ? { constraints: state.brief.constraints }
               : {}),
+            ...(state.brief.tone ? { tone: state.brief.tone } : {}),
+            ...(state.brief.length ? { length: state.brief.length } : {}),
             ...(state.brief.style_example
               ? { style_example: state.brief.style_example }
+              : {}),
+            ...(typeof includeImage === "boolean"
+              ? { include_image: includeImage }
               : {}),
             ...(item.key_message ? { key_message: item.key_message } : {}),
             ...(item.angle ? { angle: item.angle } : {}),

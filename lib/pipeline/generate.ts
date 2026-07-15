@@ -134,15 +134,18 @@ export async function generateEmailForTopicStreamed(
     // Series emails skip auto imaging by default: a 10-email campaign would
     // otherwise spend 10 Gemini calls up front. Single emails and blogs keep
     // the on-by-default behavior (see maybeAutoHeroImage).
-    // The chat's "want a picture in this email?" answer, when the user gave
-    // one, beats both defaults: no means no even if the brand auto-images, yes
-    // means yes even if the brand opted out.
+    // The chat's "want pictures?" answer, when the user gave one, beats both
+    // defaults: no means no even if the brand auto-images, yes means yes even
+    // if the brand opted out, and an explicit yes on a campaign overrides the
+    // series cost-saving skip (skip wins inside maybeAutoHeroImage, so it must
+    // be lifted here when the user opted in).
     const isSeriesEmail = Boolean(opts.briefOverride);
+    const wantsImage = brief?.include_image === true;
     const heroImage = await maybeAutoHeroImage(ctx, copy.headline, usageDeltas, {
       draftId,
       onEvent,
-      skip: isSeriesEmail || brief?.include_image === false,
-      force: brief?.include_image === true,
+      skip: brief?.include_image === false || (isSeriesEmail && !wantsImage),
+      force: wantsImage,
     });
     if (heroImage) {
       content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
