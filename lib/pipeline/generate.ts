@@ -13,6 +13,7 @@ import {
   getLatestDraftVersion,
   getRecentEmailStyleVariants,
   getTopicContext,
+  listFeedbackEmailExamples,
   patchDraftGeneration,
   populateDraft,
   persistRegeneratedDraft,
@@ -105,6 +106,9 @@ export async function generateEmailForTopicStreamed(
       opts.seedIndex === undefined
         ? await getRecentEmailStyleVariants(ctx.brand.id)
         : { styles: [], layouts: [] };
+    // Thumbs the reviewer gave past emails, fed back as taste examples so
+    // every rating makes the next draft better (non-fatal: [] on any error).
+    const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
     const { system, user, emailType, templateId, styleId, lengthTarget } =
       buildEmailMessages(ctx, tokens, {
         brief,
@@ -112,6 +116,7 @@ export async function generateEmailForTopicStreamed(
         seedIndex: opts.seedIndex,
         recentStyles: recent.styles,
         recentLayouts: recent.layouts,
+        feedbackExamples,
       });
     const designReference = await loadEmailDesignReference(ctx, draftId);
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
@@ -689,6 +694,7 @@ export async function regenerateEmailDraft(
   // style (like the hero image above) instead of rotating again. An explicit
   // opts.templateOverride (the reviewer picked a different layout in the UI)
   // still wins over the stored one. Only a FRESH generation rotates.
+  const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
   const { system, user, emailType, templateId, styleId, lengthTarget } =
     buildEmailMessages(ctx, tokens, {
       brief,
@@ -696,6 +702,7 @@ export async function regenerateEmailDraft(
       styleOverride: draftCtx.meta.email_style_variant,
       heroImage,
       emailTypeOverride: draftCtx.emailType ?? undefined,
+      feedbackExamples,
       rejection: {
         feedback,
         previousSubject: draftCtx.content.subject,

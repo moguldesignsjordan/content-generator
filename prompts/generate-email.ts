@@ -7,6 +7,7 @@ import type {
   EmailStyleId,
   EmailTemplateId,
   EmailType,
+  FeedbackEmailExample,
   Product,
   TopicContext,
   Topic,
@@ -237,10 +238,10 @@ export const EMAIL_LENGTH_TARGETS: Record<EmailType, EmailLengthTarget> = {
       "a substantive newsletter. Open with a hook, deliver one genuinely useful idea with enough depth to feel worth reading (examples, the reasoning behind the advice, a concrete takeaway), then a clear CTA. Aim for the middle of the word range and never pad with filler.",
   },
   product: {
-    words: [300, 450],
-    sections: [2, 3],
+    words: [80, 160],
+    sections: [1, 1],
     directive:
-      "a product spotlight. Lead with the outcome the reader gets, explain what it is and why it matters, give one or two concrete specifics, then a confident CTA to see it. Specifics over adjectives.",
+      "a product spotlight with creative-agency energy: fun, confident, and a little witty, never formal or corporate. Exactly ONE punchy paragraph (one body_section, no heading, no second paragraph) that leads with the outcome the reader gets, lands one or two concrete specifics, and hands off to a confident CTA. If a line could open a bank's newsletter, cut it and write something with personality.",
   },
   service: {
     words: [350, 550],
@@ -407,6 +408,43 @@ export function buildOfferBlock(ctx: TopicContext): string {
     .join("\n");
 }
 
+/**
+ * The reviewer's thumbs history, rendered as taste examples. Liked emails are
+ * studied for their qualities (never copied); disliked ones become explicit
+ * anti-patterns. Empty string when nothing has been rated, so the prompt is
+ * unchanged for new accounts.
+ */
+function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined): string {
+  if (!examples?.length) return "";
+  const liked = examples.filter((e) => e.feedback === "up");
+  const disliked = examples.filter((e) => e.feedback === "down");
+  const fmt = (e: FeedbackEmailExample) =>
+    [
+      `- Subject: ${e.subject}${e.email_type ? ` (${e.email_type} email)` : ""}`,
+      e.excerpt ? `  ${e.excerpt.replace(/\n+/g, " ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  return [
+    "THE REVIEWER'S TASTE (thumbs they gave past emails; this is direct feedback",
+    "on YOUR previous output, weight it heavily):",
+    ...(liked.length
+      ? [
+          "Emails they LIKED. Match what these do (energy, register, structure),",
+          "never their content:",
+          ...liked.map(fmt),
+        ]
+      : []),
+    ...(disliked.length
+      ? [
+          "Emails they DISLIKED. Diagnose what went wrong (too formal, too long,",
+          "too generic) and do the opposite:",
+          ...disliked.map(fmt),
+        ]
+      : []),
+  ].join("\n");
+}
+
 /** Builds the (system, user) message pair for email generation. */
 export function buildEmailMessages(
   ctx: TopicContext,
@@ -433,6 +471,9 @@ export function buildEmailMessages(
      * and distinct-by-index across the batch instead of reading DB history
      * (parallel per-draft generation calls would otherwise race that read). */
     seedIndex?: number;
+    /** Recent thumbs-rated past emails (listFeedbackEmailExamples), injected
+     * as liked/disliked taste examples so ratings improve future drafts. */
+    feedbackExamples?: FeedbackEmailExample[];
   } = {},
 ): {
   system: string;
@@ -486,6 +527,7 @@ export function buildEmailMessages(
     voiceBlock,
     positioningBlock,
     referenceBlock,
+    buildFeedbackBlock(opts.feedbackExamples),
     "",
     designBrief,
     "",

@@ -19,6 +19,7 @@ import {
 import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
+  DraftFeedback,
   DraftMeta,
   DraftSeoData,
   EmailDraftContent,
@@ -33,6 +34,8 @@ import {
   type EmailPreviewMode,
 } from "@/lib/email/preview-mode";
 import { locateRegion } from "@/lib/email/inline-style";
+import { ThumbsDownIcon, ThumbsUpIcon } from "@/components/ui/icons";
+import { cn } from "@/lib/cn";
 import { DesignChat } from "./design-chat";
 import { EmailPreview } from "./email-preview";
 import { PerformanceStats } from "./performance-stats";
@@ -82,6 +85,8 @@ interface ReviewActionsProps {
   mailerliteConfigured: boolean;
   /** Last-fetched MailerLite performance snapshot, if any (Plan 2). */
   initialPerformance?: PerformanceMetric[];
+  /** The reviewer's saved thumbs rating on this draft, if any. */
+  initialFeedback?: DraftFeedback | null;
 }
 
 /**
@@ -122,6 +127,7 @@ export function ReviewActions({
   publication: initialPublication,
   mailerliteConfigured,
   initialPerformance = [],
+  initialFeedback = null,
 }: ReviewActionsProps) {
   const router = useRouter();
   const [archived, setArchived] = useState(initialArchived);
@@ -183,6 +189,35 @@ export function ReviewActions({
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState<"approve" | null>(null);
   const toast = useToast();
+
+  // Thumbs rating: judgment-only, never changes the draft's state. Ratings
+  // feed the generator's liked/disliked examples, so every tap teaches it.
+  // Optimistic with rollback; tapping the active thumb clears it.
+  const [thumbs, setThumbs] = useState<DraftFeedback | null>(initialFeedback);
+  const [savingThumbs, setSavingThumbs] = useState(false);
+
+  async function rateDraft(next: DraftFeedback) {
+    if (savingThumbs) return;
+    const value = thumbs === next ? null : next;
+    const prev = thumbs;
+    setThumbs(value);
+    setSavingThumbs(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: value }),
+      });
+      if (!res.ok) throw new Error();
+      if (value === "up") toast.success("Noted. More emails like this one.");
+      else if (value === "down") toast.success("Noted. Future emails will steer away from this.");
+    } catch {
+      setThumbs(prev);
+      toast.error("Could not save your rating. Try again.");
+    } finally {
+      setSavingThumbs(false);
+    }
+  }
 
   // Regeneration runs in the background: the reject sheet closes the instant
   // you submit, so you're never stuck watching a spinner. This page keeps a
@@ -938,6 +973,42 @@ export function ReviewActions({
         >
           Delete
         </Button>
+        <div className="flex items-center gap-1 rounded-full border border-border p-1">
+          <Tooltip label="I like this email. Write more like it." side="top">
+            <button
+              type="button"
+              onClick={() => void rateDraft("up")}
+              disabled={savingThumbs}
+              aria-label="Thumbs up: more emails like this"
+              aria-pressed={thumbs === "up"}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                thumbs === "up"
+                  ? "bg-success/15 text-success"
+                  : "text-muted hover:bg-surface-2 hover:text-foreground",
+              )}
+            >
+              <ThumbsUpIcon size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Not my style. Steer future emails away from this." side="top">
+            <button
+              type="button"
+              onClick={() => void rateDraft("down")}
+              disabled={savingThumbs}
+              aria-label="Thumbs down: avoid emails like this"
+              aria-pressed={thumbs === "down"}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                thumbs === "down"
+                  ? "bg-danger/15 text-danger"
+                  : "text-muted hover:bg-surface-2 hover:text-foreground",
+              )}
+            >
+              <ThumbsDownIcon size={16} />
+            </button>
+          </Tooltip>
+        </div>
         <span className="ml-auto flex items-center gap-3 text-[12px] text-muted">
           {designLabel && <span title="This draft's visual design direction">{designLabel}</span>}
           {draftCostUsd > 0 && (

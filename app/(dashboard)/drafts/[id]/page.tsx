@@ -160,6 +160,7 @@ export default async function DraftReviewPage({
           publication={publication}
           mailerliteConfigured={mailerliteConfigured}
           initialPerformance={performance}
+          initialFeedback={draft.feedback}
         />
       )}
     </>

@@ -188,6 +188,7 @@
     state      text not null default 'in_review'
       check (state in ('in_review', 'approved', 'rejected', 'superseded')),
     archived   boolean not null default false,  -- hides from the default Emails list
+    feedback   text check (feedback in ('up', 'down')),  -- reviewer's thumbs rating, fed back into generation (migration 020)
     created_at timestamptz not null default now(),
     unique (job_id, version)
   );
@@ -295,6 +296,7 @@
   create index idx_jobs_topic       on content_jobs(topic_id);
   create index idx_jobs_campaign    on content_jobs(campaign_id);
   create index idx_drafts_job       on drafts(job_id);
+  create index idx_drafts_feedback  on drafts(created_at desc) where feedback is not null;
   create index idx_products_brand   on products(brand_id);
   create index idx_brand_memory_brand on brand_memory(brand_id);
   create index idx_campaigns_brand  on campaigns(brand_id);

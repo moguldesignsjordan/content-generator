@@ -755,6 +755,21 @@ export interface DraftForReview {
   created_at: string;
   // Which pipeline made this draft; the review page branches renderer on it.
   job_type: ContentJobType;
+  /** Reviewer's thumbs rating (migration 020); fed back into generation. */
+  feedback: DraftFeedback | null;
+}
+
+/** Thumbs rating a reviewer can put on a draft. */
+export type DraftFeedback = "up" | "down";
+
+/** One rated past email, distilled for the generation prompt's
+ * liked/disliked examples block. */
+export interface FeedbackEmailExample {
+  feedback: DraftFeedback;
+  subject: string;
+  email_type: EmailType | null;
+  /** Flattened body copy, truncated at query time to keep prompts lean. */
+  excerpt: string;
 }
 
 // Minimal context needed by the regeneration pipeline.

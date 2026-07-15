@@ -17,6 +17,7 @@ import type {
   CampaignStatus,
   ContentJobType,
   ContentSchedule,
+  DraftFeedback,
   DraftForReview,
   DraftGenerationState,
   DraftJobContext,
@@ -29,6 +30,7 @@ import type {
   EmailTemplateId,
   EmailType,
   BlogType,
+  FeedbackEmailExample,
   FlyerAspect,
   EmailDesignProfile,
   StyleReference,
@@ -1000,12 +1002,13 @@ export async function getDraftForReview(
 ): Promise<DraftForReview | null> {
   const db = getAdminClient();
 
-  // Falls back to an archived-less select before migration 003 adds the
-  // column, so this doesn't hard-break every draft page in the meantime.
+  // Falls back to a slimmer select before migrations 003 (archived) and 020
+  // (feedback) add their columns, so this doesn't hard-break every draft page
+  // in the meantime.
   let { data, error } = await db
     .from("drafts")
     .select(
-      `id, version, state, content, meta, seo_data, archived, created_at,
+      `id, version, state, content, meta, seo_data, archived, feedback, created_at,
        content_jobs!inner ( type, topics ( title ) )`,
     )
     .eq("id", draftId)
@@ -1042,7 +1045,74 @@ export async function getDraftForReview(
     archived: (data.archived as boolean) ?? false,
     created_at: data.created_at,
     job_type: (job?.type as ContentJobType) ?? "email",
+    feedback: ((data as { feedback?: string }).feedback as DraftFeedback) ?? null,
   };
+}
+
+/** Sets (or clears, with null) the reviewer's thumbs rating on a draft. */
+export async function setDraftFeedback(
+  draftId: string,
+  feedback: DraftFeedback | null,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("drafts").update({ feedback }).eq("id", draftId);
+  if (error) throw error;
+}
+
+/**
+ * The most recent thumbs-rated EMAIL drafts for a brand, distilled into short
+ * copy excerpts the generation prompt can hold up as "write like this" /
+ * "never like this" examples. Capped per side so the block stays lean, and
+ * non-fatal by design: rating history improving future drafts must never be
+ * the reason a draft fails to generate.
+ */
+export async function listFeedbackEmailExamples(
+  brandId: string,
+  perSide = 3,
+): Promise<FeedbackEmailExample[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select(
+      `content, meta, feedback, created_at,
+       content_jobs!inner ( brand_id, type, email_type )`,
+    )
+    .eq("content_jobs.brand_id", brandId)
+    .eq("content_jobs.type", "email")
+    .not("feedback", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(24);
+  if (error) {
+    logWarn("db:listFeedbackEmailExamples", error.message, { brandId });
+    return [];
+  }
+
+  const examples: FeedbackEmailExample[] = [];
+  const counts = { up: 0, down: 0 };
+  for (const row of (data ?? []) as {
+    content: EmailDraftContent | null;
+    meta: DraftMeta | null;
+    feedback: string | null;
+    content_jobs?: { email_type?: string | null };
+  }[]) {
+    const feedback = row.feedback === "up" || row.feedback === "down" ? row.feedback : null;
+    if (!feedback || counts[feedback] >= perSide) continue;
+    const copy = row.meta?.email_copy;
+    const subject = copy?.subject ?? row.content?.subject ?? "";
+    const body = (copy?.body_sections ?? [])
+      .map((s) => s.body)
+      .join("\n")
+      .trim();
+    if (!subject && !body) continue;
+    counts[feedback] += 1;
+    examples.push({
+      feedback,
+      subject,
+      email_type: (row.content_jobs?.email_type as EmailType) ?? null,
+      excerpt: body.slice(0, 600),
+    });
+  }
+  return examples;
 }
 
 // ── Brand resolution (multi-tenant: a brand belongs to its members) ──────────

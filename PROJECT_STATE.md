@@ -7,7 +7,26 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-14 (editor bug sweep).
+Last updated: 2026-07-15 (thumbs feedback loop + witty one-paragraph product
+emails; **migration 020 needs applying in the Supabase SQL editor** — until
+then rating an email 500s and generation just sees no examples).
+
+## Session 2026-07-15: thumbs feedback loop, product email rework, deeper chat interview
+
+- Chat interview deepened (pushed `5b5a118`, `8414ebd`): every stage asked
+  (tone is its own question), campaigns get the full question set (count,
+  images, tone, length...), landing Blog tile → Image (standalone social
+  flyer via `generate_content` channel `social`), topic question is now
+  open-ended (no past-topic chips).
+- Thumbs up/down on the email review screen (migration 020: `drafts.feedback`).
+  Judgment-only, never touches draft state. Recent rated emails (3 per side)
+  are injected into the generation prompt as liked/disliked taste examples
+  (`listFeedbackEmailExamples` → `buildFeedbackBlock`), fresh + regenerate
+  paths both.
+- Product emails reworked: exactly ONE paragraph (words 80-160, sections
+  [1,1]) with creative-agency energy (fun, witty, never formal) via
+  `EMAIL_LENGTH_TARGETS.product`; the chat's tone question leads product
+  emails with "Fun and witty".
 
 ## Locked decisions
 

@@ -31,6 +31,20 @@ export const HomeIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const ThumbsUpIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M7 10.5v9.5" />
+    <path d="M7 20h10.2a2 2 0 0 0 2-1.6l1.2-6a2 2 0 0 0-2-2.4H14l.8-4a1.9 1.9 0 0 0-3.4-1.5L7 10.5H3.5V20H7Z" />
+  </Svg>
+);
+
+export const ThumbsDownIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17 13.5V4" />
+    <path d="M17 4H6.8a2 2 0 0 0-2 1.6l-1.2 6a2 2 0 0 0 2 2.4H10l-.8 4a1.9 1.9 0 0 0 3.4 1.5l4.4-6H20.5V4H17Z" />
+  </Svg>
+);
+
 export const MailIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="3" y="5" width="18" height="14" rx="2.5" />
