@@ -203,6 +203,14 @@ export const ActivityIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const TerminalIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="4" width="19" height="16" rx="2.5" />
+    <path d="m6.5 9 3.5 3-3.5 3" />
+    <path d="M12.5 15.5h5" />
+  </Svg>
+);
+
 export const SunIcon = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="4" />

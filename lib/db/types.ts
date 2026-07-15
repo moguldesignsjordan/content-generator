@@ -877,6 +877,29 @@ export interface AppLog {
   draft_id: string | null;
 }
 
+// Prompt capture (migration 021): the exact request body of every AI call,
+// written from the HTTP client layer (lib/clients/anthropic.ts custom fetch,
+// lib/clients/gemini-image.ts) via lib/log.ts logPrompt. `request` is the
+// full sanitized body and can be megabytes, so list reads use PromptLogSummary
+// (everything except `request`) and only the /prompts/[id] detail page pulls
+// the full row.
+export type PromptProvider = "anthropic" | "gemini";
+
+export interface PromptLogSummary {
+  id: string;
+  created_at: string;
+  provider: PromptProvider;
+  endpoint: string;
+  model: string | null;
+  preview: string;
+  message_count: number;
+  char_count: number;
+}
+
+export interface PromptLog extends PromptLogSummary {
+  request: Record<string, unknown>;
+}
+
 // Billing (migration 019). One row per brand, mirroring Stripe's own state so
 // the app never has to call Stripe just to answer "what plan is this brand
 // on". Kept in sync by the checkout/webhook routes in lib/billing/stripe.ts.

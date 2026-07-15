@@ -47,6 +47,8 @@ import type {
   PlanCode,
   Positioning,
   Product,
+  PromptLog,
+  PromptLogSummary,
   PublicationRecord,
   ReferenceEmail,
   ReferenceEmailStyleProfile,
@@ -2454,6 +2456,39 @@ export async function getLogStats(): Promise<{
     usageCount24h,
     estimatedUsd24h: Number(estimatedUsd24h.toFixed(4)),
   };
+}
+
+// ── Prompt capture (migration 021) ──────────────────────────────────────────
+
+/** Summary columns only — `request` can be megabytes per row and the /prompts
+ * list never needs it. Degrades to [] pre-migration. */
+export async function listRecentPromptLogs(limit = 100): Promise<PromptLogSummary[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("prompt_logs")
+    .select("id, created_at, provider, endpoint, model, preview, message_count, char_count")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as PromptLogSummary[];
+}
+
+/** One captured request in full, for the /prompts/[id] detail page. */
+export async function getPromptLog(id: string): Promise<PromptLog | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("prompt_logs")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as PromptLog) ?? null;
 }
 
 // ── Billing (migration 019) ───────────────────────────────────────────────────

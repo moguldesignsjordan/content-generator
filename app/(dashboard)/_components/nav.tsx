@@ -8,6 +8,7 @@ import {
   MailIcon,
   MegaphoneIcon,
   PlusIcon,
+  TerminalIcon,
   type IconProps,
 } from "@/components/ui/icons";
 
@@ -77,6 +78,13 @@ export const NAV: NavItem[] = [
     label: "Logs",
     Icon: ActivityIcon,
     match: (p) => p.startsWith("/logs"),
+    adminOnly: true,
+  },
+  {
+    href: "/prompts",
+    label: "Prompts",
+    Icon: TerminalIcon,
+    match: (p) => p.startsWith("/prompts"),
     adminOnly: true,
   },
 ];

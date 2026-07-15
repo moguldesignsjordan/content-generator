@@ -1,5 +1,6 @@
 import "server-only";
 import { GoogleGenAI } from "@google/genai";
+import { logPrompt } from "@/lib/log";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server-only Google GenAI client for image generation ("Nano Banana" family).
@@ -87,6 +88,26 @@ export async function generateGeminiImage(
         },
       ]
     : prompt;
+
+  // Prompt capture (migration 021): image prompts feed the same /prompts
+  // admin page as Claude calls. The reference image is size-only, never bytes.
+  logPrompt({
+    provider: "gemini",
+    endpoint: "/interactions",
+    model: IMAGE_MODEL,
+    preview: prompt.split("\n").find((l) => l.trim()) ?? "",
+    messageCount: 1,
+    request: {
+      model: IMAGE_MODEL,
+      prompt,
+      aspect_ratio: aspectRatio,
+      ...(reference
+        ? {
+            reference: `[${Math.round((reference.data.length * 3) / 4 / 1024)} KB ${reference.mimeType} omitted]`,
+          }
+        : {}),
+    },
+  });
 
   const interaction = await withTransientRetry(() =>
     getGenAI().interactions.create({

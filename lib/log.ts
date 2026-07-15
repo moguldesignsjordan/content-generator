@@ -3,7 +3,7 @@ import { debitForUsage } from "@/lib/billing/credits";
 import { getAdminClient, isSupabaseConfigured } from "@/lib/db/client";
 import { isMissingColumnError, isMissingTableError } from "@/lib/db/table-guard";
 import { IMAGE_COST_USD, priceUsage } from "@/lib/pipeline/cost";
-import type { AppLogLevel } from "@/lib/db/types";
+import type { AppLogLevel, PromptProvider } from "@/lib/db/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Centralized app logging: every error/warning/info line and every Claude
@@ -186,6 +186,58 @@ export function logTokenUsage(
     brand_id: opts?.brandId,
   });
   meter(source, realUsd, opts);
+}
+
+// ── Prompt capture (migration 021) ──────────────────────────────────────────
+
+export interface PromptCapture {
+  provider: PromptProvider;
+  endpoint: string;
+  model: string | null;
+  preview: string;
+  messageCount: number;
+  request: Record<string, unknown>;
+}
+
+/** How long captured prompts are kept. They exist for prompt tuning, not
+ * audit history, and each row can be megabytes. */
+const PROMPT_RETENTION_DAYS = 30;
+
+/**
+ * Persists one AI request body to prompt_logs so the /prompts admin page can
+ * show exactly what context was assembled. Same contract as every other
+ * writer here: fire-and-forget, never throws, degrades to a no-op before
+ * migration 021. Each write also has a small chance of pruning rows past
+ * retention, so the table can't grow unbounded without needing a cron.
+ */
+export function logPrompt(capture: PromptCapture): void {
+  if (!isSupabaseConfigured()) return;
+  void (async () => {
+    try {
+      const db = getAdminClient();
+      const request = capture.request;
+      const { error } = await db.from("prompt_logs").insert({
+        provider: capture.provider,
+        endpoint: capture.endpoint,
+        model: capture.model,
+        preview: capture.preview.slice(0, 200),
+        message_count: capture.messageCount,
+        char_count: JSON.stringify(request).length,
+        request,
+      });
+      if (error && !isMissingTableError(error)) {
+        console.error("[log] failed to persist prompt_logs row:", error);
+      }
+      if (!error && Math.random() < 0.05) {
+        const cutoff = new Date(
+          Date.now() - PROMPT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString();
+        await db.from("prompt_logs").delete().lt("created_at", cutoff);
+      }
+    } catch (err) {
+      console.error("[log] failed to persist prompt_logs row:", err);
+    }
+  })();
 }
 
 /**

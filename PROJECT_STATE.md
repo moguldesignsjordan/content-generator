@@ -7,9 +7,26 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-15 (thumbs feedback loop + witty one-paragraph product
-emails; **migration 020 needs applying in the Supabase SQL editor** — until
-then rating an email 500s and generation just sees no examples).
+Last updated: 2026-07-15 (prompt capture + /prompts admin viewer; **migrations
+020 AND 021 need applying in the Supabase SQL editor** — until 021 is applied,
+prompt capture silently no-ops and /prompts stays empty; until 020, rating an
+email 500s).
+
+## Session 2026-07-15 (later): prompt capture + /prompts admin page
+
+- Every AI request the app sends is now captured in full (migration 021:
+  `prompt_logs`) so Jordan can read exactly how context/prompts are assembled
+  and tune them. Capture happens at the HTTP layer: a custom `fetch` on the
+  one Anthropic client (`lib/clients/prompt-capture.ts`, hooked in
+  `lib/clients/anthropic.ts`) covers all ~19 call sites, plus an explicit
+  capture in `lib/clients/gemini-image.ts` for image prompts.
+- Base64 payloads are stripped to size placeholders; prompt TEXT is never
+  truncated. SDK retry duplicates are deduped; rows self-prune after 30 days.
+- Admin-only `/prompts` list + `/prompts/[id]` detail page (system prompt with
+  cache breakpoints, messages by role, tools collapsed) mirroring the /logs
+  gating. Unit tests in `lib/clients/prompt-capture.test.ts`.
+- Not yet browser-verified live (needs migration 021 applied + a real
+  generation + an admin login).
 
 ## Session 2026-07-15: thumbs feedback loop, product email rework, deeper chat interview
 

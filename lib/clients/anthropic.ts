@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { logTokenUsage, type UsageOpts } from "@/lib/log";
+import { capturePrompt } from "./prompt-capture";
 
 export type { UsageOpts };
 
@@ -32,10 +33,24 @@ export function getAnthropic(): Anthropic {
     // The SDK already retries 429/529/5xx with exponential backoff and
     // honors retry-after headers; 4 attempts rides out a normal rate-limit
     // burst without failing a 60s generation the user is watching.
-    client = new Anthropic({ apiKey, maxRetries: 4 });
+    client = new Anthropic({ apiKey, maxRetries: 4, fetch: capturingFetch });
   }
   return client;
 }
+
+/** Prompt capture (migration 021): every prompt this app sends is captured
+ * at the fetch layer — one hook here instead of edits at all ~19
+ * getAnthropic() call sites, and it can never drift when a new call site is
+ * added. See lib/clients/prompt-capture.ts; a broken capture must never
+ * break or slow the API call it observed. */
+const capturingFetch: typeof fetch = (input, init) => {
+  try {
+    capturePrompt(input as string | URL | Request, init as RequestInit | undefined);
+  } catch (err) {
+    console.error("[prompt-capture] skipped a call:", err);
+  }
+  return fetch(input, init);
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Prompt caching helpers.
