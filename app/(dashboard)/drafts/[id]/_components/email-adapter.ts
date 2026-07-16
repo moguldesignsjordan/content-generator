@@ -64,8 +64,16 @@ export function createEmailAdapter(args: {
 
     // The button edits through the Design panel's text field, never
     // contentEditable: typing on the wrapper let a select-all-delete remove
-    // the <a> itself, and the button vanished with it.
-    usesFormEditor: (marker) => marker === "cta",
+    // the <a> itself, and the button vanished with it. The header is the same
+    // story with the logo <img>: it opens its own panel (logo alignment)
+    // instead of a caret.
+    usesFormEditor: (marker) => marker === "cta" || marker === "header",
+
+    designVariant: (marker) =>
+      marker === "cta" ? "button" : marker === "header" ? "header" : undefined,
+
+    // The header is a logo, not copy; there's nothing for the model to rewrite.
+    canRewrite: (marker) => marker !== "header",
 
     // Body blocks can carry links and emphasis; a headline or a button label is
     // just words.

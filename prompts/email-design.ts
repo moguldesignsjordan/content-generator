@@ -57,6 +57,59 @@ const LAYOUT_SHAPES: Record<EmailTemplateId, string> = {
 };
 
 /**
+ * The footer spec inside "Required chrome": a designed footer, not an
+ * afterthought — wordmark, contact line, social badge row (from the brand's
+ * saved social links), postal address, permission line, unsubscribe. Mirrors
+ * the code template's renderFooter so model-designed and template-rendered
+ * emails end at the same place.
+ */
+function buildFooterChrome(tokens: BrandTokens): string[] {
+  const footer = tokens.footer;
+  const social = footer.social ?? {};
+  const socialEntries: [string, string, string | undefined][] = [
+    ["LinkedIn", "in", social.linkedin],
+    ["X", "X", social.twitter],
+    ["Instagram", "ig", social.instagram],
+    ["YouTube", "yt", social.youtube],
+  ];
+  const socialLines = socialEntries
+    .filter(([, , href]) => href)
+    .map(([name, glyph, href]) => `    - ${name} ("${glyph}"): ${href}`);
+
+  return [
+    "- Footer (its wrapper carries data-region=\"footer\"), centered, small muted text,",
+    "  separated from the body by a thin top hairline or generous space (per the style),",
+    "  stacked in this order:",
+    `  1) the sender wordmark: "${tokens.logo_alt}" small (about 15px) in the heading font,`,
+    "     bold, with an accent-colored period" +
+      (footer.website ? `, linked to ${footer.website}` : "") +
+      ".",
+    "  2) a muted contact line" +
+      (footer.website ? `: the bare domain of ${footer.website}` : "") +
+      (footer.contact_email
+        ? `${footer.website ? ", a middot separator, and" : ":"} ${footer.contact_email} (mailto link)`
+        : "") +
+      ".",
+    ...(socialLines.length
+      ? [
+          "  3) a social row: one circular badge link per network, a 28px circle with a very",
+          "     light neutral fill and the muted-color bold glyph text shown below (never an",
+          "     external icon image; text glyphs survive every client). Link each to its URL:",
+          ...socialLines,
+        ]
+      : []),
+    ...(footer.postal_address
+      ? [
+          `  4) the postal address "${footer.postal_address}" at 11px (marketing-email law requires it).`,
+        ]
+      : []),
+    `  5) a short permission line ("You're receiving this email because you subscribed to`,
+    `     updates from ${tokens.sender_name}.") at 11px,`,
+    "  6) and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
+  ];
+}
+
+/**
  * Builds the email design brief for the generation system prompt: layout
  * direction for this email's shape plus the hard email-HTML rules and the
  * brand's visual tokens.
@@ -68,7 +121,6 @@ export function buildEmailDesignBrief(
 ): string {
   const c = tokens.colors;
   const f = tokens.fonts;
-  const footer = tokens.footer;
   const hero = opts.heroImage;
   // Defaults to the safe baseline look when no style is passed (keeps every
   // existing call site, and any legacy path, producing a valid brief).
@@ -157,13 +209,7 @@ export function buildEmailDesignBrief(
     tokens.logo_url
       ? `- Header: the brand logo <img src="${tokens.logo_url}" alt="${tokens.logo_alt}"> capped at max-width:170px;max-height:48px, positioned and divided from the body per the STYLE DIRECTION below.`
       : `- Header: a typographic wordmark, "${tokens.logo_alt}" in the heading font, bold, with a period after it colored in the accent, positioned and divided from the body per the STYLE DIRECTION below.`,
-    "- Footer, centered, small muted text above a top border or generous space (per the style): the sender name" +
-      (footer.website ? ` linked to ${footer.website}` : "") +
-      (footer.contact_email ? `, the contact email ${footer.contact_email}` : "") +
-      (footer.postal_address
-        ? `, the postal address "${footer.postal_address}" (marketing-email law requires it)`
-        : "") +
-      ", and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
+    ...buildFooterChrome(tokens),
     "",
     "BRAND TOKENS (the default palette; use these exact values UNLESS the",
     "instruction below explicitly asks for a different color, tone, or look",

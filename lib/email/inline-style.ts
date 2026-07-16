@@ -106,6 +106,15 @@ export function locateRegion(
 
   const start = html.lastIndexOf("<", attrIdx);
   if (start === -1) return null;
+  return locateElementAt(html, start);
+}
+
+/**
+ * Locates the element whose opening tag starts at `start` (which must be the
+ * index of its '<'), using the same depth-aware, comment-skipping walk as
+ * locateRegion. Returns null for self-closing/unclosed elements.
+ */
+function locateElementAt(html: string, start: number): RegionLocation | null {
   const tag = /^<([a-zA-Z][a-zA-Z0-9]*)/.exec(html.slice(start))?.[1]?.toLowerCase();
   if (!tag) return null;
 
@@ -193,6 +202,95 @@ export function replaceRegionInner(
   return {
     html: html.slice(0, located.innerStart) + innerHtml + html.slice(located.innerEnd),
   };
+}
+
+/** Block-level tags that can hold a run of copy worth editing. */
+const TEXT_BLOCK_TAGS = /^(p|h1|h2|h3|h4|ul|ol|td|div)$/i;
+/** Opening tags that mark a candidate as a structural wrapper, not a text leaf. */
+const NESTED_BLOCK_RE = /<(p|h1|h2|h3|h4|ul|ol|table|tr|td|div)\b/i;
+
+/**
+ * Tags every stray text block with data-region="body" so the whole email is
+ * click-to-editable. Model-designed emails routinely leave copy outside the
+ * prompted regions (a sign-off line, a P.S., fine print under the CTA), and
+ * the inline editor only arms elements carrying data-region — those words were
+ * simply dead to the editor. This walks the document, finds block elements
+ * that hold visible text but sit outside every existing region, and splices
+ * the attribute into their opening tag. Idempotent: a tagged element is a
+ * region, so the next pass skips it and everything inside it.
+ *
+ * Conservative on purpose:
+ * - only inside <body>, never the preheader (display:none) or head/style
+ * - `td`/`div` only when they are text LEAVES (no nested block elements), so
+ *   layout wrappers never become one giant editable region
+ * - comment spans (Outlook conditionals) are skipped wholesale
+ */
+export function ensureEditableRegions(html: string): string {
+  const bodyStart = html.search(/<body[\s>]/i);
+  if (bodyStart === -1) return html;
+  const bodyOpenEnd = findTagEnd(html, bodyStart);
+  if (bodyOpenEnd === -1) return html;
+
+  // Spans already claimed: every existing data-region element, whole.
+  const spans: Array<{ start: number; end: number }> = [];
+  const regionNames = new Set<string>();
+  const attrRe = /data-region="([^"]*)"/g;
+  for (let m = attrRe.exec(html); m; m = attrRe.exec(html)) regionNames.add(m[1]);
+  for (const name of regionNames) {
+    for (let i = 0; ; i++) {
+      const located = locateRegion(html, name, i);
+      if (!located) break;
+      spans.push({ start: located.start, end: located.end });
+    }
+  }
+  // Comment spans (Outlook conditionals) are never candidates.
+  for (let from = 0; ; ) {
+    const open = html.indexOf("<!--", from);
+    if (open === -1) break;
+    const close = html.indexOf("-->", open);
+    const end = close === -1 ? html.length : close + 3;
+    spans.push({ start: open, end });
+    from = end;
+  }
+  const claimed = (idx: number) => spans.some((s) => idx >= s.start && idx < s.end);
+
+  const inserts: number[] = [];
+  const candidateRe = /<([a-zA-Z][a-zA-Z0-9]*)/g;
+  candidateRe.lastIndex = bodyOpenEnd;
+  for (let m = candidateRe.exec(html); m; m = candidateRe.exec(html)) {
+    const lt = m.index;
+    if (!TEXT_BLOCK_TAGS.test(m[1]) || claimed(lt)) continue;
+
+    const openEnd = findTagEnd(html, lt);
+    if (openEnd === -1) continue;
+    const openTag = html.slice(lt, openEnd);
+    if (openTag.includes("data-region=")) continue;
+    if (/display\s*:\s*none/i.test(openTag)) continue;
+
+    const located = locateElementAt(html, lt);
+    if (!located) continue;
+
+    const text = located.innerHTML
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&[a-zA-Z#0-9]+;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) continue;
+
+    // td/div wrappers with block children stay structural; their leaves get
+    // tagged instead (this same loop reaches them later).
+    if (/^(td|div)$/i.test(m[1]) && NESTED_BLOCK_RE.test(located.innerHTML)) continue;
+
+    inserts.push(lt + 1 + m[1].length);
+    // Everything inside this new region is claimed now.
+    spans.push({ start: located.start, end: located.end });
+  }
+
+  let out = html;
+  for (const at of inserts.sort((a, b) => b - a)) {
+    out = `${out.slice(0, at)} data-region="body"${out.slice(at)}`;
+  }
+  return out;
 }
 
 /**
@@ -317,6 +415,42 @@ export function applyCtaStyleChanges(elementHtml: string, changes: StyleChanges)
       return applyStyleChanges(out, button);
     }
     out = out.slice(0, anchorIdx) + applyStyleChanges(out.slice(anchorIdx), button);
+  }
+  return out;
+}
+
+/**
+ * Styles the header region, landing text-align where it actually moves the
+ * logo. The code-template header is a `<table data-region="header">` whose
+ * `<td>` holds the logo/wordmark; text-align must sit on that cell (and any
+ * legacy align="" attribute there must go, or it wins in Outlook). Model
+ * designs sometimes set the logo `<img>` to display:block, which text-align
+ * can't move, so that is flipped to inline-block. Non-alignment props stay on
+ * the wrapper like every other region.
+ */
+export function applyHeaderStyleChanges(elementHtml: string, changes: StyleChanges): string {
+  const { textAlign, ...rest } = changes;
+  let out = Object.keys(rest).length ? applyStyleChanges(elementHtml, rest) : elementHtml;
+  if (!textAlign) return out;
+
+  const tdIdx = out.search(/<td[\s>]/i);
+  if (tdIdx === -1) {
+    out = applyStyleChanges(out, { textAlign });
+  } else {
+    let cell = applyStyleChanges(out.slice(tdIdx), { textAlign });
+    // Drop a legacy align attribute on that cell so it can't override the style.
+    const cellOpen = /^<td\b[^>]*>/i.exec(cell)?.[0];
+    if (cellOpen && /\salign="[^"]*"/i.test(cellOpen)) {
+      cell = cellOpen.replace(/\salign="[^"]*"/i, "") + cell.slice(cellOpen.length);
+    }
+    out = out.slice(0, tdIdx) + cell;
+  }
+
+  // A block-level logo ignores text-align; make it flow inline instead.
+  const imgMatch = /<img\b[^>]*>/i.exec(out);
+  if (imgMatch && /display\s*:\s*block/i.test(imgMatch[0])) {
+    const fixed = imgMatch[0].replace(/display\s*:\s*block/i, "display:inline-block");
+    out = out.slice(0, imgMatch.index) + fixed + out.slice(imgMatch.index + imgMatch[0].length);
   }
   return out;
 }

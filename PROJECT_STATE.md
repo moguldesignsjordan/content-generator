@@ -7,10 +7,29 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-15 (prompt capture + /prompts admin viewer; **migrations
-020 AND 021 need applying in the Supabase SQL editor** — until 021 is applied,
-prompt capture silently no-ops and /prompts stays empty; until 020, rating an
-email 500s).
+Last updated: 2026-07-15 (email editor sweep — see session below; also still
+open: **migrations 020 AND 021 need applying in the Supabase SQL editor** —
+until 021 is applied, prompt capture silently no-ops and /prompts stays empty;
+until 020, rating an email 500s).
+
+## Session 2026-07-15 (latest): email editor sweep
+
+- Fixed the "some words aren't editable" bug at the root: copy the model (or
+  the code templates' lead/`<h2>` blocks) left outside any `data-region` is
+  now auto-tagged as an editable body region — at generation, on every edit,
+  and write-through when an old draft's review page opens.
+- Header has its own edit mode: selecting it offers only "Align logo"
+  (left/center/right, applied to the cell that actually moves the logo);
+  no more free-typing over the logo, no Rewrite.
+- Footer redesigned (new generations): wordmark, domain·email line, circular
+  social badges pulled from Settings' social links (typographic glyphs, no
+  external images), postal address, permission line, unsubscribe. Same spec
+  mirrored into the model design brief.
+- Editor polish: Design panel follows page scroll; color swatches seed from
+  the section's real rendered color.
+- typecheck/build/339 tests green; UNCOMMITTED (kept separate from the
+  prompt-capture session's uncommitted files); browser click-through pending.
+  Step plan: `~/.claude/plans/wondrous-cuddling-yeti.md`.
 
 ## Session 2026-07-15 (later): prompt capture + /prompts admin page
 

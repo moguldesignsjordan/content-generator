@@ -84,49 +84,94 @@ export function renderHeader(tokens: BrandTokens): string {
   );
 }
 
+/** Strips protocol and trailing slash for a display-friendly domain, e.g. "moguldesignagency.com". */
+function displayDomain(url: string): string {
+  return url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+}
+
 /**
- * Footer: sender sign-off, optional website/social/contact, and the literal
- * {$unsubscribe} merge tag MailerLite requires. The tag is here by construction
- * so a generated email can never be unpublishable.
+ * Social row: one circular typographic badge per configured network. Text
+ * glyphs in table-cell circles on purpose — no external icon images means
+ * nothing to block or break in Gmail/Outlook, and the circles degrade to
+ * small squares where border-radius is ignored. Order matches SocialLinks.
+ */
+export function renderSocialBadges(tokens: BrandTokens): string {
+  const social = tokens.footer.social ?? {};
+  const muted = tokens.colors.muted;
+  const entries: [title: string, glyph: string, href: string | undefined][] = [
+    ["LinkedIn", "in", social.linkedin],
+    ["X", "X", social.twitter],
+    ["Instagram", "ig", social.instagram],
+    ["YouTube", "yt", social.youtube],
+  ];
+  const cells = entries
+    .filter(([, , href]) => href)
+    .map(
+      ([title, glyph, href]) =>
+        `<td style="padding:0 5px;">` +
+        `<a href="${escapeHtml(href as string)}" title="${title}" class="em-social" ` +
+        `style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;` +
+        `background:#EEF1F6;color:${muted};font-family:${tokens.fonts.body};font-size:12px;` +
+        `font-weight:700;text-align:center;text-decoration:none;">${glyph}</a></td>`,
+    );
+  if (!cells.length) return "";
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:14px auto 0;">` +
+    `<tr>${cells.join("")}</tr></table>`
+  );
+}
+
+/**
+ * Footer: sender wordmark, contact line (domain and email), social badge row,
+ * postal address, permission reminder, and the literal {$unsubscribe} merge
+ * tag MailerLite requires. The tag is here by construction so a generated
+ * email can never be unpublishable.
  */
 export function renderFooter(tokens: BrandTokens): string {
   const f = tokens.footer;
   const muted = tokens.colors.muted;
-  const website = f.website
-    ? `<a href="${escapeHtml(f.website)}" style="color:${tokens.colors.primary};text-decoration:none;font-weight:600;">${escapeHtml(tokens.sender_name)}</a>`
-    : `<span style="color:${tokens.colors.primary};font-weight:600;">${escapeHtml(tokens.sender_name)}</span>`;
 
-  const social = f.social ?? {};
-  const entries: [string, string | undefined][] = [
-    ["LinkedIn", social.linkedin],
-    ["Twitter", social.twitter],
-    ["Instagram", social.instagram],
-    ["YouTube", social.youtube],
-  ];
-  const socialLinks = entries
-    .filter(([, href]) => href)
-    .map(
-      ([label, href]) =>
-        `<a href="${escapeHtml(href as string)}" style="color:${muted};text-decoration:none;margin:0 8px;">${label}</a>`,
+  // Sender wordmark, set in the heading font with the accent period — the
+  // header's typographic identity, echoed small.
+  const wordmarkInner =
+    `<span class="em-heading" style="font-family:${tokens.fonts.heading};font-size:15px;font-weight:700;` +
+    `letter-spacing:-0.2px;color:${tokens.colors.primary};">${escapeHtml(tokens.sender_name)}` +
+    `<span class="em-accent" style="color:${tokens.colors.accent};">.</span></span>`;
+  const wordmark = f.website
+    ? `<a href="${escapeHtml(f.website)}" style="text-decoration:none;">${wordmarkInner}</a>`
+    : wordmarkInner;
+
+  // One muted contact line: domain and email, dot-separated.
+  const contactParts: string[] = [];
+  if (f.website) {
+    contactParts.push(
+      `<a href="${escapeHtml(f.website)}" style="color:${muted};text-decoration:none;">${escapeHtml(displayDomain(f.website))}</a>`,
     );
-  const socialRow = socialLinks.length
-    ? `<div style="margin:10px 0;font-size:12px;">${socialLinks.join("")}</div>`
+  }
+  if (f.contact_email) {
+    contactParts.push(
+      `<a href="mailto:${escapeHtml(f.contact_email)}" style="color:${muted};text-decoration:none;">${escapeHtml(f.contact_email)}</a>`,
+    );
+  }
+  const contactRow = contactParts.length
+    ? `<div style="margin:6px 0 0;">${contactParts.join(`<span style="padding:0 6px;">&middot;</span>`)}</div>`
     : "";
 
   return (
-    `<table role="presentation" width="100%" data-region="footer" class="em-border" style="margin-top:40px;padding-top:24px;` +
+    `<table role="presentation" width="100%" data-region="footer" class="em-border" style="margin-top:40px;padding-top:28px;` +
     `border-top:1px solid #E6EAF0;font-family:${tokens.fonts.body};">` +
     `<tr><td class="em-muted" style="text-align:center;color:${muted};font-size:12px;line-height:1.6;">` +
-    `<div style="margin:0 0 4px;">${website}</div>` +
-    (f.contact_email
-      ? `<div style="margin:0 0 4px;"><a href="mailto:${escapeHtml(f.contact_email)}" style="color:${muted};text-decoration:none;">${escapeHtml(f.contact_email)}</a></div>`
-      : "") +
-    socialRow +
+    `<div style="margin:0;">${wordmark}</div>` +
+    contactRow +
+    renderSocialBadges(tokens) +
     // CAN-SPAM/GDPR: marketing email must carry the sender's physical address.
     (f.postal_address
-      ? `<div style="margin:10px 0 0;">${escapeHtml(f.postal_address)}</div>`
+      ? `<div style="margin:14px 0 0;font-size:11px;">${escapeHtml(f.postal_address)}</div>`
       : "") +
-    `<div style="margin:16px 0 0;">` +
+    `<div style="margin:14px 0 0;font-size:11px;">` +
+    `You're receiving this email because you subscribed to updates from ${escapeHtml(tokens.sender_name)}.` +
+    `</div>` +
+    `<div style="margin:8px 0 0;">` +
     `<a href="{$unsubscribe}" style="color:${muted};text-decoration:underline;">Unsubscribe</a>` +
     `</div>` +
     `</td></tr></table>`
@@ -171,7 +216,7 @@ const DARK = {
  * inline styles email requires). The light design is the base; stripping
  * this block leaves a correct light email.
  */
-function renderDarkModeStyle(): string {
+function renderDarkModeStyle(accent: string): string {
   return (
     `<style>` +
     `:root{color-scheme:light dark;supported-color-schemes:light dark;}` +
@@ -182,8 +227,14 @@ function renderDarkModeStyle(): string {
     `.em-lead{color:${DARK.lead} !important;}` +
     `.em-text,.em-text p{color:${DARK.text} !important;}` +
     `.em-muted,.em-muted a,.em-muted span{color:${DARK.muted} !important;}` +
+    // The footer wordmark and its accent period sit inside .em-muted, whose
+    // descendant rules above out-rank their own classes; these higher-
+    // specificity rules keep them from graying out.
+    `.em-muted .em-heading{color:${DARK.heading} !important;}` +
+    `.em-muted span.em-accent{color:${accent} !important;}` +
     `.em-hairline{background:${DARK.hairline} !important;}` +
     `.em-border{border-color:${DARK.hairline} !important;}` +
+    `.em-social,.em-muted a.em-social{background:${DARK.hairline} !important;color:${DARK.lead} !important;}` +
     `}` +
     `</style>`
   );
@@ -206,7 +257,7 @@ export function renderShell(
     `<meta name="viewport" content="width=device-width,initial-scale=1" />` +
     `<meta name="color-scheme" content="light dark" />` +
     `<meta name="supported-color-schemes" content="light dark" />` +
-    renderDarkModeStyle() +
+    renderDarkModeStyle(c.accent) +
     `<title>Email</title></head>` +
     `<body class="em-bg" style="margin:0;padding:0;background:#EEF1F6;-webkit-font-smoothing:antialiased;">` +
     renderPreheader(opts.preheader ?? "") +

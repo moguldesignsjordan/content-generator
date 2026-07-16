@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCtaStyleChanges,
+  applyHeaderStyleChanges,
   applyStyleChanges,
   replaceCtaText,
   countRegion,
+  ensureEditableRegions,
   guessStyleValue,
   locateRegion,
   removeRegion,
@@ -292,5 +294,114 @@ describe("replaceCtaText", () => {
   it("returns the input unchanged when the anchor never closes", () => {
     const broken = `<div data-region="cta"><a href="#">Go`;
     expect(replaceCtaText(broken, "New")).toBe(broken);
+  });
+});
+
+describe("ensureEditableRegions", () => {
+  it("tags a stray sign-off paragraph above the footer as body", () => {
+    const html =
+      `<html><body>` +
+      `<div data-region="body"><p>Main copy.</p></div>` +
+      `<p style="margin:24px 0 0;">Talk soon,<br>Jordan</p>` +
+      `<table data-region="footer"><tr><td>Bye</td></tr></table>` +
+      `</body></html>`;
+    const out = ensureEditableRegions(html);
+    expect(out).toContain(`<p data-region="body" style="margin:24px 0 0;">Talk soon,`);
+    // The pre-existing regions are untouched.
+    expect(countRegion(out, "body")).toBe(2);
+    expect(countRegion(out, "footer")).toBe(1);
+  });
+
+  it("is idempotent", () => {
+    const html =
+      `<html><body>` +
+      `<div data-region="body"><p>Main copy.</p></div>` +
+      `<p>PS: one more thing.</p>` +
+      `</body></html>`;
+    const once = ensureEditableRegions(html);
+    expect(ensureEditableRegions(once)).toBe(once);
+  });
+
+  it("never touches text already inside a region, the head, or hidden preheaders", () => {
+    const html =
+      `<html><head><style>p{color:red}</style></head><body>` +
+      `<div style="display:none;max-height:0;">Preview text&#847;&zwnj;</div>` +
+      `<div data-region="body"><p>Inside a region.</p></div>` +
+      `</body></html>`;
+    expect(ensureEditableRegions(html)).toBe(html);
+  });
+
+  it("tags a leaf td holding copy, but never a structural wrapper td", () => {
+    const html =
+      `<html><body><table><tr>` +
+      `<td><table><tr><td>Fine print the model left untagged.</td></tr></table></td>` +
+      `</tr></table></body></html>`;
+    const out = ensureEditableRegions(html);
+    // Only the INNER td (the text leaf) is tagged.
+    expect(countRegion(out, "body")).toBe(1);
+    expect(out).toContain(`<td data-region="body">Fine print`);
+  });
+
+  it("skips Outlook conditional comments and empty blocks", () => {
+    const html =
+      `<html><body>` +
+      `<!--[if mso]><table><tr><td>MSO scaffolding</td></tr></table><![endif]-->` +
+      `<div>   </div>` +
+      `<div data-region="body"><p>Copy.</p></div>` +
+      `</body></html>`;
+    expect(ensureEditableRegions(html)).toBe(html);
+  });
+
+  it("locates tagged regions by the same occurrence index the editor will use", () => {
+    const html =
+      `<html><body>` +
+      `<div data-region="body"><p>First.</p></div>` +
+      `<p>Stray second.</p>` +
+      `</body></html>`;
+    const out = ensureEditableRegions(html);
+    const second = locateRegion(out, "body", 1);
+    expect(second?.innerHTML).toBe("Stray second.");
+  });
+});
+
+describe("applyHeaderStyleChanges", () => {
+  const HEADER =
+    `<table role="presentation" width="100%" data-region="header">` +
+    `<tr><td class="em-border" style="padding:0 0 24px;">` +
+    `<img src="https://x/logo.png" alt="Brand" style="display:inline-block;max-width:170px;" />` +
+    `</td></tr></table>`;
+
+  it("lands text-align on the inner td, not the table", () => {
+    const out = applyHeaderStyleChanges(HEADER, { textAlign: "center" });
+    const tableTag = out.slice(0, out.indexOf(">") + 1);
+    expect(tableTag).not.toContain("text-align");
+    const tdTag = out.slice(out.indexOf("<td"), out.indexOf(">", out.indexOf("<td")) + 1);
+    expect(tdTag).toContain("text-align:center");
+  });
+
+  it("strips a legacy align attribute from the cell so it can't win in Outlook", () => {
+    const legacy = HEADER.replace(`<td class="em-border"`, `<td align="left" class="em-border"`);
+    const out = applyHeaderStyleChanges(legacy, { textAlign: "right" });
+    expect(out).not.toContain(`align="left"`);
+    expect(out).toContain("text-align:right");
+  });
+
+  it("flips a block-level logo img to inline-block so text-align can move it", () => {
+    const blockLogo = HEADER.replace("display:inline-block", "display:block");
+    const out = applyHeaderStyleChanges(blockLogo, { textAlign: "center" });
+    expect(out).toContain("display:inline-block");
+    expect(out).not.toContain("display:block");
+  });
+
+  it("applies alignment to the wrapper itself when there is no td (model-designed div header)", () => {
+    const divHeader = `<div data-region="header" style="padding:0 0 24px;"><span>Brand.</span></div>`;
+    const out = applyHeaderStyleChanges(divHeader, { textAlign: "center" });
+    expect(out.slice(0, out.indexOf(">") + 1)).toContain("text-align:center");
+  });
+
+  it("keeps non-alignment props on the wrapper", () => {
+    const out = applyHeaderStyleChanges(HEADER, { margin: "8px 0", textAlign: "left" });
+    const tableTag = out.slice(0, out.indexOf(">") + 1);
+    expect(tableTag).toContain("margin:8px 0");
   });
 });

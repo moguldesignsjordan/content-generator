@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDraftWithJobContext } from "@/lib/db/queries";
 import {
   applyCtaStyleChanges,
+  applyHeaderStyleChanges,
   applyStyleChanges,
   locateRegion,
   replaceCtaText,
@@ -80,11 +81,14 @@ export async function POST(
     }
 
     // The CTA is two elements (wrapper + <a> button); its text/fill styling
-    // must land on the button itself to be visible.
+    // must land on the button itself to be visible. The header's alignment
+    // must land on its inner cell to move the logo.
     let newElement =
       body.region === "cta"
         ? applyCtaStyleChanges(located.outerHTML, changes)
-        : applyStyleChanges(located.outerHTML, changes);
+        : body.region === "header"
+          ? applyHeaderStyleChanges(located.outerHTML, changes)
+          : applyStyleChanges(located.outerHTML, changes);
     if (buttonText) newElement = replaceCtaText(newElement, buttonText);
     const newHtml =
       draftCtx.content.html.slice(0, located.start) +

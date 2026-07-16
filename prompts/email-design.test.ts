@@ -96,6 +96,28 @@ describe("buildEmailDesignBrief", () => {
     }
   });
 
+  it("specs the social badge row only when the brand has social links", () => {
+    const withSocial = buildEmailDesignBrief(
+      {
+        ...TOKENS,
+        footer: {
+          ...TOKENS.footer,
+          social: { linkedin: "https://linkedin.com/company/x", youtube: "https://youtube.com/@x" },
+        },
+      },
+      "newsletter_tip",
+    );
+    expect(withSocial).toContain("a social row");
+    expect(withSocial).toContain("https://linkedin.com/company/x");
+    expect(withSocial).toContain("https://youtube.com/@x");
+    expect(withSocial).toMatch(/never an\s+external icon image/i);
+
+    const withoutSocial = buildEmailDesignBrief(TOKENS, "newsletter_tip");
+    expect(withoutSocial).not.toContain("a social row");
+    // The unsubscribe guarantee is spec'd regardless.
+    expect(withoutSocial).toContain("{$unsubscribe}");
+  });
+
   it("includes a hero image placement block only when a hero image is given", () => {
     const withoutHero = buildEmailDesignBrief(TOKENS, "newsletter_tip", {
       style: EMAIL_STYLES.soft_card,

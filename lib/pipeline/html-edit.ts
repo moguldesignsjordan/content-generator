@@ -2,6 +2,7 @@ import "server-only";
 import { updateDraftContent } from "@/lib/db/queries";
 import { stripEmDashes } from "@/lib/text";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
+import { ensureEditableRegions } from "@/lib/email/inline-style";
 import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
 import type {
   DraftJobContext,
@@ -92,8 +93,12 @@ export async function commitHtmlEdit(args: {
   // Dark-mode repair runs on every edit, so a patch that introduces dark text
   // (a model recolor, a user picking black in the Design panel) can't leave the
   // email unreadable in dark mode — and older drafts get repaired on their
-  // next edit. ensureUnsubscribeTag stays last: it is the publish guarantee.
-  const safeHtml = ensureUnsubscribeTag(ensureDarkModeReadability(stripEmDashes(validated)));
+  // next edit. Region tagging repairs older drafts the same way, so copy the
+  // model left outside a data-region becomes editable after any edit.
+  // ensureUnsubscribeTag stays last: it is the publish guarantee.
+  const safeHtml = ensureUnsubscribeTag(
+    ensureEditableRegions(ensureDarkModeReadability(stripEmDashes(validated))),
+  );
 
   const history: StyleEditHistoryEntry[] = [
     ...(draftCtx.meta.style_edit_history ?? []),

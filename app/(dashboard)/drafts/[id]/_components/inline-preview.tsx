@@ -559,6 +559,22 @@ export function InlinePreview({
     return () => document.removeEventListener("mousedown", onDown);
   }, [editing, commitEdit]);
 
+  // The Design panel is portalled and positioned in viewport coordinates
+  // computed at render time; scrolling the PAGE doesn't re-render, so the
+  // panel used to stay behind, hanging where its section no longer was.
+  // Re-render on scroll/resize while it's open so the anchor recomputes.
+  const [, setRepositionTick] = useState(0);
+  useEffect(() => {
+    if (!designOpen) return;
+    const bump = () => setRepositionTick((t) => t + 1);
+    window.addEventListener("scroll", bump, true);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("scroll", bump, true);
+      window.removeEventListener("resize", bump);
+    };
+  }, [designOpen]);
+
   // ── Toolbar actions ───────────────────────────────────────────────────────
 
   async function runAdapter(fn: () => Promise<SaveResult>, failure: string) {
@@ -619,6 +635,22 @@ export function InlinePreview({
   }
 
   const doc = iframeRef.current?.contentDocument ?? null;
+  const designVariant = selected ? adapter.designVariant?.(selected.marker) : undefined;
+
+  // The section's LIVE rendered colors, read from the iframe. Seeds the Design
+  // panel when the element carries no inline color of its own — inherited
+  // styles are invisible to the string-based guess, which used to leave the
+  // swatches on black/white regardless of what the email actually showed.
+  const computedSeed = (() => {
+    if (!designOpen || !selected) return undefined;
+    const el = selectedElRef.current;
+    const win = iframeRef.current?.contentWindow;
+    if (!el || !win) return undefined;
+    const target = designVariant === "button" ? (el.querySelector("a") ?? el) : el;
+    const cs = win.getComputedStyle(target);
+    return { color: cs.color, background: cs.backgroundColor };
+  })();
+  const canRewrite = !selected || (adapter.canRewrite?.(selected.marker) ?? true);
   const canDelete = !!selected && !!doc && adapter.canDelete(selected, doc);
   const deleteBlocked =
     selected && doc ? adapter.deleteBlockedReason?.(selected, doc) ?? null : null;
@@ -702,14 +734,16 @@ export function InlinePreview({
           <span className="px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">
             {selected.label}
           </span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => setRewriteOpen(true)}
-            className="pointer-events-auto rounded-full px-2.5 py-1 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
-          >
-            Rewrite
-          </button>
+          {canRewrite && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setRewriteOpen(true)}
+              className="pointer-events-auto rounded-full px-2.5 py-1 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+            >
+              Rewrite
+            </button>
+          )}
           {adapter.applyStyle && (
             <button
               type="button"
@@ -719,7 +753,11 @@ export function InlinePreview({
                 designOpen ? "bg-surface-3 text-foreground" : "text-foreground hover:bg-surface-3"
               }`}
             >
-              {adapter.usesFormEditor?.(selected.marker) ? "Edit button" : "Design"}
+              {designVariant === "button"
+                ? "Edit button"
+                : designVariant === "header"
+                  ? "Align logo"
+                  : "Design"}
             </button>
           )}
           {canDelete &&
@@ -755,20 +793,19 @@ export function InlinePreview({
           // (color, size, weight, the button's fill) lives on the anchor, and
           // the panel doubles as the button's no-AI wording editor.
           textSnippet={
-            adapter.usesFormEditor?.(selected.marker)
+            designVariant === "button"
               ? selectedElRef.current?.querySelector("a")?.outerHTML
               : undefined
           }
-          buttonMode={adapter.usesFormEditor?.(selected.marker) ?? false}
+          variant={designVariant}
+          computedSeed={computedSeed}
           initialText={
-            adapter.usesFormEditor?.(selected.marker)
+            designVariant === "button"
               ? (selectedElRef.current?.querySelector("a")?.textContent ?? selected.text).trim()
               : undefined
           }
           onApplyText={
-            adapter.usesFormEditor?.(selected.marker)
-              ? (text) => void handleFormText(text)
-              : undefined
+            designVariant === "button" ? (text) => void handleFormText(text) : undefined
           }
           anchor={designLayout.anchor}
           maxHeight={designLayout.maxHeight}

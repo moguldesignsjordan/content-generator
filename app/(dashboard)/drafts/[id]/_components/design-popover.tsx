@@ -25,13 +25,29 @@ const SPACING_MARGIN: Record<SpacingPreset, string> = {
   roomy: "40px 0",
 };
 
+/** Converts a computed "rgb(a, b, c)" color to #hex; returns undefined for anything else (transparent, keywords). */
+function rgbToHex(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(value.trim());
+  if (!m) return value.startsWith("#") ? value.slice(0, 7) : undefined;
+  if (m[4] !== undefined && parseFloat(m[4]) === 0) return undefined; // fully transparent
+  const hex = (n: string) => parseInt(n, 10).toString(16).padStart(2, "0");
+  return `#${hex(m[1])}${hex(m[2])}${hex(m[3])}`;
+}
+
 /**
  * Best-effort read of a section's current inline style, to seed the controls.
  * `textSnippet` is the element that actually carries the text styling when it
  * differs from the section wrapper — the CTA's <a> button — while spacing and
- * alignment always come from the wrapper.
+ * alignment always come from the wrapper. `computedSeed` carries the LIVE
+ * rendered colors from the preview iframe, used when the element has no inline
+ * color of its own (inherited styles are invisible to the string guess).
  */
-function guessDesignState(snippet: string, textSnippet = snippet) {
+function guessDesignState(
+  snippet: string,
+  textSnippet = snippet,
+  computedSeed?: { color?: string; background?: string },
+) {
   const color = guessStyleValue(textSnippet, "color");
   const background = guessStyleValue(textSnippet, "background");
   const margin = guessStyleValue(snippet, "margin");
@@ -44,8 +60,14 @@ function guessDesignState(snippet: string, textSnippet = snippet) {
   const spacing: SpacingPreset = maxMargin <= 12 ? "compact" : maxMargin >= 30 ? "roomy" : "normal";
 
   return {
-    color: color?.startsWith("#") ? color.slice(0, 7) : "#000000",
-    background: background?.startsWith("#") ? background.slice(0, 7) : "#ffffff",
+    color:
+      (color?.startsWith("#") ? color.slice(0, 7) : undefined) ??
+      rgbToHex(computedSeed?.color) ??
+      "#000000",
+    background:
+      (background?.startsWith("#") ? background.slice(0, 7) : undefined) ??
+      rgbToHex(computedSeed?.background) ??
+      "#ffffff",
     spacing,
     fontSize: fontSizeRaw ? parseInt(fontSizeRaw, 10) || 16 : 16,
     align: (align === "center" || align === "right" ? align : "left") as Alignment,
@@ -58,8 +80,14 @@ interface DesignPopoverProps {
   snippet: string;
   /** The inner element carrying the text styling, when it isn't the wrapper (the CTA's <a>). */
   textSnippet?: string;
-  /** Relabels the color controls for a button section ("Button color" instead of "Background"). */
-  buttonMode?: boolean;
+  /**
+   * Which layout to render: "button" adds the wording field and relabels the
+   * color controls; "header" strips the panel down to logo alignment only
+   * (that is the one edit a logo needs); undefined is the full style panel.
+   */
+  variant?: "button" | "header";
+  /** The section's live rendered colors (from the preview iframe), seeding the swatches when no inline color exists. */
+  computedSeed?: { color?: string; background?: string };
   /** The button's current label, seeding the text field. */
   initialText?: string;
   /**
@@ -80,7 +108,8 @@ interface DesignPopoverProps {
 export function DesignPopover({
   snippet,
   textSnippet,
-  buttonMode = false,
+  variant,
+  computedSeed,
   initialText,
   onApplyText,
   anchor,
@@ -90,7 +119,9 @@ export function DesignPopover({
   onClose,
 }: DesignPopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const initial = guessDesignState(snippet, textSnippet);
+  const buttonMode = variant === "button";
+  const headerMode = variant === "header";
+  const initial = guessDesignState(snippet, textSnippet, computedSeed);
   const [text, setText] = useState(initialText ?? "");
   const textDirty = text.trim() !== (initialText ?? "").trim();
   const [color, setColor] = useState(initial.color);
@@ -155,40 +186,46 @@ export function DesignPopover({
         </div>
       )}
 
-      <ColorRow
-        label={buttonMode ? "Text color" : "Text"}
-        value={color}
-        onChange={setColor}
-        onApply={() => onApply({ color })}
-        busy={busy}
-      />
-      <ColorRow
-        label={buttonMode ? "Button color" : "Background"}
-        value={background}
-        onChange={setBackground}
-        onApply={() => onApply({ background })}
-        busy={busy}
-      />
+      {!headerMode && (
+        <>
+          <ColorRow
+            label={buttonMode ? "Text color" : "Text"}
+            value={color}
+            onChange={setColor}
+            onApply={() => onApply({ color })}
+            busy={busy}
+          />
+          <ColorRow
+            label={buttonMode ? "Button color" : "Background"}
+            value={background}
+            onChange={setBackground}
+            onApply={() => onApply({ background })}
+            busy={busy}
+          />
+
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-muted">Spacing</p>
+            <SegmentedControl
+              size="sm"
+              value={spacing}
+              onChange={(v) => {
+                setSpacing(v);
+                onApply({ margin: SPACING_MARGIN[v] });
+              }}
+              options={[
+                { value: "compact", label: "Compact" },
+                { value: "normal", label: "Normal" },
+                { value: "roomy", label: "Roomy" },
+              ]}
+            />
+          </div>
+        </>
+      )}
 
       <div>
-        <p className="mb-1 text-[11px] font-medium text-muted">Spacing</p>
-        <SegmentedControl
-          size="sm"
-          value={spacing}
-          onChange={(v) => {
-            setSpacing(v);
-            onApply({ margin: SPACING_MARGIN[v] });
-          }}
-          options={[
-            { value: "compact", label: "Compact" },
-            { value: "normal", label: "Normal" },
-            { value: "roomy", label: "Roomy" },
-          ]}
-        />
-      </div>
-
-      <div>
-        <p className="mb-1 text-[11px] font-medium text-muted">Alignment</p>
+        <p className="mb-1 text-[11px] font-medium text-muted">
+          {headerMode ? "Logo position" : "Alignment"}
+        </p>
         <SegmentedControl
           size="sm"
           value={align}
@@ -205,6 +242,7 @@ export function DesignPopover({
       </div>
 
       {/* Size and weight share a row: both are single-tap controls. */}
+      {!headerMode && (
       <div className="flex items-end justify-between gap-3">
         <div>
           <p className="mb-1 text-[11px] font-medium text-muted">Size</p>
@@ -262,6 +300,7 @@ export function DesignPopover({
           </button>
         </div>
       </div>
+      )}
     </div>,
     document.body,
   );

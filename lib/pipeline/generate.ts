@@ -35,6 +35,7 @@ import {
 } from "@/lib/email/templates";
 import { hasDarkModeSupport } from "@/lib/email/preview-mode";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
+import { ensureEditableRegions } from "@/lib/email/inline-style";
 import type {
   CampaignBrief,
   ContentImage,
@@ -504,7 +505,9 @@ function renderEmailForContext(
     designSource = "template";
     html = renderEmailTemplate(templateId, { copy, tokens });
   }
-  html = ensureUnsubscribeTag(stripEmDashes(html));
+  // Region tagging runs BEFORE the unsubscribe guarantee so the fallback
+  // unsubscribe <p> (appended bare, structural) never gets tagged editable.
+  html = ensureUnsubscribeTag(ensureEditableRegions(stripEmDashes(html)));
 
   // A regeneration keeps the prior hero image: the prompt asks the model to
   // place it, but the code path guarantees it regardless of compliance (and

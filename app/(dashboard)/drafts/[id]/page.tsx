@@ -10,6 +10,8 @@ import {
   getSingleBrand,
 } from "@/lib/db/queries";
 import { getSessionUser } from "@/lib/supabase/server";
+import { updateDraftContent } from "@/lib/db/queries";
+import { ensureEditableRegions } from "@/lib/email/inline-style";
 import { resolveSanityConfig } from "@/lib/clients/sanity";
 import { resolveMailerliteConfig } from "@/lib/publishing/providers/mailerlite";
 import { getPerformanceForDraft } from "@/lib/pipeline/performance";
@@ -53,6 +55,21 @@ export default async function DraftReviewPage({
       ? await getDraftSubject(sourceDraftId).catch(() => null)
       : null;
   const isEmail = !isBlog && !isFlyer;
+
+  // Older drafts can hold copy the model left outside any data-region — dead
+  // to the inline editor. Repair the stored document on open (new generations
+  // and every edit already run this), persisting in place: the editor's save
+  // paths locate regions by occurrence index in the STORED html, so a
+  // preview-only fix would leave client and server counting different
+  // documents. No history entry; the visible email doesn't change.
+  if (isEmail && !isGenerating && draft.content.html) {
+    const normalized = ensureEditableRegions(draft.content.html);
+    if (normalized !== draft.content.html) {
+      draft.content = { ...draft.content, html: normalized };
+      await updateDraftContent(draft.id, draft.content).catch(() => {});
+    }
+  }
+
   const existingBlog = isEmail
     ? await getBlogDraftFromEmail(id).catch(() => null)
     : null;

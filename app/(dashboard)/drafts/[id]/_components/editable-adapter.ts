@@ -49,6 +49,14 @@ export interface EditableAdapter {
    * markers open the Design panel (with a text field) on the second click.
    */
   usesFormEditor?(marker: string): boolean;
+  /**
+   * Which specialized Design-panel layout a marker gets: "button" adds the
+   * wording field (the CTA), "header" strips the panel down to logo alignment
+   * only. Undefined means the full style controls.
+   */
+  designVariant?(marker: string): "button" | "header" | undefined;
+  /** Whether the AI Rewrite action makes sense for this element (default yes — a logo has no words to rewrite). */
+  canRewrite?(marker: string): boolean;
   /** Whether light markdown (bold/links/bullets) is meaningful in this element. */
   allowsMarkdown(marker: string): boolean;
   /** Whether this element may be deleted, given the whole document's current state. */
