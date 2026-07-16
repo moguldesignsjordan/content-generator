@@ -9,8 +9,10 @@ import {
 } from "@/lib/db/queries";
 import { listProviders } from "@/lib/publishing/registry";
 import { describeConnection } from "@/lib/publishing/connections";
+import { brandReadiness } from "@/lib/brand-readiness";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
+import { BrandReadinessCard } from "../_components/brand-readiness-card";
 import { SettingsClient } from "./_components/settings-client";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +67,7 @@ export default async function SettingsPage() {
   const products = await listProducts(brand.id);
   const integrations = await getBrandIntegrations(brand.id);
   const schedules = await listContentSchedules(brand.id);
+  const readiness = brandReadiness(brand, icps, products);
 
   return (
     <>
@@ -72,6 +75,7 @@ export default async function SettingsPage() {
         title="Settings"
         subtitle={`${brand.name} · changes take effect on the next generation`}
       />
+      <BrandReadinessCard {...readiness} onSettingsPage className="mb-6" />
       <SettingsClient
         brand={brand}
         strategy={strategy}

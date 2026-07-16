@@ -7,22 +7,11 @@ import {
   getBrandStrategy,
   getBrandWithIcps,
   getLatestActiveCampaign,
-  listDrafts,
   listProducts,
 } from "@/lib/db/queries";
-import { brandReadiness } from "@/lib/brand-readiness";
 import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
-import {
-  Card,
-  LinkButton,
-  ListGroup,
-  ListRow,
-  StatCard,
-} from "@/components/ui";
-import { ChevronRightIcon } from "@/components/ui/icons";
-import { BrandReadinessCard } from "./_components/brand-readiness-card";
+import { Card, LinkButton } from "@/components/ui";
 import { CreateAgent } from "./_components/create-agent";
-import { DraftStateBadge } from "./_components/topic-badges";
 
 // Always read fresh from the DB; topics/drafts change as you work.
 export const dynamic = "force-dynamic";
@@ -77,15 +66,13 @@ export default async function DashboardPage() {
   }
 
   const { brand, pillars } = data;
-  const [drafts, withIcps, products, activeCampaign, scheduledAwaitingReview] =
+  const [withIcps, products, activeCampaign, scheduledAwaitingReview] =
     await Promise.all([
-      listDrafts().catch(() => []),
       getBrandWithIcps(user.id).catch(() => null),
       listProducts(brand.id).catch(() => []),
       getLatestActiveCampaign(brand.id).catch(() => null),
       countScheduledAwaitingReview(brand.id).catch(() => 0),
     ]);
-  const readiness = brandReadiness(brand, withIcps?.icps ?? [], products);
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
       c.topics.map((t) => ({
@@ -125,10 +112,6 @@ export default async function DashboardPage() {
         }
       : undefined;
 
-  const inReview = drafts.filter((d) => d.state === "in_review").length;
-  const approved = drafts.filter((d) => d.state === "approved").length;
-  const queued = allTopics.filter((t) => t.status === "queued").length;
-
   return (
     <div className="relative space-y-6">
       {/* Ambient stage behind the top of the screen: brand light over a
@@ -147,25 +130,6 @@ export default async function DashboardPage() {
       {/* Create — the work surface. Quick actions + an animated type box. */}
       <CreateAgent initial={createAgentInitial} />
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-2.5">
-        <StatCard
-          label="In review"
-          value={inReview}
-          sub="drafts"
-        />
-        <StatCard
-          label="Approved"
-          value={approved}
-          sub="ready to ship"
-        />
-        <StatCard
-          label="Topics"
-          value={allTopics.length}
-          sub={`${queued} queued`}
-        />
-      </div>
-
       {/* Scheduled drafts awaiting review (Settings → Schedules). Never
           auto-publishes; this is just a nudge to go approve/reject. */}
       {scheduledAwaitingReview > 0 && (
@@ -183,45 +147,6 @@ export default async function DashboardPage() {
           <span className="shrink-0 text-[13px] font-medium text-accent">View →</span>
         </Link>
       )}
-
-      {/* Recent emails */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-foreground">
-            Recent emails
-          </h2>
-          {drafts.length > 0 && (
-            <Link
-              href="/emails"
-              className="flex items-center gap-0.5 text-[13px] font-medium text-accent transition-colors hover:text-accent-press"
-            >
-              View all
-              <ChevronRightIcon size={14} />
-            </Link>
-          )}
-        </div>
-
-        {drafts.length === 0 ? (
-          <Card className="p-6 text-center text-sm text-muted">
-            No emails yet. Use the create agent up top to draft one.
-          </Card>
-        ) : (
-          <ListGroup>
-            {drafts.slice(0, 5).map((d) => (
-              <ListRow
-                key={d.id}
-                href={`/drafts/${d.id}`}
-                title={d.subject || "Untitled draft"}
-                subtitle={d.topic_title ?? "No topic"}
-                trailing={<DraftStateBadge state={d.state} />}
-              />
-            ))}
-          </ListGroup>
-        )}
-      </section>
-
-      {/* What's still missing from the brand brain (hides itself when full) */}
-      <BrandReadinessCard {...readiness} />
     </div>
   );
 }

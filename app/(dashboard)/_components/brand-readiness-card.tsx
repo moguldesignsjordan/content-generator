@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import type { ReadinessItem } from "@/lib/brand-readiness";
 
 // Shows what's still missing from the brand brain. Renders nothing once
@@ -8,16 +9,22 @@ export function BrandReadinessCard({
   items,
   done,
   total,
+  // Every item already links to /settings. Lives on Settings itself now, so
+  // the overflow line skips the redundant self-link.
+  onSettingsPage,
+  className,
 }: {
   items: ReadinessItem[];
   done: number;
   total: number;
+  onSettingsPage?: boolean;
+  className?: string;
 }) {
   const missing = items.filter((i) => !i.done);
   if (missing.length === 0) return null;
 
   return (
-    <Card className="p-4">
+    <Card className={cn("p-4", className)}>
       <div className="flex items-center justify-between">
         <h2 className="text-[14px] font-semibold text-foreground">
           Brand readiness
@@ -36,26 +43,40 @@ export function BrandReadinessCard({
         The more of these are filled in, the more on-brand every draft comes out.
       </p>
       <ul className="mt-3 space-y-1.5">
-        {missing.slice(0, 4).map((item) => (
-          <li key={item.label}>
-            <Link
-              href={item.href}
-              className="group flex items-baseline gap-2 text-[13px]"
-            >
+        {missing.slice(0, 4).map((item) =>
+          onSettingsPage ? (
+            <li key={item.label} className="flex items-baseline gap-2 text-[13px]">
               <span className="text-muted">○</span>
-              <span className="font-medium text-foreground group-hover:text-accent">
-                {item.label}
-              </span>
+              <span className="font-medium text-foreground">{item.label}</span>
               <span className="text-muted">{item.hint}</span>
-            </Link>
-          </li>
-        ))}
+            </li>
+          ) : (
+            <li key={item.label}>
+              <Link
+                href={item.href}
+                className="group flex items-baseline gap-2 text-[13px]"
+              >
+                <span className="text-muted">○</span>
+                <span className="font-medium text-foreground group-hover:text-accent">
+                  {item.label}
+                </span>
+                <span className="text-muted">{item.hint}</span>
+              </Link>
+            </li>
+          ),
+        )}
         {missing.length > 4 && (
           <li className="pl-5 text-[13px] text-muted">
-            and {missing.length - 4} more in{" "}
-            <Link href="/settings" className="text-accent hover:text-accent-press">
-              Settings
-            </Link>
+            {onSettingsPage ? (
+              `and ${missing.length - 4} more below`
+            ) : (
+              <>
+                and {missing.length - 4} more in{" "}
+                <Link href="/settings" className="text-accent hover:text-accent-press">
+                  Settings
+                </Link>
+              </>
+            )}
           </li>
         )}
       </ul>

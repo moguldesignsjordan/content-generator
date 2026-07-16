@@ -1,6 +1,6 @@
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { listDrafts } from "@/lib/db/queries";
-import { Card } from "@/components/ui";
+import { Card, StatCard } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { DraftsList } from "../_components/drafts-list";
 
@@ -34,12 +34,21 @@ export default async function EmailsPage() {
     );
   }
 
+  const inReview = drafts.filter((d) => d.state === "in_review").length;
+  const approved = drafts.filter((d) => d.state === "approved").length;
+
   return (
     <>
       <ScreenHeader
         title="Emails"
         subtitle="Every email, newest first. Tap to review and approve."
       />
+      {drafts.length > 0 && (
+        <div className="mb-6 grid grid-cols-2 gap-2.5">
+          <StatCard label="In review" value={inReview} sub="drafts" />
+          <StatCard label="Approved" value={approved} sub="ready to ship" />
+        </div>
+      )}
       <DraftsList drafts={drafts} kind="email" />
     </>
   );

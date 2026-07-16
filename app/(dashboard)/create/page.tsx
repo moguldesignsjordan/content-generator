@@ -72,6 +72,9 @@ export default async function CreatePage() {
   );
 
   const hasTopics = allTopics.length > 0;
+  const queuedCount = pillars
+    .flatMap((p) => p.clusters.flatMap((c) => c.topics))
+    .filter((t) => !t.archived && t.status === "queued").length;
 
   return (
     <div className="relative">
@@ -124,9 +127,16 @@ export default async function CreatePage() {
 
       {/* Content plan: the topic backlog. Secondary to the campaign flow. */}
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="font-display text-[18px] font-semibold tracking-tight text-foreground">
-          Content plan
-        </h2>
+        <div className="flex items-baseline gap-2.5">
+          <h2 className="font-display text-[18px] font-semibold tracking-tight text-foreground">
+            Content plan
+          </h2>
+          {hasTopics && (
+            <span className="text-[13px] text-muted">
+              {allTopics.length} topics · {queuedCount} queued
+            </span>
+          )}
+        </div>
         {hasTopics && <SuggestTopics compact />}
       </div>
 
