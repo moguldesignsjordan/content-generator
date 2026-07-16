@@ -164,6 +164,8 @@ export async function generateEmailForTopicStreamed(
       heroImage = await useProductPhotoAsHero(
         brief.product_photo_url,
         copy.headline ?? ctx.topic.title,
+        ctx.brand.id,
+        draftId,
       );
     }
     if (!heroImage) {

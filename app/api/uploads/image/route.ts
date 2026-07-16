@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { optimizeEmailImage } from "@/lib/images/optimize";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
+import { createMediaAsset, getSingleBrand } from "@/lib/db/queries";
+import type { MediaAssetKind } from "@/lib/db/types";
 import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 // Generic authenticated image upload, hosted on the same content-images
 // bucket generated heroes use. Shared by anywhere a real photo (a product
 // shot, a flyer reference) needs a stable hosted URL before a draft or a
-// campaign brief exists to attach it to. No AI involved.
+// campaign brief exists to attach it to. No AI involved. Every upload is
+// recorded in the media library (migration 024) so it can be browsed and
+// reused later; an optional `kind` field tags what it's for.
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const KINDS: MediaAssetKind[] = ["hero", "flyer", "product", "general"];
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,6 +39,11 @@ export async function POST(req: NextRequest) {
         status: 400,
       });
     }
+    const rawKind = form?.get("kind") as string | null;
+    const kind: MediaAssetKind = KINDS.includes(rawKind as MediaAssetKind)
+      ? (rawKind as MediaAssetKind)
+      : "general";
+    const alt = (form?.get("alt") as string | null)?.trim() || null;
 
     let optimized;
     try {
@@ -44,7 +54,22 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const url = await uploadContentImage(optimized.data, optimized.format);
+    const { url, path } = await uploadContentImage(optimized.data, optimized.format);
+
+    const brand = await getSingleBrand(sessionUser.id).catch(() => null);
+    if (brand) {
+      createMediaAsset({
+        brandId: brand.id,
+        url,
+        storagePath: path,
+        alt,
+        kind,
+        source: "uploaded",
+        width: optimized.width,
+        height: optimized.height,
+      }).catch((err) => logError("api:/api/uploads/image:record-media-asset", err));
+    }
+
     return NextResponse.json({ url, width: optimized.width, height: optimized.height });
   } catch (err) {
     logError("api:/api/uploads/image", err);

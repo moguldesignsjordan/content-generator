@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext, getTopicContext, updateDraftContent } from "@/lib/db/queries";
+import {
+  createMediaAsset,
+  getBrandByDraftId,
+  getDraftWithJobContext,
+  getTopicContext,
+  updateDraftContent,
+} from "@/lib/db/queries";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
 import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
@@ -119,16 +125,33 @@ export async function POST(
           { status: 400 },
         );
       }
-      const url = await uploadContentImage(optimized.data);
+      const { url, path } = await uploadContentImage(optimized.data);
+      const alt = stripEmDashes(
+        (currentCopy?.headline ?? draftCtx.content.subject ?? "Flyer").trim(),
+      ).slice(0, 160);
       const image: ContentImage = {
         url,
-        alt: stripEmDashes(
-          (currentCopy?.headline ?? draftCtx.content.subject ?? "Flyer").trim(),
-        ).slice(0, 160),
+        alt,
         width: optimized.width,
         height: optimized.height,
         style: "uploaded",
       };
+
+      const brand = await getBrandByDraftId(id).catch(() => null);
+      if (brand) {
+        createMediaAsset({
+          brandId: brand.id,
+          url,
+          storagePath: path,
+          alt,
+          kind: "flyer",
+          source: "uploaded",
+          width: optimized.width,
+          height: optimized.height,
+          originDraftId: id,
+        }).catch((err) => logError("api:/api/drafts/[id]/flyer:record-media-asset", err));
+      }
+
       await updateDraftContent(id, draftCtx.content, {
         ...meta,
         flyer_image: image,

@@ -11,6 +11,7 @@ import {
   isGeminiConfigured,
 } from "@/lib/clients/gemini-image";
 import {
+  createMediaAsset,
   getDraftWithJobContext,
   getEmailCopyForDraft,
   getLatestDraftVersion,
@@ -285,12 +286,24 @@ export async function regenerateFlyerImage(args: {
     rendered.data,
     FLYER_ASPECTS[args.aspect],
   );
-  const url = await uploadContentImage(optimized.data);
+  const { url, path } = await uploadContentImage(optimized.data);
+  const alt = stripEmDashes(args.copy.headline).slice(0, 160);
+
+  recordFlyerMediaAsset({
+    brandId: args.ctx.brand.id,
+    url,
+    storagePath: path,
+    alt,
+    prompt: finalPrompt,
+    width: optimized.width,
+    height: optimized.height,
+    draftId: args.draftId,
+  });
 
   return {
     image: {
       url,
-      alt: stripEmDashes(args.copy.headline).slice(0, 160),
+      alt,
       width: optimized.width,
       height: optimized.height,
       style: "illustration",
@@ -339,16 +352,57 @@ async function renderFlyer(
     rendered.data,
     FLYER_ASPECTS[opts.aspect],
   );
-  const url = await uploadContentImage(optimized.data);
+  const { url, path } = await uploadContentImage(optimized.data);
+  const alt = stripEmDashes(copy.headline).slice(0, 160);
+
+  recordFlyerMediaAsset({
+    brandId: ctx.brand.id,
+    url,
+    storagePath: path,
+    alt,
+    prompt: finalPrompt,
+    width: optimized.width,
+    height: optimized.height,
+    draftId: opts.draftId,
+  });
 
   return {
     url,
-    alt: stripEmDashes(copy.headline).slice(0, 160),
+    alt,
     width: optimized.width,
     height: optimized.height,
     style: "illustration",
     prompt: finalPrompt,
   };
+}
+
+/** Records a flyer render in the media library. Fire-and-forget: a logging
+ * failure must never break the flyer render it's attached to. */
+function recordFlyerMediaAsset(args: {
+  brandId: string;
+  url: string;
+  storagePath: string;
+  alt: string;
+  prompt: string;
+  width: number;
+  height: number;
+  draftId: string;
+}): void {
+  createMediaAsset({
+    brandId: args.brandId,
+    url: args.url,
+    storagePath: args.storagePath,
+    alt: args.alt,
+    kind: "flyer",
+    source: "generated",
+    style: "illustration",
+    prompt: args.prompt,
+    width: args.width,
+    height: args.height,
+    originDraftId: args.draftId,
+  }).catch((err) => {
+    logError("pipeline:generate-flyer:record-media-asset", err);
+  });
 }
 
 /** Strips the scene field, leaving what drafts.meta.flyer_copy stores. */

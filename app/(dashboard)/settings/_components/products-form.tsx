@@ -105,6 +105,7 @@ function ProductCard({
     try {
       const body = new FormData();
       body.append("file", file);
+      body.append("kind", "product");
       const res = await fetch("/api/uploads/image", { method: "POST", body });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "Upload failed");

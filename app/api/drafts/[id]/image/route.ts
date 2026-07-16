@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getDraftWithJobContext,
+  getMediaAsset,
   getTopicContext,
   updateDraftContent,
 } from "@/lib/db/queries";
@@ -98,6 +99,8 @@ async function commitBlogHero(
  *    exactPrompt sends the full prompt as-is (the tweak-and-regenerate path).
  *  - mode "upload": { file, alt?, placement? } places the user's own image as
  *    the hero. No AI involved.
+ *  - mode "reuse": { mediaAssetId, placement? } attaches an existing media
+ *    library asset as-is. No AI involved, no new storage object.
  *  - mode "move": { placement } re-places the existing hero instantly, no
  *    model call and no new image.
  * Emails splice the image into the draft's HTML at the chosen placement;
@@ -155,10 +158,37 @@ export async function POST(
         ...(await saveUploadedHeroImage({
           file: Buffer.from(await read.file.arrayBuffer()),
           alt,
+          brandId: topicCtx.brand.id,
+          draftId: id,
         })),
         placement: readPlacement(form, draftCtx.meta.hero_image?.placement),
       };
       label = "Uploaded a hero image";
+    } else if (mode === "reuse") {
+      const mediaAssetId = (form.get("mediaAssetId") as string | null)?.trim();
+      if (!mediaAssetId) {
+        return NextResponse.json(
+          { error: "Pick an image from your library." },
+          { status: 400 },
+        );
+      }
+      const asset = await getMediaAsset(mediaAssetId);
+      if (!asset || asset.brand_id !== topicCtx.brand.id) {
+        return NextResponse.json(
+          { error: "That image isn't in your library anymore." },
+          { status: 404 },
+        );
+      }
+      image = {
+        url: asset.url,
+        alt: asset.alt || topicCtx.topic.title,
+        width: asset.width ?? 1200,
+        height: asset.height ?? 630,
+        style: asset.style ?? "uploaded",
+        placement: readPlacement(form, draftCtx.meta.hero_image?.placement),
+        ...(asset.prompt ? { prompt: asset.prompt } : {}),
+      };
+      label = "Reused a saved image";
     } else {
       const style = (form.get("style") ?? "") as ContentImageStyle;
       if (!STYLES.includes(style)) {

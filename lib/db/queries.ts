@@ -41,6 +41,9 @@ import type {
   IcpProfile,
   KeywordData,
   MailerliteConfig,
+  MediaAsset,
+  MediaAssetKind,
+  MediaAssetSource,
   OnboardingState,
   PerformanceMetric,
   PillarWithClusters,
@@ -2118,6 +2121,93 @@ export async function createStyleReference(args: {
 export async function deleteStyleReference(id: string): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("style_references").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Media library (migration 024) ───────────────────────────────────────────
+// Every image the app hosts gets a row here so it can be browsed and reused
+// later without a fresh generation. See MediaAsset in lib/db/types.ts.
+
+export async function listMediaAssets(
+  brandId: string,
+  kind?: MediaAssetKind,
+): Promise<MediaAsset[]> {
+  const db = getAdminClient();
+  let query = db
+    .from("media_assets")
+    .select("*")
+    .eq("brand_id", brandId);
+  if (kind) query = query.eq("kind", kind);
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (error) {
+    // Pre-migration-024 DBs have no table yet; the library is just empty.
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as MediaAsset[];
+}
+
+export async function getMediaAsset(id: string): Promise<MediaAsset | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("media_assets")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as MediaAsset) ?? null;
+}
+
+/**
+ * Records one hosted image. Called as a non-fatal side effect everywhere an
+ * image gets hosted (generation, upload, re-host) — callers should catch and
+ * log rather than let a recording failure break the actual image operation.
+ */
+export async function createMediaAsset(args: {
+  brandId: string;
+  url: string;
+  storagePath: string;
+  alt?: string | null;
+  kind: MediaAssetKind;
+  source: MediaAssetSource;
+  style?: string | null;
+  prompt?: string | null;
+  width?: number | null;
+  height?: number | null;
+  originDraftId?: string | null;
+}): Promise<MediaAsset> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("media_assets")
+    .insert({
+      brand_id: args.brandId,
+      url: args.url,
+      storage_path: args.storagePath,
+      alt: args.alt ?? null,
+      kind: args.kind,
+      source: args.source,
+      style: args.style ?? null,
+      prompt: args.prompt ?? null,
+      width: args.width ?? null,
+      height: args.height ?? null,
+      origin_draft_id: args.originDraftId ?? null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as MediaAsset;
+}
+
+/** Deletes the row only; the caller removes the storage object first (it has
+ * the storage_path from getMediaAsset). */
+export async function deleteMediaAsset(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("media_assets").delete().eq("id", id);
   if (error) throw error;
 }
 

@@ -325,12 +325,17 @@
       <div class="group-label">Content</div>
       <a href="#email">Email generation &amp; editing</a>
       <a href="#blog">Blog generation &amp; editing</a>
+      <a href="#flyers">Flyers (social graphics)</a>
+      <a href="#style-context">Style &amp; design context</a>
       <a href="#seo">SEO &amp; keyword research</a>
 
       <div class="group-label">Delivery</div>
       <a href="#publishing">Publishing</a>
       <a href="#analytics">Performance</a>
       <a href="#automation">Recurring automation</a>
+
+      <div class="group-label">Business</div>
+      <a href="#billing-credits">Multi-tenancy &amp; billing</a>
 
       <div class="group-label">Under the hood</div>
       <a href="#models">Every AI model used</a>
@@ -348,8 +353,11 @@
       <a href="#brand-brain">Brand brain</a>
       <a href="#email">Email</a>
       <a href="#blog">Blog</a>
+      <a href="#flyers">Flyers</a>
+      <a href="#style-context">Style context</a>
       <a href="#seo">SEO</a>
       <a href="#publishing">Publishing</a>
+      <a href="#billing-credits">Billing</a>
       <a href="#models">Models</a>
       <a href="#ui">UI</a>
       <a href="#gaps">Gaps</a>
@@ -368,11 +376,12 @@
           <span class="pill">MailerLite</span>
           <span class="pill">Sanity</span>
           <span class="pill">DataForSEO</span>
+          <span class="pill">Stripe</span>
           <span class="pill">Tailwind v4</span>
         </div>
 
         <div class="card">
-          <p>In one sentence: it's an <strong>automated content engine for Mogul Design Agency</strong> that picks a topic from a stored brand strategy, has Claude draft an on-brand email or blog post in your voice, routes every draft through a mandatory human approval gate, then publishes to MailerLite (email) and Sanity (blog) — with SEO research, editing tools, images, analytics, and now recurring schedules layered on top. One brand today, built so a second brand is a config change, not a rewrite.</p>
+          <p>In one sentence: it's an <strong>automated content engine</strong> that picks a topic from a stored brand strategy, has Claude draft an on-brand email, blog post, or social flyer in your voice, routes every draft through a mandatory human approval gate, then publishes to MailerLite (email) and Sanity (blog) — with SEO research, inline editing, images, analytics, recurring schedules, and now real multi-tenant billing layered on top. What started as one brand's tool now supports multiple brands/customers, each metered on its own credit balance.</p>
         </div>
       </section>
 
@@ -439,7 +448,7 @@
         <div class="grid2">
           <div class="card">
             <h3>Quick chat on Home <span class="badge cyan">fastest</span></h3>
-            <p>The chat embedded right on your Home screen. Say what you want in plain language ("let's create an email for retractable banners"); it locks in a goal/key message/angle, spins up a topic if needed, and generates on your go-ahead. Backed by <code>/api/create/chat</code>.</p>
+            <p>The chat embedded right on your Home screen — built as a two-minute wizard for a non-technical end user, not a marketing tool. It asks exactly <strong>one plain-language question per turn</strong> (what you're making, the topic, the one message, what readers should do, length, image, look and feel), every question paired with tappable suggestion chips so there's rarely any typing required. It never surfaces an internal concept like "brief," "CTA," or "funnel stage" — a tapped chip is just an ordinary chat message under the hood, so it needed no special plumbing. Saying everything up front ("let's create a short email about our spring sale, casual tone, no image") still short-circuits straight to the recap. Backed by <code>/api/create/chat</code>.</p>
           </div>
           <div class="card">
             <h3>New Campaign <span class="badge violet">most thorough</span></h3>
@@ -508,17 +517,17 @@
         <p>Claude (Sonnet 4.6, extended "adaptive" thinking) gets one job: return structured copy — subject, preheader, headline, 1–8 body sections, CTA — <em>and</em> a complete, ready-to-send HTML document, in a single forced tool call. It's designing the layout itself, not filling in a template; it's told to build an Outlook-safe table layout, tag every region (<code>header</code>/<code>eyebrow</code>/<code>headline</code>/<code>body</code>/<code>cta</code>/<code>footer</code>) so it can be click-edited later, and bake in the dark-mode CSS. Length and section count are held to a target range that varies by email type (a promotional blast: 120–250 words; a full newsletter: 300–700) — enforced both in the prompt and by a code check that will re-ask Claude once if it comes in short.</p>
         <p>If the model's HTML fails a sanity check (missing structure, no dark-mode CSS, or contains something it shouldn't like a script tag), the app quietly falls back to one of 3 hand-built code templates for that email's type instead — so a bad design pass never ships a broken email.</p>
 
-        <h3>Editing a draft — three tools, one hotspot system</h3>
-        <p>The preview <em>is</em> the editor. Every tagged region gets an invisible hotspot; tap one and a sheet opens with three tabs:</p>
+        <h3>Editing a draft — click straight on the live preview</h3>
+        <p>The preview <em>is</em> the editor, and it's genuinely inline now: click any region and it selects (a ring plus a floating <strong>Rewrite / Design / Delete</strong> toolbar); click again — or double-click — and it turns into an editable text field right where it sits, exactly like editing a doc. Click outside to save, <kbd>Esc</kbd> to revert without saving. Nothing is a pop-up form pre-filled from a flattened, paragraph-losing copy of the text anymore; you're always typing directly into the real markup.</p>
         <div class="twrap"><table>
           <thead><tr><th>Tool</th><th>What it does</th><th>Model used</th></tr></thead>
           <tbody>
-            <tr><td>Wording</td><td>Type exact replacement text, or ask Claude to rephrase this one spot</td><td>Haiku, retried once, escalates to Sonnet only if both attempts fail to find a safe match</td></tr>
-            <tr><td>Design</td><td>Color, background, spacing, font size, alignment, bold — instant, native controls</td><td class="num">none — pure code</td></tr>
-            <tr><td>Style</td><td>Fuzzy free-text asks like "make it bolder" or a suggestion chip</td><td>same Haiku → retry → Sonnet ladder</td></tr>
+            <tr><td>Type in place</td><td>Click twice (or double-click) any region and edit its text directly, formatting intact</td><td class="num">none — pure code</td></tr>
+            <tr><td>Rewrite</td><td>Ask Claude to rephrase the selected region; shown as a <strong>proposal</strong> in a modal against the current text — it only commits if you accept it</td><td>Haiku, escalates to Sonnet on a rare miss</td></tr>
+            <tr><td>Design</td><td>Color, background, spacing, font size, alignment, bold, and (for the CTA specifically) its own button-text field — instant, native controls</td><td class="num">none — pure code</td></tr>
           </tbody>
         </table></div>
-        <p>Every AI-assisted edit works by find-and-replace on the actual HTML: the model returns the exact text to find and what to put instead, and the code refuses to apply anything ambiguous — if that text appears more than once in the email and the model didn't say "replace all of them" on purpose, it errors instead of guessing which one you meant. One shared, server-saved Undo stack (10 steps deep) covers every edit type, so undo survives a page reload.</p>
+        <p>The model never authors raw markup for an edit anymore — every change, AI-proposed or typed, lands through the same deterministic apply path, which is what makes undo and re-edit safe. One shared, server-saved Undo stack (10 steps deep) covers every edit type, so undo survives a page reload. The call-to-action button is edited as a real form field for its label (never as free-typed text), specifically so the underlying link markup can't be corrupted by an accidental select-all-delete.</p>
         <p><strong>Redesign</strong> is the bigger hammer: regenerate the entire visual design from your existing copy in one shot — useful when a color change is baked into fifty little spots at once. Optionally steer it first ("darker, purple accent"). It never touches your words, only the design.</p>
 
         <h3>Hero images</h3>
@@ -548,12 +557,36 @@
         </table></div>
         <p>Titles starting "How to…", numbered listicle patterns ("7 Signs…"), the words "case study," and topics tagged for the top of your funnel each nudge the format automatically — or you can force one directly when generating.</p>
 
-        <h3>Editing — click directly on the article</h3>
-        <p>Unlike email, there's no separate form: the rendered preview itself is the editor. Every part of the article — headline, slug, intro, each section's heading and body, the conclusion, the call-to-action — has an invisible edit hotspot right on the live preview. Tap one, a small sheet opens pre-filled with that exact text, save, and the whole preview re-renders from the updated copy so what you see is always exactly what would publish. Page title and meta description live in a separate small "SEO details" sheet, since they're search-engine metadata, not part of the visible article.</p>
+        <h3>Editing — the same inline editor as email</h3>
+        <p>Blog and email deliberately share one editing component: click a section (headline, intro, a section's heading or body, the conclusion, the call-to-action) to select it, click again to type in place, click outside to save. The one real difference is what's underneath — a blog's body is Markdown, not raw HTML, so an inline edit round-trips through an HTML↔Markdown converter (kept in lock-step by a Vitest round-trip test) rather than a straight string splice. Page title and meta description still live in a separate small "SEO details" sheet, since they're search-engine metadata, not part of the visible article.</p>
         <p>Reject-and-regenerate works identically to email: specific feedback, capped at 3 versions, generation continues in the background while you keep working.</p>
 
         <h3>Why it converts to something called "Portable Text"</h3>
         <p>Sanity — your CMS — doesn't store rich content as HTML or Markdown; it needs a structured format called Portable Text. The app has its own small, hand-built converter (deliberately not Sanity's own tool, so it can be tested in isolation) that turns the constrained Markdown your posts are written in — headings, bullets, numbered lists, quotes, bold, italic, links — into that structure at publish time. Nothing more exotic than that subset is supported, by design, since that's also all the generation prompt itself is allowed to produce.</p>
+      </section>
+
+      <section class="block" id="flyers">
+        <div class="barhead"><span class="rule"></span><h2>Flyers <span class="badge violet">social graphics</span></h2></div>
+        <p class="kicker">A third content channel alongside email and blog: not a body of copy, a single designed image with the words baked into it.</p>
+        <p>A flyer is its own draft kind (<code>content_jobs.type = 'social'</code>) with its own top-level nav destination, <strong>Flyers</strong>, and its own two-step generation: one cheap Claude call (Haiku) writes the headline/subtext/CTA copy <em>and</em> a visual scene concept together, then Gemini renders the actual graphic with that exact copy typeset into the image — unlike a hero image, which is pure illustration with no text, a flyer's render prompt explicitly hands the model the words to letter onto the design, plus the brand's palette and font direction. Three export shapes: square (1:1, a feed post), portrait (4:5), and story (9:16) — the render is fit to the exact target pixel dimensions afterward.</p>
+        <p>Two ways to start one: a dedicated new-flyer form (topic, aspect, optional style reference), or straight from an existing email in chat ("make a flyer out of that email") — which reuses the email's own topic and copy as source material rather than generating from scratch, and won't create a duplicate if one already exists for that email. Same approval gate as everything else, same hotspot review screen, downloadable as the final image once approved.</p>
+      </section>
+
+      <section class="block" id="style-context">
+        <div class="barhead"><span class="rule"></span><h2>Style &amp; design context</h2></div>
+        <p class="kicker">Answering "it doesn't sound or look like mine" — give the engine real examples instead of only a written voice description.</p>
+
+        <h3>Reference emails</h3>
+        <p>Settings → "Reference emails": paste or upload a full email (.txt/.md/.html/.eml) you want yours to read like. On save, one Claude call distills it into traits and an approximate word count; every email generation then injects both that summary <em>and</em> the raw text of your two newest references into the prompt, with explicit instructions that references outrank the written voice description for style.</p>
+
+        <h3>Length control</h3>
+        <p>Settings → Voice gets a short / standard / long control that scales the per-email-type word budget (roughly 55% for short, 130% for long) and can be overridden per piece from the quick-create chat. Previously the pipeline only ever enforced a floor — retrying if a draft came in too short — which is why emails tended to run long by default; short and long are now both real, not just "short unless it drifts."</p>
+
+        <h3>A pasted style example, per piece</h3>
+        <p>In chat, attach or paste any email — including a raw Gmail "show original" export (MIME headers, quoted-printable encoding, base64 parts and all; the server unwraps that format directly rather than asking you to clean it up first) — and it's saved verbatim as that one piece's style reference, distinct from the reusable Settings library.</p>
+
+        <h3>Email design references (recreate the actual layout)</h3>
+        <p>Upload a screenshot of an email whose <em>design</em> you want to copy (Settings → "Email designs," or just attach an image in chat) and one vision call analyzes its layout. From then on, every email generation attaches that actual image to the prompt and is told to recreate its structure — using this brand's own colors, fonts, and copy, never the reference's. Only the newest design reference is used at a time, and the app's own non-negotiables (the 600px email-safe card, real dark-mode CSS, the mandatory unsubscribe link) always win over whatever the reference shows.</p>
       </section>
 
       <section class="block" id="seo">
@@ -594,6 +627,22 @@
         <p class="kicker">Set a cadence once; a draft shows up for you to review on schedule, forever.</p>
         <p>Settings → Recurring schedules lets you set a channel (email or blog), a cadence (daily/weekly/every-2-weeks/monthly), and optionally force a specific type. A daily check picks up anything due, generates a real draft for your oldest topic that hasn't been touched yet, and leaves it awaiting review — <strong>exactly</strong> like a manually triggered draft, with the same approval gate, same editing tools, same everything. A small badge on Home tells you when a scheduled draft is sitting there waiting. If there's genuinely nothing left to write about, it skips that tick cleanly and tries again next time rather than erroring.</p>
         <p>This never sends or publishes anything by itself — it only ever gets you to "ready for your review," the same finish line every other path in this app stops at.</p>
+      </section>
+
+      <section class="block" id="billing-credits">
+        <div class="barhead"><span class="rule"></span><h2>Multi-tenancy &amp; billing <span class="badge violet">new</span></h2></div>
+        <p class="kicker">The app grew from "one brand's private tool" into something that can actually meter and charge separate customers.</p>
+
+        <h3>Each brand now belongs to someone</h3>
+        <p>A new ownership table ties every brand to the specific user(s) who signed in and set it up (owner today; editor/viewer roles exist in the schema for later). Nothing about the content pipeline changed — it's still exactly one brand per session — but the app no longer just assumes "the one brand"; it resolves whose brand this is from who's logged in, which is what makes per-customer usage and billing possible at all.</p>
+
+        <h3>Credits — the metering currency</h3>
+        <p>Every metered AI call (a full generation, a redesign, an image, a flyer) debits an integer credit balance instead of being free to run indefinitely. The economics are deliberately data, not code: one tunable row controls credits-per-dollar, the markup multiplier over real API cost, the one-time starter grant, and the free vs. paid monthly allowance, so pricing can be retuned without a deploy. The ledger itself is append-only and idempotent — a retried webhook or a double-fired cron can never grant or charge twice, because both the grant and the debit functions collapse onto the same request's unique key. Chat, settings forms, and style extraction stay free by design; only the substantial generation calls are metered.</p>
+
+        <h3>Buying more — Stripe</h3>
+        <p>/billing shows your balance, a usage-by-category chart pulled from the same logging feed the /logs page uses, and a full transaction history. Two ways to add credits: one-time prepaid packs (Stripe Checkout, one-off payment) or a Pro monthly subscription that grants a larger recurring allowance automatically via a daily cron, mirroring the recurring-schedule cron's own auth pattern. Whichever metered action runs out of balance shows a "Buy credits" toast with a direct link, wired into every AI surface in the app — generation, chat, redesign, image, flyer, and the inline-editor's Rewrite — rather than just the obvious ones.</p>
+
+        <div class="callout"><strong>Known limitation, not a bug:</strong> the schema and webhook logic currently support exactly one paid tier ("Pro"). A second, higher tier exists as a real Stripe price but isn't wired into the app's plan logic yet — upgrading to true two-tier pricing is its own future slice, not a config change.</div>
       </section>
 
       <section class="block" id="models">
@@ -642,16 +691,20 @@
             <tr><td>approvals</td><td>Every approve/reject decision, with feedback</td></tr>
             <tr><td>publications</td><td>What's actually gone out, and where — the idempotency record</td></tr>
             <tr><td>performance</td><td>Time-series of pulled-back email stats</td></tr>
-            <tr><td>content_schedules</td><td>Recurring auto-generation cadences (new)</td></tr>
+            <tr><td>content_schedules</td><td>Recurring auto-generation cadences</td></tr>
             <tr><td>brand_integrations</td><td>Your own encrypted MailerLite/Sanity credentials, per brand</td></tr>
             <tr><td>products / brand_memory</td><td>Real offers content can pitch; durable facts the create-chat has learned</td></tr>
+            <tr><td>reference_emails / style_references</td><td>Example emails to write like; uploaded designs to visually recreate</td></tr>
+            <tr><td>brand_members <span class="badge violet">new</span></td><td>Which user(s) own which brand — the multi-tenancy ownership record</td></tr>
+            <tr><td>credit_transactions / credits_balance <span class="badge violet">new</span></td><td>The append-only usage ledger and its cached balance, per brand</td></tr>
+            <tr><td>brand_billing / billing_config <span class="badge violet">new</span></td><td>Stripe customer/subscription mirror; the tunable pricing knobs</td></tr>
           </tbody>
         </table></div>
       </section>
 
       <section class="block" id="tested">
         <div class="barhead"><span class="rule"></span><h2>What's actually tested</h2></div>
-        <p>86 automated tests across the parts of the app that are pure logic and therefore safe to test without a real database: the blog Markdown → Portable Text converter, credential encryption, hero-image placement math, the email dark/light preview toggle, DataForSEO response normalization, the recurring-schedule cadence math, and both generation prompts' pure helper functions. Everything that touches Supabase directly is instead verified live, by hand, against the real database — which is exactly how every feature in this document got checked before shipping.</p>
+        <p>Just under 300 automated tests, up from 86 when this section was first written — the count grew sharply once a test-only stub for the server-only boundary unblocked testing modules that import from <code>lib/pipeline/</code> and <code>lib/db/</code> directly, not just pure standalone helpers. Coverage spans the blog Markdown ↔ Portable Text round-trip, credential encryption, hero/flyer image placement math, the email dark/light preview toggle and the dark-mode-readability auto-repair, DataForSEO response normalization, recurring-schedule cadence math, credit-charging arithmetic, the mocked Stripe webhook handlers, and both generation prompts' pure helper functions. Everything that touches Supabase directly, or a real third-party API, is instead verified live, by hand, against the real database or a real sandbox account — which is exactly how every feature in this document got checked before shipping.</p>
       </section>
 
       <section class="block" id="gaps">
@@ -663,6 +716,8 @@
           <div class="gapnote"><span class="badge neutral">docs vs. code</span><div>The original build plan mentions using <strong>Opus for harder pieces</strong> — that never got wired in. Every draft, in practice, uses Sonnet 4.6.</div></div>
           <div class="gapnote"><span class="badge neutral">stale doc</span><div>The README references a separate "content assistant" chat component — it's since been folded entirely into the quick-create chat on Home; there's no separate component anymore.</div></div>
           <div class="gapnote"><span class="badge neutral">cosmetic</span><div>A schedule's "Run now" button doesn't refresh its own row's last-run text until you reload the page (Pause/Resume and Delete update instantly).</div></div>
+          <div class="gapnote"><span class="badge neutral">one tier only</span><div>A second, higher-priced plan exists as a real Stripe price but the billing schema and webhook logic only recognize one paid tier so far — see <a href="#billing-credits">Multi-tenancy &amp; billing</a>.</div></div>
+          <div class="gapnote"><span class="badge neutral">deferred</span><div><strong>Per-brand row-level security</strong> isn't on yet — brand ownership is enforced in application code (which brand a session resolves to), not yet by the database itself refusing cross-brand reads.</div></div>
         </div>
       </section>
     </main>

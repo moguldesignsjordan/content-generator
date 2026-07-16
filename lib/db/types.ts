@@ -529,6 +529,35 @@ export interface ContentImage {
 /** How the user's typed subject is treated when generating an image. */
 export type ImagePromptMode = "auto" | "exact";
 
+// ── Media library (migration 024) ───────────────────────────────────────────
+// Every image the app hosts (generated hero, uploaded hero, product photo,
+// flyer render, direct library upload) gets a row so it can be browsed and
+// reused later without a fresh generation. Distinct from StyleReference:
+// a style reference steers HOW a new image looks; a MediaAsset IS a finished
+// image someone might reuse as-is.
+
+/** What the image was used for (or is meant for) when it was hosted. */
+export type MediaAssetKind = "hero" | "flyer" | "product" | "general";
+
+/** Whether an AI model rendered it, or a human uploaded it as-is. */
+export type MediaAssetSource = "generated" | "uploaded";
+
+export interface MediaAsset {
+  id: string;
+  brand_id: string;
+  url: string;
+  storage_path: string;
+  alt: string | null;
+  kind: MediaAssetKind;
+  source: MediaAssetSource;
+  style: ContentImageStyle | null;
+  prompt: string | null;
+  width: number | null;
+  height: number | null;
+  origin_draft_id: string | null;
+  created_at: string;
+}
+
 // Rolled-up token/image spend for one draft, persisted on drafts.meta so the
 // review screen can show "This draft cost ~$0.0X". Estimates for display, not
 // billing truth.

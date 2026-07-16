@@ -12,6 +12,7 @@ import {
   isGeminiConfigured,
 } from "@/lib/clients/gemini-image";
 import { getAdminClient } from "@/lib/db/client";
+import { createMediaAsset } from "@/lib/db/queries";
 import { optimizeEmailImage } from "@/lib/images/optimize";
 import {
   IMAGE_PROMPT_TOOL,
@@ -220,12 +221,29 @@ export async function generateContentImage(
   const optimized = await optimizeEmailImage(rendered.data);
 
   // 4. Host on the public content-images bucket.
-  const url = await uploadContentImage(optimized.data, optimized.format);
+  const { url, path } = await uploadContentImage(optimized.data, optimized.format);
+  const finalAlt = stripEmDashes(alt.trim()).slice(0, 160);
+
+  if (args.brandId) {
+    recordMediaAsset({
+      brandId: args.brandId,
+      url,
+      storagePath: path,
+      alt: finalAlt,
+      kind: "hero",
+      source: "generated",
+      style: args.style,
+      prompt: finalPrompt,
+      width: optimized.width,
+      height: optimized.height,
+      originDraftId: args.draftId,
+    });
+  }
 
   return {
     image: {
       url,
-      alt: stripEmDashes(alt.trim()).slice(0, 160),
+      alt: finalAlt,
       width: optimized.width,
       height: optimized.height,
       style: args.style,
@@ -245,6 +263,9 @@ export async function generateContentImage(
 export async function saveUploadedHeroImage(args: {
   file: Buffer;
   alt: string;
+  /** Who this belongs to, for the media library. Omit to skip recording. */
+  brandId?: string;
+  draftId?: string;
 }): Promise<ContentImage> {
   let optimized;
   try {
@@ -252,10 +273,26 @@ export async function saveUploadedHeroImage(args: {
   } catch {
     throw new Error("That file isn't a readable image. Try a JPEG or PNG.");
   }
-  const url = await uploadContentImage(optimized.data, optimized.format);
+  const { url, path } = await uploadContentImage(optimized.data, optimized.format);
+  const alt = stripEmDashes(args.alt.trim()).slice(0, 160);
+
+  if (args.brandId) {
+    recordMediaAsset({
+      brandId: args.brandId,
+      url,
+      storagePath: path,
+      alt,
+      kind: "hero",
+      source: "uploaded",
+      width: optimized.width,
+      height: optimized.height,
+      originDraftId: args.draftId,
+    });
+  }
+
   return {
     url,
-    alt: stripEmDashes(args.alt.trim()).slice(0, 160),
+    alt,
     width: optimized.width,
     height: optimized.height,
     style: "uploaded",
@@ -273,15 +310,36 @@ export async function saveUploadedHeroImage(args: {
 export async function useProductPhotoAsHero(
   url: string,
   alt: string,
+  brandId?: string,
+  draftId?: string,
 ): Promise<ContentImage | undefined> {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`fetch ${res.status}`);
     const optimized = await optimizeEmailImage(Buffer.from(await res.arrayBuffer()));
-    const hostedUrl = await uploadContentImage(optimized.data, optimized.format);
+    const { url: hostedUrl, path } = await uploadContentImage(
+      optimized.data,
+      optimized.format,
+    );
+    const finalAlt = stripEmDashes(alt.trim()).slice(0, 160);
+
+    if (brandId) {
+      recordMediaAsset({
+        brandId,
+        url: hostedUrl,
+        storagePath: path,
+        alt: finalAlt,
+        kind: "hero",
+        source: "uploaded",
+        width: optimized.width,
+        height: optimized.height,
+        originDraftId: draftId,
+      });
+    }
+
     return {
       url: hostedUrl,
-      alt: stripEmDashes(alt.trim()).slice(0, 160),
+      alt: finalAlt,
       width: optimized.width,
       height: optimized.height,
       style: "uploaded",
@@ -294,11 +352,13 @@ export async function useProductPhotoAsHero(
 
 /** Uploads an image to the content-images bucket, creating it if missing.
  * Exported for the flyer pipeline (lib/pipeline/generate-flyer.ts), which
- * hosts its renders in the same bucket. */
+ * hosts its renders in the same bucket. Returns the storage path alongside
+ * the public URL so callers can record it in the media library (and delete
+ * the object later). */
 export async function uploadContentImage(
   data: Buffer,
   format: "jpeg" | "png" = "jpeg",
-): Promise<string> {
+): Promise<{ url: string; path: string }> {
   const db = getAdminClient();
   const ext = format === "png" ? "png" : "jpg";
   const contentType = format === "png" ? "image/png" : "image/jpeg";
@@ -325,7 +385,15 @@ export async function uploadContentImage(
   }
 
   const { data: pub } = db.storage.from(BUCKET).getPublicUrl(path);
-  return pub.publicUrl;
+  return { url: pub.publicUrl, path };
+}
+
+/** Records a hosted image in the media library. Fire-and-forget: a logging
+ * failure must never break the generation/upload it's attached to. */
+function recordMediaAsset(args: Parameters<typeof createMediaAsset>[0]): void {
+  createMediaAsset(args).catch((err) => {
+    logError("pipeline:generate-image:record-media-asset", err);
+  });
 }
 
 // The hero splice/remove/render string transforms live in

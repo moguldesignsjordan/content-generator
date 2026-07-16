@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
 import { Button, Input, LinkButton, SegmentedControl, Sheet } from "@/components/ui";
-import type { BrandPaletteMode, ContentImage, HeroPlacement } from "@/lib/db/types";
+import type {
+  BrandPaletteMode,
+  ContentImage,
+  HeroPlacement,
+  MediaAsset,
+} from "@/lib/db/types";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
 // steered by a reference image), upload your own, move it, or remove it.
@@ -148,6 +153,32 @@ function ImageFilePicker({
   );
 }
 
+/** One card in the "reuse a saved image" grid. */
+function MediaCard({
+  asset,
+  disabled,
+  onClick,
+}: {
+  asset: MediaAsset;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-[92px] flex-col overflow-hidden rounded-xl border border-border text-left transition-colors hover:border-accent disabled:opacity-50"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={asset.url} alt={asset.alt ?? ""} className="h-[68px] w-full object-cover" />
+      <span className="truncate px-1.5 py-1 text-[10.5px] capitalize text-muted">
+        {asset.kind}
+      </span>
+    </button>
+  );
+}
+
 export interface ImageSheetProps {
   open: boolean;
   onClose: () => void;
@@ -179,7 +210,8 @@ export function ImageSheet({
   onApplied,
   onEdited,
 }: ImageSheetProps) {
-  const [tab, setTab] = useState<"generate" | "upload">("generate");
+  const [tab, setTab] = useState<"generate" | "upload" | "library">("generate");
+  const [libraryAssets, setLibraryAssets] = useState<MediaAsset[] | null>(null);
   const [style, setStyle] = useState<string>("illustration");
   // null = follow the style's default (photos natural, graphic styles branded).
   const [brandColors, setBrandColors] = useState<BrandPaletteMode | null>(null);
@@ -211,7 +243,26 @@ export function ImageSheet({
     setUploadAlt("");
     setError(null);
     setPlacement(currentPlacement ?? "top");
+    setLibraryAssets(null);
   }, [open, currentPlacement, promptUsed, paletteUsed]);
+
+  // Lazy-loaded on first visit to the Library tab, then cached for the sheet's
+  // lifetime (a fresh sheet reset above clears it back to null).
+  useEffect(() => {
+    if (tab !== "library" || libraryAssets !== null) return;
+    let cancelled = false;
+    fetch("/api/media")
+      .then((res) => res.json())
+      .then((data: { assets?: MediaAsset[] }) => {
+        if (!cancelled) setLibraryAssets(data.assets ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryAssets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, libraryAssets]);
 
   // What the server will actually do when the user hasn't touched the toggle:
   // realistic photos stay natural, every graphic style gets brand accents.
@@ -219,9 +270,9 @@ export function ImageSheet({
     brandColors ?? (style === "photo" ? "none" : "accents");
 
   async function run(
-    action: "generate" | "upload" | "remove" | "move",
+    action: "generate" | "upload" | "remove" | "move" | "reuse",
     moveTo?: HeroPlacement,
-    opts?: { exactPrompt?: string },
+    opts?: { exactPrompt?: string; mediaAssetId?: string },
   ) {
     if (busy) return;
     if (action === "upload" && !uploadFile) {
@@ -242,6 +293,8 @@ export function ImageSheet({
         if (action === "upload") {
           form.set("file", uploadFile!);
           if (uploadAlt.trim()) form.set("alt", uploadAlt.trim());
+        } else if (action === "reuse") {
+          form.set("mediaAssetId", opts!.mediaAssetId!);
         } else if (action === "generate") {
           form.set("style", style);
           // Only an explicit tap overrides the brand-level preference; the
@@ -339,6 +392,7 @@ export function ImageSheet({
         options={[
           { value: "generate", label: "Generate" },
           { value: "upload", label: "Upload" },
+          { value: "library", label: "Library" },
         ]}
       />
 
@@ -540,6 +594,38 @@ export function ImageSheet({
           </div>
           <p className="mt-2 text-[11px] text-muted">
             Resized and compressed automatically. PNGs with transparency stay PNG.
+          </p>
+        </>
+      )}
+
+      {tab === "library" && (
+        <>
+          <p className="mt-4 text-xs font-medium text-muted">
+            Your saved and generated images
+          </p>
+          {libraryAssets === null ? (
+            <p className="mt-3 text-[12.5px] text-muted">Loading…</p>
+          ) : libraryAssets.length === 0 ? (
+            <p className="mt-3 text-[12.5px] text-muted">
+              Nothing saved yet. Images you generate or upload show up here to
+              reuse later, for free.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {libraryAssets.map((asset) => (
+                <MediaCard
+                  key={asset.id}
+                  asset={asset}
+                  disabled={busy}
+                  onClick={() => run("reuse", undefined, { mediaAssetId: asset.id })}
+                />
+              ))}
+            </div>
+          )}
+          {placementRow}
+          {removeButton && <div className="mt-4">{removeButton}</div>}
+          <p className="mt-2 text-[11px] text-muted">
+            Tap an image to use it here. Reusing a saved image is free.
           </p>
         </>
       )}
