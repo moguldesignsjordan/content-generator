@@ -72,6 +72,14 @@ describe("renderFooter", () => {
     // The legal guarantees never depend on optional fields.
     expect(bare).toContain(`href="{$unsubscribe}"`);
   });
+
+  it("uses the real uploaded logo, not the typographic wordmark, when logo_url is set", () => {
+    const branded = renderFooter({ ...TOKENS, logo_url: "https://cdn.example.com/logo.png" });
+    expect(branded).toContain(`<img src="https://cdn.example.com/logo.png"`);
+    expect(branded).toContain(`alt="Test Brand"`);
+    // No stand-in mark once a real logo exists.
+    expect(branded).not.toContain(`class="em-heading"`);
+  });
 });
 
 describe("ensureEditableRegions over a real template render", () => {

@@ -114,10 +114,14 @@ function buildFooterChrome(tokens: BrandTokens): string[] {
     "- Footer (its wrapper carries data-region=\"footer\"), centered, small muted text,",
     "  separated from the body by a thin top hairline or generous space (per the style),",
     "  stacked in this order:",
-    `  1) the sender wordmark: "${tokens.logo_alt}" small (about 15px) in the heading font,`,
-    "     bold, with an accent-colored period" +
+    "  1) the sender mark: " +
+      (tokens.logo_url
+        ? `the brand logo <img src="${tokens.logo_url}" alt="${tokens.logo_alt}"> capped at ` +
+          "max-width:120px;max-height:28px, small and centered"
+        : `a typographic wordmark, "${tokens.logo_alt}" small (about 15px) in the heading font, ` +
+          "bold, with an accent-colored period") +
       (footer.website ? `, linked to ${footer.website}` : "") +
-      ".",
+      ". Use the SAME mark (real logo or wordmark) as the header above, never a different one.",
     "  2) a muted contact line" +
       (footer.website ? `: the bare domain of ${footer.website}` : "") +
       (footer.contact_email

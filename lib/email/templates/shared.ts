@@ -131,12 +131,15 @@ export function renderFooter(tokens: BrandTokens): string {
   const f = tokens.footer;
   const muted = tokens.colors.muted;
 
-  // Sender wordmark, set in the heading font with the accent period — the
-  // header's typographic identity, echoed small.
-  const wordmarkInner =
-    `<span class="em-heading" style="font-family:${tokens.fonts.heading};font-size:15px;font-weight:700;` +
-    `letter-spacing:-0.2px;color:${tokens.colors.primary};">${escapeHtml(tokens.sender_name)}` +
-    `<span class="em-accent" style="color:${tokens.colors.accent};">.</span></span>`;
+  // Sender mark: the real logo (small) if one is set, otherwise the same
+  // typographic wordmark the header falls back to — mirrors renderHeader so
+  // the footer never shows a stand-in mark once a real logo is uploaded.
+  const wordmarkInner = tokens.logo_url
+    ? `<img src="${escapeHtml(tokens.logo_url)}" alt="${escapeHtml(tokens.logo_alt)}" ` +
+      `style="display:inline-block;max-width:120px;max-height:28px;" />`
+    : `<span class="em-heading" style="font-family:${tokens.fonts.heading};font-size:15px;font-weight:700;` +
+      `letter-spacing:-0.2px;color:${tokens.colors.primary};">${escapeHtml(tokens.sender_name)}` +
+      `<span class="em-accent" style="color:${tokens.colors.accent};">.</span></span>`;
   const wordmark = f.website
     ? `<a href="${escapeHtml(f.website)}" style="text-decoration:none;">${wordmarkInner}</a>`
     : wordmarkInner;
