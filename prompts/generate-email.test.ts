@@ -3,12 +3,14 @@ import type {
   CampaignBrief,
   EmailTemplateId,
   EmailType,
+  FeedbackEmailExample,
   Product,
   Topic,
   TopicStatus,
 } from "@/lib/db/types";
 import {
   EMAIL_LENGTH_TARGETS,
+  buildFeedbackBlock,
   countEmailWords,
   resolveEmailLayout,
   resolveEmailTemplateId,
@@ -47,6 +49,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     description: "A full audit of your brand.",
     deliverables: [],
     price_point: null,
+    image_url: null,
     url: null,
     created_at: "2026-07-05T00:00:00Z",
     ...overrides,
@@ -261,5 +264,52 @@ describe("resolveLengthTarget", () => {
   it("never drops below the 50-word floor on the tightest type", () => {
     const short = resolveLengthTarget("promotional", "short");
     expect(short.words[0]).toBeGreaterThanOrEqual(50);
+  });
+});
+
+describe("buildFeedbackBlock", () => {
+  it("returns empty for no examples", () => {
+    expect(buildFeedbackBlock(undefined)).toBe("");
+    expect(buildFeedbackBlock([])).toBe("");
+  });
+
+  it("surfaces a disliked example's Why line when a note is given", () => {
+    const examples: FeedbackEmailExample[] = [
+      {
+        feedback: "down",
+        subject: "Big sale this week",
+        email_type: "promotional",
+        excerpt: "Buy now before it's gone.",
+        note: "Too generic",
+      },
+    ];
+    const block = buildFeedbackBlock(examples);
+    expect(block).toContain("Why: Too generic");
+    expect(block).toContain("Big sale this week");
+  });
+
+  it("omits the Why line when no note was given", () => {
+    const examples: FeedbackEmailExample[] = [
+      {
+        feedback: "down",
+        subject: "Big sale this week",
+        email_type: "promotional",
+        excerpt: "Buy now before it's gone.",
+      },
+    ];
+    const block = buildFeedbackBlock(examples);
+    expect(block).not.toContain("Why:");
+  });
+
+  it("separates liked and disliked sections", () => {
+    const examples: FeedbackEmailExample[] = [
+      { feedback: "up", subject: "Loved this one", email_type: "newsletter", excerpt: "" },
+      { feedback: "down", subject: "Hated this one", email_type: "newsletter", excerpt: "" },
+    ];
+    const block = buildFeedbackBlock(examples);
+    expect(block).toContain("Emails they LIKED");
+    expect(block).toContain("Loved this one");
+    expect(block).toContain("Emails they DISLIKED");
+    expect(block).toContain("Hated this one");
   });
 });

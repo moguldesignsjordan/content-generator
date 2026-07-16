@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { EmailStyleId } from "@/lib/db/types";
-import { EMAIL_STYLES, EMAIL_STYLE_IDS, pickEmailStyle, pickRotation } from "./email-styles";
+import type { EmailStyleId, VisualVibe } from "@/lib/db/types";
+import {
+  EMAIL_STYLES,
+  EMAIL_STYLE_IDS,
+  VISUAL_VIBE_STYLES,
+  pickEmailStyle,
+  pickRotation,
+} from "./email-styles";
 
 describe("EMAIL_STYLES", () => {
   it("has a directive for every id in EMAIL_STYLE_IDS, and vice versa", () => {
@@ -53,6 +59,23 @@ describe("pickEmailStyle", () => {
     expect(pickEmailStyle({ seedIndex: 11 })).toBe(
       pickEmailStyle({ seedIndex: 11 - EMAIL_STYLE_IDS.length }),
     );
+  });
+
+  it("narrows to the vibe's curated subset when a vibe is given", () => {
+    const vibes: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
+    for (const vibe of vibes) {
+      for (let i = 0; i < 50; i++) {
+        expect(VISUAL_VIBE_STYLES[vibe]).toContain(pickEmailStyle({ vibe }));
+      }
+    }
+  });
+
+  it("never repeats any of the last 3 used styles even within a vibe subset", () => {
+    const recent: EmailStyleId[] = ["bold_accent_band", "pill_modern"];
+    for (let i = 0; i < 100; i++) {
+      const picked = pickEmailStyle({ vibe: "punchy", recent });
+      expect(picked).toBe("warm_gradient_top");
+    }
   });
 });
 

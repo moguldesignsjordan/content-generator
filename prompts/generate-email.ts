@@ -414,13 +414,14 @@ export function buildOfferBlock(ctx: TopicContext): string {
  * anti-patterns. Empty string when nothing has been rated, so the prompt is
  * unchanged for new accounts.
  */
-function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined): string {
+export function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined): string {
   if (!examples?.length) return "";
   const liked = examples.filter((e) => e.feedback === "up");
   const disliked = examples.filter((e) => e.feedback === "down");
   const fmt = (e: FeedbackEmailExample) =>
     [
       `- Subject: ${e.subject}${e.email_type ? ` (${e.email_type} email)` : ""}`,
+      e.note ? `  Why: ${e.note}` : "",
       e.excerpt ? `  ${e.excerpt.replace(/\n+/g, " ")}` : "",
     ]
       .filter(Boolean)
@@ -437,8 +438,9 @@ function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined): strin
       : []),
     ...(disliked.length
       ? [
-          "Emails they DISLIKED. Diagnose what went wrong (too formal, too long,",
-          "too generic) and do the opposite:",
+          "Emails they DISLIKED. Where a Why line is given, that's the reviewer's",
+          "own diagnosis, fix exactly that. Where it's missing, infer what went",
+          "wrong (too formal, too long, too generic) and do the opposite:",
           ...disliked.map(fmt),
         ]
       : []),
@@ -508,10 +510,15 @@ export function buildEmailMessages(
     });
   const styleId =
     opts.styleOverride ??
-    pickEmailStyle({ recent: opts.recentStyles, seedIndex: opts.seedIndex });
+    pickEmailStyle({
+      recent: opts.recentStyles,
+      seedIndex: opts.seedIndex,
+      vibe: opts.brief?.visual_vibe,
+    });
   const designBrief = buildEmailDesignBrief(tokens, templateId, {
     heroImage: opts.heroImage,
     style: EMAIL_STYLES[styleId],
+    vibe: opts.brief?.visual_vibe,
   });
   // The text half of the design reference; the screenshot itself is attached to
   // the user turn by the pipeline (loadEmailDesignReference). Empty string when
@@ -552,6 +559,19 @@ export function buildEmailMessages(
     "",
     "RULES:",
     "- Write in the brand voice above. Sound human, never like generic AI marketing copy.",
+    "- AVOID THE TELLS THAT MARK COPY AS AI-WRITTEN:",
+    "  - No 'It's not just X, it's Y' (or 'This isn't about X, it's about Y') constructions.",
+    "  - No stacking three short punchy sentences in a row as a rhythm crutch",
+    "    ('X. Y. Z.'); vary sentence length so short lines land because they're",
+    "    earned, not because they're a pattern.",
+    "  - No opening on a rhetorical question ('Ever wonder why...', 'What if I",
+    "    told you...') or a scene-setting 'Picture this' / 'Imagine' lead-in.",
+    "  - No throat-clearing openers ('In today's fast-paced world', 'Let's face",
+    "    it', 'We get it'); start on the actual point.",
+    "  - Use contractions naturally (it's, you're, don't); a sentence fragment",
+    "    here and there reads more human than a fully grammatical one.",
+    "  - One genuinely specific, concrete detail beats three vague superlatives;",
+    "    if a line could open literally any brand's email, cut or sharpen it.",
     "- Use the target keyword and the audience's own vocabulary naturally; never keyword-stuff.",
     "- Match the email's call-to-action to the funnel stage (provided below).",
     "- Fill the plain-text copy fields (no markup in them) AND the html field with the",

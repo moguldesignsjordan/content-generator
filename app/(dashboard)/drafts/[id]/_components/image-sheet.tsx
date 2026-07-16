@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
 import { Button, Input, LinkButton, SegmentedControl, Sheet } from "@/components/ui";
-import type { ContentImage, HeroPlacement } from "@/lib/db/types";
+import type { BrandPaletteMode, ContentImage, HeroPlacement } from "@/lib/db/types";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
 // steered by a reference image), upload your own, move it, or remove it.
@@ -20,7 +20,7 @@ const IMAGE_STYLES = [
   {
     id: "photo",
     label: "Photo",
-    description: "Premium photography, natural light, graded to the brand palette.",
+    description: "Premium photography, natural light, true-to-life color.",
   },
   {
     id: "texture",
@@ -159,6 +159,8 @@ export interface ImageSheetProps {
   placement?: HeroPlacement;
   /** The prompt that produced the current image, if it was generated. */
   promptUsed?: string;
+  /** Whether the current image leaned on brand colors, if it was generated. */
+  paletteUsed?: BrandPaletteMode;
   /** Fresh HTML after any successful change; image is null after a remove. */
   onApplied: (html: string, image: ContentImage | null) => void;
   /** Fires alongside onApplied so sibling UI (the undo history) can refresh. */
@@ -173,11 +175,14 @@ export function ImageSheet({
   hasImage,
   placement: currentPlacement,
   promptUsed,
+  paletteUsed,
   onApplied,
   onEdited,
 }: ImageSheetProps) {
   const [tab, setTab] = useState<"generate" | "upload">("generate");
   const [style, setStyle] = useState<string>("illustration");
+  // null = follow the style's default (photos natural, graphic styles branded).
+  const [brandColors, setBrandColors] = useState<BrandPaletteMode | null>(null);
   const [subject, setSubject] = useState("");
   const [promptMode, setPromptMode] = useState<"auto" | "exact">("auto");
   const [showPrompt, setShowPrompt] = useState(false);
@@ -196,6 +201,7 @@ export function ImageSheet({
     if (!open) return;
     setTab("generate");
     setSubject("");
+    setBrandColors(paletteUsed ?? null);
     setPromptMode("auto");
     setShowPrompt(false);
     setEditedPrompt(promptUsed ?? "");
@@ -205,7 +211,12 @@ export function ImageSheet({
     setUploadAlt("");
     setError(null);
     setPlacement(currentPlacement ?? "top");
-  }, [open, currentPlacement, promptUsed]);
+  }, [open, currentPlacement, promptUsed, paletteUsed]);
+
+  // What the server will actually do when the user hasn't touched the toggle:
+  // realistic photos stay natural, every graphic style gets brand accents.
+  const effectiveBrandColors: BrandPaletteMode =
+    brandColors ?? (style === "photo" ? "none" : "accents");
 
   async function run(
     action: "generate" | "upload" | "remove" | "move",
@@ -233,6 +244,9 @@ export function ImageSheet({
           if (uploadAlt.trim()) form.set("alt", uploadAlt.trim());
         } else if (action === "generate") {
           form.set("style", style);
+          // Only an explicit tap overrides the brand-level preference; the
+          // untouched toggle lets the server resolve the default.
+          if (brandColors) form.set("brandColors", brandColors);
           if (subject.trim()) form.set("subject", subject.trim());
           if (promptMode === "exact") form.set("promptMode", "exact");
           if (opts?.exactPrompt) form.set("exactPrompt", opts.exactPrompt);
@@ -347,6 +361,30 @@ export function ImageSheet({
             {IMAGE_STYLES.find((s) => s.id === style)?.description}
           </p>
           <div className="mt-3">
+            <p className="text-xs font-medium text-muted">Colors</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Chip
+                active={effectiveBrandColors === "accents"}
+                disabled={busy}
+                onClick={() => setBrandColors("accents")}
+              >
+                Brand colors
+              </Chip>
+              <Chip
+                active={effectiveBrandColors === "none"}
+                disabled={busy}
+                onClick={() => setBrandColors("none")}
+              >
+                Natural
+              </Chip>
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted">
+              {effectiveBrandColors === "accents"
+                ? "Your brand colors appear as accents in the image."
+                : "No brand colors forced in; the image keeps its natural palette."}
+            </p>
+          </div>
+          <div className="mt-3">
             <p className="text-xs font-medium text-muted">
               What should it show? (optional)
             </p>
@@ -378,7 +416,7 @@ export function ImageSheet({
             {subject.trim() && (
               <p className="mt-1.5 text-[11px] text-muted">
                 {promptMode === "exact"
-                  ? "Your description goes to the image model word for word, only the style and brand colors are added."
+                  ? "Your description goes to the image model word for word, only the style treatment is added."
                   : "AI adds visual detail around your description; everything you named stays in."}
               </p>
             )}

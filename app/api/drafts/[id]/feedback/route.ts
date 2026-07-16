@@ -19,7 +19,10 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as { feedback?: unknown };
+    const body = (await req.json().catch(() => ({}))) as {
+      feedback?: unknown;
+      note?: unknown;
+    };
     const feedback =
       body.feedback === "up" || body.feedback === "down" ? body.feedback : null;
     if (feedback === null && body.feedback != null) {
@@ -28,14 +31,18 @@ export async function POST(
         { status: 400 },
       );
     }
+    const note =
+      typeof body.note === "string" && body.note.trim()
+        ? body.note.trim().slice(0, 300)
+        : null;
 
     const draft = await getDraftWithJobContext(id);
     if (!draft) {
       return NextResponse.json({ error: "Draft not found." }, { status: 404 });
     }
 
-    await setDraftFeedback(id, feedback);
-    return NextResponse.json({ ok: true, feedback });
+    await setDraftFeedback(id, feedback, note);
+    return NextResponse.json({ ok: true, feedback, note: feedback ? note : null });
   } catch (err) {
     logError("api:/api/drafts/[id]/feedback", err);
     return NextResponse.json(

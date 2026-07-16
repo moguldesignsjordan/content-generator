@@ -47,6 +47,7 @@ import type {
   DraftSeoData,
   DraftUsage,
   TopicContext,
+  VisualVibe,
 } from "@/lib/db/types";
 import { stripEmDashes, stripMarkdown } from "@/lib/text";
 import { prepareReferenceImage } from "@/lib/images/optimize";
@@ -55,7 +56,9 @@ import {
   generateContentImage,
   isGeminiConfigured,
   spliceHeroImage,
+  useProductPhotoAsHero,
 } from "./generate-image";
+import { VISUAL_VIBE_IMAGE_STYLE, resolveBrandPalette } from "@/prompts/generate-image";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { logError, logWarn } from "@/lib/log";
@@ -147,12 +150,31 @@ export async function generateEmailForTopicStreamed(
     // be lifted here when the user opted in).
     const isSeriesEmail = Boolean(opts.briefOverride);
     const wantsImage = brief?.include_image === true;
-    const heroImage = await maybeAutoHeroImage(ctx, copy.headline, usageDeltas, {
-      draftId,
-      onEvent,
-      skip: brief?.include_image === false || (isSeriesEmail && !wantsImage),
-      force: wantsImage,
-    });
+    const skipImage = brief?.include_image === false || (isSeriesEmail && !wantsImage);
+
+    // A real product photo (the mapped product's own image, or one the user
+    // uploaded in the interview) wins over AI generation: it's the actual
+    // thing being sold, and it's free. Falls through to the normal AI path
+    // on any fetch/optimize failure (useProductPhotoAsHero is non-fatal).
+    let heroImage: ContentImage | undefined;
+    if (!skipImage && brief?.product_photo_url) {
+      const imaging = { phase: "imaging", label: "Adding your product photo" };
+      await patchDraftGeneration(draftId, imaging).catch(() => {});
+      onEvent({ type: "phase", ...imaging });
+      heroImage = await useProductPhotoAsHero(
+        brief.product_photo_url,
+        copy.headline ?? ctx.topic.title,
+      );
+    }
+    if (!heroImage) {
+      heroImage = await maybeAutoHeroImage(
+        ctx,
+        copy.headline,
+        usageDeltas,
+        { draftId, onEvent, skip: skipImage, force: wantsImage },
+        { emailType, tone: brief?.tone, vibe: brief?.visual_vibe },
+      );
+    }
     if (heroImage) {
       content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
     }
@@ -256,6 +278,7 @@ export async function maybeAutoHeroImage(
     skip?: boolean;
     force?: boolean;
   },
+  emailContext?: { emailType?: string; tone?: string; vibe?: VisualVibe },
 ): Promise<ContentImage | undefined> {
   const prefs = ctx.brand.visual_identity?.image_gen;
   const optedOut = prefs?.auto === false && !progress?.force;
@@ -269,6 +292,11 @@ export async function maybeAutoHeroImage(
     progress.onEvent({ type: "phase", ...imaging });
   }
   try {
+    // A per-piece vibe (a fresh, specific answer from the interview) wins
+    // over the brand's generic stored default; an explicit user style choice
+    // never reaches this path at all (that's the image sheet, unaffected).
+    const vibe = emailContext?.vibe;
+    const style = (vibe && VISUAL_VIBE_IMAGE_STYLE[vibe]) || prefs?.style || "illustration";
     const generated = await generateContentImage({
       tokens: resolveBrandTokens(ctx.brand),
       brandId: ctx.brand.id,
@@ -276,7 +304,11 @@ export async function maybeAutoHeroImage(
       brandName: ctx.brand.name,
       topicTitle: ctx.topic.title,
       headline,
-      style: prefs?.style ?? "illustration",
+      style,
+      brandPalette: resolveBrandPalette(style, prefs?.brand_palette),
+      emailType: emailContext?.emailType,
+      tone: emailContext?.tone,
+      vibe,
     });
     usageDeltas.push(...generated.usage);
     return { ...generated.image, placement: "top" };

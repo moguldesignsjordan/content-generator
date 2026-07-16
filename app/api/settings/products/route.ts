@@ -23,6 +23,7 @@ export async function PATCH(req: NextRequest) {
       deliverables: (product.deliverables ?? []).filter(Boolean),
       price_point: product.price_point?.trim() || null,
       url: product.url?.trim() || null,
+      image_url: product.image_url?.trim() || null,
     });
     return NextResponse.json({ product: saved });
   } catch (err) {

@@ -5,6 +5,7 @@ import type {
   Icp,
   Product,
   Strategy,
+  VisualVibe,
 } from "@/lib/db/types";
 
 /**
@@ -24,6 +25,8 @@ export interface CreateBriefCard {
   tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
+  visualVibe: VisualVibe | null;
+  hasProductPhoto: boolean;
 }
 
 /**
@@ -67,6 +70,8 @@ export function buildBriefCard(args: {
     tone: brief.tone ?? null,
     funnelStage,
     ctaLabel: resolveCtaLabel(brand, strategy, funnelStage),
+    visualVibe: brief.visual_vibe ?? null,
+    hasProductPhoto: Boolean(brief.product_photo_url),
   };
 }
 

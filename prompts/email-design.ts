@@ -4,8 +4,42 @@ import type {
   EmailTemplateId,
   HeroPlacement,
   StyleReference,
+  VisualVibe,
 } from "@/lib/db/types";
 import { EMAIL_STYLES, type EmailStyleDirective } from "./email-styles";
+
+// The default accent discipline: color is a signal, not a theme.
+const ACCENT_BUDGET_DEFAULT = [
+  "ACCENT BUDGET (non-negotiable; brand presence comes from typography, spacing,",
+  "and the logo, not color coverage):",
+  "- The accent color appears at FULL strength in at most 2 to 3 places in the",
+  "  whole email. The CTA button is always one of them; the style direction below",
+  "  names the other one or two. Everything else stays neutral (the body text,",
+  "  muted, and background tokens, plus grays and near-whites derived from them).",
+  "- Where a style calls for an accent-tinted fill (callout backgrounds, chips,",
+  "  soft bands), use a very light tint of the accent, roughly 8 to 12% strength",
+  "  mixed toward white, with normal dark body text on it. Never place body copy",
+  "  on a solid full-strength accent background.",
+  "- Headlines and subheadings use the primary color, never the accent.",
+  "- When in doubt, leave it neutral: an email with too little accent still looks",
+  "  professional; one painted in brand color looks like a coupon.",
+];
+
+// Loosened for a punchy/playful visual_vibe: still composed, just louder.
+const ACCENT_BUDGET_VIBRANT = [
+  "ACCENT BUDGET (loosened for this piece's punchy/playful vibe; still deliberate,",
+  "never a wall of color):",
+  "- The accent color can appear at full strength in up to 4 or 5 places: the CTA,",
+  "  the style's usual accent moment, plus one or two extra, a callout fill, a",
+  "  chip, a small block of color behind the eyebrow or a stat.",
+  "- A second brand color (the secondary token) may join the accent as a light",
+  "  tint on ONE section background for contrast, e.g. alternating a section's",
+  "  backdrop; keep body text at WCAG-AA contrast on it.",
+  "- Headlines still use the primary color; the accent stays reserved for",
+  "  deliberate moments, never running body text.",
+  "- Energetic and colorful still means composed: never more than 2 distinct",
+  "  brand hues visible at once outside the logo.",
+];
 
 // Where the design prompt tells the model to put the hero image; mirrors the
 // code-level anchors in spliceHeroImage so prompt and splice never disagree.
@@ -117,7 +151,11 @@ function buildFooterChrome(tokens: BrandTokens): string[] {
 export function buildEmailDesignBrief(
   tokens: BrandTokens,
   templateId: EmailTemplateId,
-  opts: { heroImage?: ContentImage; style?: EmailStyleDirective } = {},
+  opts: {
+    heroImage?: ContentImage;
+    style?: EmailStyleDirective;
+    vibe?: VisualVibe;
+  } = {},
 ): string {
   const c = tokens.colors;
   const f = tokens.fonts;
@@ -125,6 +163,10 @@ export function buildEmailDesignBrief(
   // Defaults to the safe baseline look when no style is passed (keeps every
   // existing call site, and any legacy path, producing a valid brief).
   const style = opts.style ?? EMAIL_STYLES.soft_card;
+  const accentBudget =
+    opts.vibe === "punchy" || opts.vibe === "playful"
+      ? ACCENT_BUDGET_VIBRANT
+      : ACCENT_BUDGET_DEFAULT;
 
   return [
     "EMAIL DESIGN SYSTEM (follow exactly; email HTML is not browser HTML):",
@@ -223,19 +265,7 @@ export function buildEmailDesignBrief(
     `- Heading font stack: ${f.heading}`,
     `- Body font stack: ${f.body}`,
     "",
-    "ACCENT BUDGET (non-negotiable; brand presence comes from typography, spacing,",
-    "and the logo, not color coverage):",
-    "- The accent color appears at FULL strength in at most 2 to 3 places in the",
-    "  whole email. The CTA button is always one of them; the style direction below",
-    "  names the other one or two. Everything else stays neutral (the body text,",
-    "  muted, and background tokens, plus grays and near-whites derived from them).",
-    "- Where a style calls for an accent-tinted fill (callout backgrounds, chips,",
-    "  soft bands), use a very light tint of the accent, roughly 8 to 12% strength",
-    "  mixed toward white, with normal dark body text on it. Never place body copy",
-    "  on a solid full-strength accent background.",
-    "- Headlines and subheadings use the primary color, never the accent.",
-    "- When in doubt, leave it neutral: an email with too little accent still looks",
-    "  professional; one painted in brand color looks like a coupon.",
+    ...accentBudget,
     "",
     "STYLE DIRECTION FOR THIS EMAIL (this piece's visual identity; the exact spacing,",
     "sizing, and detail choices within it are yours, but every EMAIL DESIGN SYSTEM rule",

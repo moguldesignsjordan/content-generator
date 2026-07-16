@@ -125,6 +125,7 @@ export function EmailPreview({
             hasImage={hasImage}
             placement={image?.placement}
             promptUsed={image?.prompt}
+            paletteUsed={image?.brand_palette}
             onApplied={(newHtml, newImage) => {
               onHtmlChange(newHtml);
               setImage(newImage);

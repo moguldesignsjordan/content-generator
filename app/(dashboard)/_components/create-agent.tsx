@@ -78,6 +78,8 @@ interface BriefCard {
   tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
+  visualVibe: string | null;
+  hasProductPhoto: boolean;
 }
 
 interface Option {
@@ -145,6 +147,10 @@ export function CreateAgent({
   // An attached image is uploaded and analyzed before the user can send, so the
   // paperclip needs its own pending state (send() has its own `loading`).
   const [uploading, setUploading] = useState(false);
+  // Set when the agent's PRODUCT EMAIL FLOW just asked "upload a different
+  // photo": the NEXT image attach is the product's own photo (hero material),
+  // not a design to copy, so the paperclip has to route it differently.
+  const [awaitingProductPhoto, setAwaitingProductPhoto] = useState(false);
   // Quick-action panel open state. Open in the landing; tapping + toggles it.
   // Closes on send so the conversation reads clean.
   const [actionsOpen, setActionsOpen] = useState(true);
@@ -226,10 +232,36 @@ export function CreateAgent({
       .catch(() => toast.error("Couldn't read that file."));
   }
 
+  /**
+   * A real product photo: hosted as-is (no AI, no design analysis) and
+   * reported back as a plain chat message carrying the URL, which the agent
+   * is instructed to save verbatim as update_brief.product_photo_url.
+   */
+  async function uploadProductPhoto(file: File) {
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/uploads/image", { method: "POST", body });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that photo.");
+      setAwaitingProductPhoto(false);
+      void send(`I uploaded a product photo: ${data.url}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't upload that photo.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   /** The paperclip: takes anything a non-technical user might have on hand. */
   function handleAttachFile(file: File) {
     if (file.type.startsWith("image/")) {
-      void uploadDesignImage(file);
+      if (awaitingProductPhoto) {
+        void uploadProductPhoto(file);
+      } else {
+        void uploadDesignImage(file);
+      }
       return;
     }
     attachTextFile(file);
@@ -495,7 +527,10 @@ export function CreateAgent({
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => send(opt.label)}
+                    onClick={() => {
+                      if (opt.id.startsWith("photo_upload")) setAwaitingProductPhoto(true);
+                      send(opt.label);
+                    }}
                     disabled={loading || generating}
                     className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
                   >
@@ -817,13 +852,16 @@ function BriefCardView({
     {
       label: "Offer",
       value: card.offerName,
-      hint: card.offerPrice ?? undefined,
+      hint: [card.offerPrice, card.hasProductPhoto ? "photo attached" : null]
+        .filter(Boolean)
+        .join(" · ") || undefined,
     },
     {
       label: "Tone",
       value: card.tone,
       hint: card.tone ? undefined : "brand voice",
     },
+    { label: "Vibe", value: card.visualVibe },
   ];
 
   // Number of rows with a pending (uncommitted) edit, in label order.

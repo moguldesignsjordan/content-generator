@@ -14,9 +14,16 @@ import {
 import type {
   BrandColors,
   BrandFonts,
+  BrandPalettePref,
   ContentImageStyle,
   VisualIdentity,
 } from "@/lib/db/types";
+
+const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
+  { value: "auto", label: "Auto (photos stay natural, everything else gets accents)" },
+  { value: "always", label: "Always use brand colors" },
+  { value: "never", label: "Never force brand colors" },
+];
 
 const IMAGE_STYLE_OPTIONS: { value: ContentImageStyle; label: string }[] = [
   { value: "illustration", label: "Illustration" },
@@ -73,6 +80,9 @@ export function VisualIdentityForm({
   const [imageStyle, setImageStyle] = useState<ContentImageStyle>(
     vi.image_gen?.style ?? "illustration",
   );
+  const [brandPalette, setBrandPalette] = useState<BrandPalettePref>(
+    vi.image_gen?.brand_palette ?? "auto",
+  );
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -119,7 +129,11 @@ export function VisualIdentityForm({
               postal_address: postalAddress.trim() || undefined,
               social,
             },
-            image_gen: { auto: autoImages, style: imageStyle },
+            image_gen: {
+              auto: autoImages,
+              style: imageStyle,
+              brand_palette: brandPalette,
+            },
           },
         }),
       });
@@ -311,6 +325,23 @@ export function VisualIdentityForm({
             </Field>
           </div>
         )}
+        <div className="mt-3 max-w-xs">
+          <Field
+            label="Brand colors in images"
+            hint="Realistic photos usually look best without a forced color grade; graphic styles read as more on-brand with accents."
+          >
+            <Select
+              value={brandPalette}
+              onChange={(e) => setBrandPalette(e.target.value as BrandPalettePref)}
+            >
+              {BRAND_PALETTE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
       </div>
 
       {/* Social */}

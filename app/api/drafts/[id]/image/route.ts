@@ -15,8 +15,9 @@ import {
 } from "@/lib/pipeline/generate-image";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { prepareReferenceImage } from "@/lib/images/optimize";
-import { IMAGE_STYLE_LABELS } from "@/prompts/generate-image";
+import { IMAGE_STYLE_LABELS, resolveBrandPalette } from "@/prompts/generate-image";
 import type {
+  BrandPaletteMode,
   ContentImage,
   ContentImageStyle,
   DraftJobContext,
@@ -192,6 +193,14 @@ export async function POST(
       const exactPrompt =
         (form.get("exactPrompt") as string | null)?.trim().slice(0, 2000) ||
         undefined;
+      const rawPalette = form.get("brandColors") as string | null;
+      const brandPalette = resolveBrandPalette(
+        style,
+        topicCtx.brand.visual_identity?.image_gen?.brand_palette,
+        rawPalette === "accents" || rawPalette === "none"
+          ? (rawPalette as BrandPaletteMode)
+          : undefined,
+      );
 
       const generated = await generateContentImage({
         tokens: resolveBrandTokens(topicCtx.brand),
@@ -208,6 +217,7 @@ export async function POST(
         exactPrompt,
         reference,
         referenceUse,
+        brandPalette,
       });
       image = {
         ...generated.image,

@@ -476,6 +476,7 @@ export function BlogReviewActions({
         kind="blog"
         hasImage={!!heroImage}
         promptUsed={heroImage?.prompt}
+        paletteUsed={heroImage?.brand_palette}
         onApplied={(newHtml, newImage) => {
           setHtml(newHtml);
           setHeroImage(newImage);

@@ -209,7 +209,7 @@ export function buildProductLines(products: Product[]): string[] {
   return products.length
     ? products.map(
         (p) =>
-          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}${p.description ? `, ${p.description}` : ""}`,
+          `  - ${p.slug}: ${p.name}${p.price_point ? ` (${p.price_point})` : ""}${p.description ? `, ${p.description}` : ""}${p.image_url ? " [has a real photo on file]" : ""}`,
       )
     : ["  (none on file)"];
 }
@@ -306,6 +306,8 @@ export function buildBriefStateBlock(
           ? "yes"
           : "no"
     }`,
+    `  Vibe: ${brief.visual_vibe ?? "(not set)"}`,
+    `  Product photo: ${brief.product_photo_url ? "attached, will be the hero as-is" : "(none)"}`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }
@@ -325,6 +327,8 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
     lines.push(
       `  Tone for this piece: ${brief.tone} (shade the brand voice this way; it does not replace it)`,
     );
+  if (brief.visual_vibe)
+    lines.push(`  Visual/verbal vibe: ${brief.visual_vibe}`);
   if (brief.style_example) {
     const body =
       brief.style_example.length > 3000

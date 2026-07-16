@@ -1004,17 +1004,27 @@ export async function getDraftForReview(
 ): Promise<DraftForReview | null> {
   const db = getAdminClient();
 
-  // Falls back to a slimmer select before migrations 003 (archived) and 020
-  // (feedback) add their columns, so this doesn't hard-break every draft page
-  // in the meantime.
+  // Falls back to progressively slimmer selects before migrations 003
+  // (archived), 020 (feedback), and 023 (feedback_note) add their columns, so
+  // this doesn't hard-break every draft page in the meantime.
   let { data, error } = await db
     .from("drafts")
     .select(
-      `id, version, state, content, meta, seo_data, archived, feedback, created_at,
+      `id, version, state, content, meta, seo_data, archived, feedback, feedback_note, created_at,
        content_jobs!inner ( type, topics ( title ) )`,
     )
     .eq("id", draftId)
     .maybeSingle();
+  if (error) {
+    ({ data, error } = await db
+      .from("drafts")
+      .select(
+        `id, version, state, content, meta, seo_data, archived, feedback, created_at,
+         content_jobs!inner ( type, topics ( title ) )`,
+      )
+      .eq("id", draftId)
+      .maybeSingle());
+  }
   if (error) {
     ({ data, error } = await db
       .from("drafts")
@@ -1048,16 +1058,23 @@ export async function getDraftForReview(
     created_at: data.created_at,
     job_type: (job?.type as ContentJobType) ?? "email",
     feedback: ((data as { feedback?: string }).feedback as DraftFeedback) ?? null,
+    feedback_note: (data as { feedback_note?: string | null }).feedback_note ?? null,
   };
 }
 
-/** Sets (or clears, with null) the reviewer's thumbs rating on a draft. */
+/** Sets (or clears, with null) the reviewer's thumbs rating on a draft, and
+ * optionally a reason alongside it. Clearing the rating (feedback null)
+ * always clears the note too, whatever the caller passes for it. */
 export async function setDraftFeedback(
   draftId: string,
   feedback: DraftFeedback | null,
+  note?: string | null,
 ): Promise<void> {
   const db = getAdminClient();
-  const { error } = await db.from("drafts").update({ feedback }).eq("id", draftId);
+  const { error } = await db
+    .from("drafts")
+    .update({ feedback, feedback_note: feedback ? (note ?? null) : null })
+    .eq("id", draftId);
   if (error) throw error;
 }
 
@@ -1073,10 +1090,10 @@ export async function listFeedbackEmailExamples(
   perSide = 3,
 ): Promise<FeedbackEmailExample[]> {
   const db = getAdminClient();
-  const { data, error } = await db
+  let { data, error } = await db
     .from("drafts")
     .select(
-      `content, meta, feedback, created_at,
+      `content, meta, feedback, feedback_note, created_at,
        content_jobs!inner ( brand_id, type, email_type )`,
     )
     .eq("content_jobs.brand_id", brandId)
@@ -1084,6 +1101,25 @@ export async function listFeedbackEmailExamples(
     .not("feedback", "is", null)
     .order("created_at", { ascending: false })
     .limit(24);
+  // Migration 023 (feedback_note) may not be applied yet; fall back to the
+  // pre-023 select rather than losing the whole feedback loop over one column.
+  // Cast to the first query's shape: the row mapping below already treats
+  // feedback_note as optional, so a missing column here is harmless.
+  if (error) {
+    const fallback = await db
+      .from("drafts")
+      .select(
+        `content, meta, feedback, created_at,
+         content_jobs!inner ( brand_id, type, email_type )`,
+      )
+      .eq("content_jobs.brand_id", brandId)
+      .eq("content_jobs.type", "email")
+      .not("feedback", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(24);
+    data = fallback.data as typeof data;
+    error = fallback.error;
+  }
   if (error) {
     logWarn("db:listFeedbackEmailExamples", error.message, { brandId });
     return [];
@@ -1095,6 +1131,7 @@ export async function listFeedbackEmailExamples(
     content: EmailDraftContent | null;
     meta: DraftMeta | null;
     feedback: string | null;
+    feedback_note?: string | null;
     content_jobs?: { email_type?: string | null };
   }[]) {
     const feedback = row.feedback === "up" || row.feedback === "down" ? row.feedback : null;
@@ -1112,6 +1149,7 @@ export async function listFeedbackEmailExamples(
       subject,
       email_type: (row.content_jobs?.email_type as EmailType) ?? null,
       excerpt: body.slice(0, 600),
+      note: row.feedback_note ?? null,
     });
   }
   return examples;
@@ -1553,6 +1591,7 @@ export async function upsertProduct(
     deliverables: string[];
     price_point: string | null;
     url: string | null;
+    image_url?: string | null;
   },
 ): Promise<Product> {
   const db = getAdminClient();

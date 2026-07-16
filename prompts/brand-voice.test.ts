@@ -1,10 +1,28 @@
 import { describe, expect, it } from "vitest";
-import type { ReferenceEmail } from "@/lib/db/types";
+import type { CampaignBrief, Product, ReferenceEmail } from "@/lib/db/types";
 import {
+  buildBriefStateBlock,
   buildCampaignBriefBlock,
   buildKeywordLines,
+  buildProductLines,
   buildReferenceEmailsBlock,
 } from "./brand-voice";
+
+function makeProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: "p1",
+    brand_id: "b1",
+    slug: "brand-audit",
+    name: "Brand audit",
+    description: "A full audit of your brand.",
+    deliverables: [],
+    price_point: null,
+    url: null,
+    image_url: null,
+    created_at: "2026-07-05T00:00:00Z",
+    ...overrides,
+  };
+}
 
 describe("buildKeywordLines", () => {
   it("falls back to the raw topic fields when the topic hasn't been researched", () => {
@@ -74,6 +92,53 @@ describe("buildKeywordLines", () => {
     expect(lines).toEqual([
       "TARGET KEYWORD (DataForSEO-validated): b2b newsletter ideas (~210/mo searches)",
     ]);
+  });
+});
+
+describe("buildProductLines", () => {
+  it("flags products that have a real photo on file", () => {
+    const lines = buildProductLines([
+      makeProduct({ slug: "with-photo", image_url: "https://example.com/a.jpg" }),
+      makeProduct({ slug: "no-photo", image_url: null }),
+    ]);
+    expect(lines[0]).toContain("[has a real photo on file]");
+    expect(lines[1]).not.toContain("[has a real photo on file]");
+  });
+
+  it("falls back to a placeholder when there are no products", () => {
+    expect(buildProductLines([])).toEqual(["  (none on file)"]);
+  });
+});
+
+describe("buildBriefStateBlock", () => {
+  it("reports the vibe and product photo state", () => {
+    const block = buildBriefStateBlock(
+      { visual_vibe: "punchy", product_photo_url: "https://example.com/a.jpg" } as CampaignBrief,
+      "topic-1",
+    );
+    expect(block).toContain("Vibe: punchy");
+    expect(block).toContain("Product photo: attached, will be the hero as-is");
+  });
+
+  it("shows the not-set defaults when the brief is empty", () => {
+    const block = buildBriefStateBlock({} as CampaignBrief, null);
+    expect(block).toContain("Vibe: (not set)");
+    expect(block).toContain("Product photo: (none)");
+  });
+});
+
+describe("buildCampaignBriefBlock", () => {
+  it("includes the visual vibe when set", () => {
+    const block = buildCampaignBriefBlock({
+      goal: "Sell the thing",
+      visual_vibe: "playful",
+    } as CampaignBrief);
+    expect(block).toContain("Visual/verbal vibe: playful");
+  });
+
+  it("omits the vibe line when unset", () => {
+    const block = buildCampaignBriefBlock({ goal: "Sell the thing" } as CampaignBrief);
+    expect(block).not.toContain("Visual/verbal vibe");
   });
 });
 

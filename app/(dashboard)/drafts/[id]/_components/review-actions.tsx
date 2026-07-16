@@ -195,8 +195,12 @@ export function ReviewActions({
   // Optimistic with rollback; tapping the active thumb clears it.
   const [thumbs, setThumbs] = useState<DraftFeedback | null>(initialFeedback);
   const [savingThumbs, setSavingThumbs] = useState(false);
+  // A fresh thumbs-down opens a quick "why" sheet: chips + optional free
+  // text, feeding the WHY into future generations, not just the "avoid this".
+  const [showDownReason, setShowDownReason] = useState(false);
+  const [downReason, setDownReason] = useState("");
 
-  async function rateDraft(next: DraftFeedback) {
+  async function rateDraft(next: DraftFeedback, note?: string | null) {
     if (savingThumbs) return;
     const value = thumbs === next ? null : next;
     const prev = thumbs;
@@ -206,7 +210,7 @@ export function ReviewActions({
       const res = await fetch(`/api/drafts/${draftId}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feedback: value }),
+        body: JSON.stringify({ feedback: value, note: value ? (note ?? null) : null }),
       });
       if (!res.ok) throw new Error();
       if (value === "up") toast.success("Noted. More emails like this one.");
@@ -217,6 +221,15 @@ export function ReviewActions({
     } finally {
       setSavingThumbs(false);
     }
+  }
+
+  const DOWN_REASONS = ["Too stiff", "Too long", "Too generic", "Wrong vibe"];
+
+  function submitDownReason() {
+    const note = downReason.trim();
+    setShowDownReason(false);
+    setDownReason("");
+    void rateDraft("down", note || null);
   }
 
   // Regeneration runs in the background: the reject sheet closes the instant
@@ -994,7 +1007,13 @@ export function ReviewActions({
           <Tooltip label="Not my style. Steer future emails away from this." side="top">
             <button
               type="button"
-              onClick={() => void rateDraft("down")}
+              onClick={() => {
+                if (thumbs === "down") {
+                  void rateDraft("down"); // tapping the active thumb clears it
+                } else {
+                  setShowDownReason(true);
+                }
+              }}
               disabled={savingThumbs}
               aria-label="Thumbs down: avoid emails like this"
               aria-pressed={thumbs === "down"}
@@ -1118,6 +1137,52 @@ export function ReviewActions({
             Max revisions reached. Edit the draft manually or start fresh.
           </p>
         )}
+      </Sheet>
+
+      {/* Thumbs-down reason: optional, never blocks the rating itself (Skip
+          saves a bare "down" exactly like before this existed). */}
+      <Sheet
+        open={showDownReason}
+        onClose={() => {
+          setShowDownReason(false);
+          setDownReason("");
+        }}
+        title="What threw you off?"
+        description="Optional, but it helps future drafts steer away from this specifically."
+        footer={
+          <Button
+            variant={downReason.trim() ? "solid" : "subtle"}
+            className="w-full"
+            onClick={submitDownReason}
+          >
+            {downReason.trim() ? "Save" : "Skip"}
+          </Button>
+        }
+      >
+        <div className="flex flex-wrap gap-2">
+          {DOWN_REASONS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setDownReason(r)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
+                downReason === r
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-border bg-surface-2 text-foreground hover:bg-surface-3",
+              )}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <Textarea
+          rows={3}
+          className="mt-3"
+          value={downReason}
+          onChange={(e) => setDownReason(e.target.value)}
+          placeholder="Anything specific? (optional)"
+        />
       </Sheet>
 
       {/* Schedule for later: date/time only, no timezone field, MailerLite

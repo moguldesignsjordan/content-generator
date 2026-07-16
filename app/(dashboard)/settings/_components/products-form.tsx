@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Card, Field, Input, Textarea, useToast } from "@/components/ui";
 import type { Product } from "@/lib/db/types";
 import { ListInput } from "./list-input";
@@ -18,6 +18,7 @@ interface EditableProduct {
   deliverables: string[];
   price_point: string;
   url: string;
+  image_url: string;
 }
 
 function toEditable(p: Product): EditableProduct {
@@ -29,6 +30,7 @@ function toEditable(p: Product): EditableProduct {
     deliverables: p.deliverables ?? [],
     price_point: p.price_point ?? "",
     url: p.url ?? "",
+    image_url: p.image_url ?? "",
   };
 }
 
@@ -40,6 +42,7 @@ const EMPTY: EditableProduct = {
   deliverables: [],
   price_point: "",
   url: "",
+  image_url: "",
 };
 
 /**
@@ -93,7 +96,25 @@ function ProductCard({
 }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const toast = useToast();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  async function handlePhotoUpload(file: File) {
+    setUploadingPhoto(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/uploads/image", { method: "POST", body });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Upload failed");
+      onChange({ image_url: data.url });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Photo upload failed.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -173,6 +194,57 @@ function ProductCard({
         onChange={(deliverables) => onChange({ deliverables })}
         placeholder="Add a deliverable…"
       />
+
+      <Field
+        label="Photo"
+        hint="A real photo of this product. Product emails offer it as the hero image instead of an AI-generated one."
+      >
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handlePhotoUpload(f);
+            e.target.value = "";
+          }}
+        />
+        <div className="flex items-center gap-3">
+          {product.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.image_url}
+              alt=""
+              className="h-14 w-14 shrink-0 rounded-[var(--radius-md)] border border-border object-cover"
+            />
+          ) : (
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border text-[10px] text-muted">
+              No photo
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              loading={uploadingPhoto}
+              onClick={() => photoInputRef.current?.click()}
+            >
+              {product.image_url ? "Replace" : "Upload"}
+            </Button>
+            {product.image_url && (
+              <button
+                type="button"
+                onClick={() => onChange({ image_url: "" })}
+                className="text-xs text-muted transition-colors hover:text-danger"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+      </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Price point" hint="How pricing is talked about in copy.">

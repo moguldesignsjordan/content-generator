@@ -1,6 +1,23 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { ContentImageStyle, ReferenceUse } from "@/lib/db/types";
+import type {
+  BrandPaletteMode,
+  BrandPalettePref,
+  ContentImageStyle,
+  ReferenceUse,
+  VisualVibe,
+} from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
+
+// Which image style best carries each requested vibe (see
+// CampaignBrief.visual_vibe), used as the auto-image default in place of the
+// brand's generic stored style when a piece has an explicit vibe. An explicit
+// user style choice (the image sheet) always wins over both.
+export const VISUAL_VIBE_IMAGE_STYLE: Record<VisualVibe, ContentImageStyle> = {
+  punchy: "collage",
+  playful: "illustration",
+  sleek: "lineart",
+  premium: "photo",
+};
 
 // Image-prompt crafting: a tiny FAST_MODEL call turns topic + headline +
 // chosen style + brand palette into a tight prompt for the image model
@@ -20,7 +37,7 @@ export const IMAGE_STYLE_LABELS: Record<ContentImageStyle, string> = {
 /** One-line descriptions for the style picker UI. Keep in sync with the scaffolds. */
 export const IMAGE_STYLE_DESCRIPTIONS: Record<ContentImageStyle, string> = {
   illustration: "Flat editorial vector art, neutral base with brand-color accents.",
-  photo: "Premium photography, natural light, graded to the brand palette.",
+  photo: "Premium photography, natural light, true-to-life color.",
   texture: "Abstract gradient backdrop built only from brand colors.",
   render3d: "Soft matte 3D shapes with studio lighting, playful but polished.",
   collage: "Layered paper-cutout collage, tactile and editorial.",
@@ -28,48 +45,112 @@ export const IMAGE_STYLE_DESCRIPTIONS: Record<ContentImageStyle, string> = {
 };
 
 // The deterministic halves of each prompt. {SCENE} is the model-crafted
-// subject; {PALETTE} is the brand's real hex values.
+// subject; {COLOR} is the style's color treatment (branded or neutral, below).
 const STYLE_SCAFFOLDS: Record<ContentImageStyle, string> = {
   illustration:
     "A modern flat vector-style editorial illustration of {SCENE}. Clean bold " +
     "shapes, minimal detail, generous negative space, confident composition. " +
-    "A calm neutral base of soft grays, off-whites, and muted naturals, with " +
-    "these brand colors used sparingly as deliberate accents on a few focal " +
-    "shapes: {PALETTE}. No text, no words, no letters, no logos, no watermarks. " +
+    "{COLOR} No text, no words, no letters, no logos, no watermarks. " +
     "Crisp edges, print quality.",
   photo:
     "A premium editorial photograph of {SCENE}. Natural light, shallow depth of " +
-    "field, uncluttered composition with clear negative space, color-graded to " +
-    "harmonize with this brand palette: {PALETTE}. Photorealistic, no text, no " +
-    "words, no logos, no watermarks.",
+    "field, uncluttered composition with clear negative space, {COLOR} " +
+    "Photorealistic, no text, no words, no logos, no watermarks.",
   texture:
     "An abstract brand background texture: {SCENE}. Soft gradients, layered " +
-    "organic shapes or subtle geometry, depth without clutter, built ONLY from " +
-    "these brand colors and tints of them: {PALETTE}. No objects, no people, no " +
-    "text, no letters, no logos. Smooth, high-end, suitable as an email header " +
-    "backdrop.",
+    "organic shapes or subtle geometry, depth without clutter, {COLOR} " +
+    "No objects, no people, no text, no letters, no logos. Smooth, high-end, " +
+    "suitable as an email header backdrop.",
   render3d:
     "A soft 3D render of {SCENE}. Smooth matte clay-like materials, rounded " +
     "friendly geometry, gentle studio lighting with soft shadows, objects " +
     "floating on a clean neutral backdrop (soft gray or off-white) with " +
-    "generous negative space. Mostly soft neutral tones, with these brand " +
-    "colors appearing as accents on one or two hero objects: {PALETTE}. No " +
-    "text, no words, no letters, no logos, no watermarks. Modern, high-end " +
-    "product-page quality.",
+    "generous negative space. {COLOR} No text, no words, no letters, no " +
+    "logos, no watermarks. Modern, high-end product-page quality.",
   collage:
     "A modern editorial paper-cutout collage of {SCENE}. Layered torn and " +
     "cleanly cut paper shapes, subtle drop shadows for real depth, a playful " +
-    "but disciplined composition with clear focal hierarchy. Mostly paper " +
-    "white, kraft, and soft gray stock, with a few pieces cut from these " +
-    "brand colors as accents: {PALETTE}. No text, no letters, no logos, no " +
-    "watermarks. Tactile, magazine-cover quality.",
+    "but disciplined composition with clear focal hierarchy. {COLOR} No text, " +
+    "no letters, no logos, no watermarks. Tactile, magazine-cover quality.",
   lineart:
     "A minimal continuous line-art drawing of {SCENE}. Confident single-weight " +
-    "strokes in a dark neutral ink on a clean near-white background, with at " +
-    "most one or two small flat accent fills drawn from this brand palette: " +
-    "{PALETTE}. Elegant, sparse, gallery quality. No text, no words, no " +
-    "letters, no logos, no watermarks.",
+    "strokes in a dark neutral ink on a clean near-white background, {COLOR} " +
+    "Elegant, sparse, gallery quality. No text, no words, no letters, no " +
+    "logos, no watermarks.",
 };
+
+// Per-style color treatments: `accents` steers toward the brand palette
+// ({PALETTE} is the brand's real hex values); `none` keeps the render's
+// colors natural/editorial with no brand steering at all. Realistic photos
+// especially read as artificially tinted when force-graded to a palette,
+// which is why photo defaults to `none` (see resolveBrandPalette).
+const COLOR_TREATMENTS: Record<
+  ContentImageStyle,
+  Record<BrandPaletteMode, string>
+> = {
+  illustration: {
+    accents:
+      "A calm neutral base of soft grays, off-whites, and muted naturals, with " +
+      "these brand colors used sparingly as deliberate accents on a few focal " +
+      "shapes: {PALETTE}.",
+    none:
+      "A calm neutral base of soft grays, off-whites, and muted naturals, with " +
+      "a restrained editorial palette: one or two confident accent hues that " +
+      "suit the subject.",
+  },
+  photo: {
+    accents:
+      "color-graded to harmonize with this brand palette: {PALETTE}.",
+    none: "natural true-to-life color grading, nothing artificially tinted.",
+  },
+  texture: {
+    accents:
+      "built ONLY from these brand colors and tints of them: {PALETTE}.",
+    none:
+      "built from a small family of soft, harmonious tones that suit the mood.",
+  },
+  render3d: {
+    accents:
+      "Mostly soft neutral tones, with these brand colors appearing as accents " +
+      "on one or two hero objects: {PALETTE}.",
+    none:
+      "Mostly soft neutral tones, with one or two tasteful accent colors on " +
+      "the hero objects.",
+  },
+  collage: {
+    accents:
+      "Mostly paper white, kraft, and soft gray stock, with a few pieces cut " +
+      "from these brand colors as accents: {PALETTE}.",
+    none:
+      "Mostly paper white, kraft, and soft gray stock, with a few pieces in " +
+      "muted editorial accent colors.",
+  },
+  lineart: {
+    accents:
+      "with at most one or two small flat accent fills drawn from this brand " +
+      "palette: {PALETTE}.",
+    none:
+      "with at most one or two small flat accent fills in a color that suits " +
+      "the subject.",
+  },
+};
+
+/**
+ * Resolves whether a render should lean on brand colors. Precedence:
+ * per-image override (the sheet's toggle / the chat's answer) → brand-level
+ * pref ("always"/"never") → per-style default: photos stay natural, every
+ * graphic style gets brand accents.
+ */
+export function resolveBrandPalette(
+  style: ContentImageStyle,
+  pref?: BrandPalettePref,
+  override?: BrandPaletteMode,
+): BrandPaletteMode {
+  if (override) return override;
+  if (pref === "always") return "accents";
+  if (pref === "never") return "none";
+  return style === "photo" ? "none" : "accents";
+}
 
 // Appended to the final render prompt when the user attached a reference
 // image, telling the image model how to use it. Exported so the pipeline's
@@ -127,6 +208,7 @@ export function buildFinalImagePrompt(
   scene: string,
   tokens: BrandTokens,
   referenceUse?: ReferenceUse,
+  brandPalette?: BrandPaletteMode,
 ): string {
   const c = tokens.colors;
   // Texture is deliberately a pure brand backdrop, so it gets the full
@@ -137,9 +219,11 @@ export function buildFinalImagePrompt(
       ? [c.primary, c.accent, c.secondary, c.background]
       : [c.accent, c.primary];
   const palette = paletteColors.filter(Boolean).join(", ");
+  const mode = brandPalette ?? resolveBrandPalette(style);
+  const color = COLOR_TREATMENTS[style][mode].replace("{PALETTE}", palette);
   const base = STYLE_SCAFFOLDS[style]
     .replace("{SCENE}", scene.trim().replace(/\.$/, ""))
-    .replace("{PALETTE}", palette);
+    .replace("{COLOR}", color);
   return referenceUse ? `${base} ${REFERENCE_DIRECTIVES[referenceUse]}` : base;
 }
 
@@ -153,8 +237,15 @@ export function buildImagePromptMessages(args: {
   subject?: string;
   /** Set when a reference image is attached to the call. */
   referenceUse?: ReferenceUse;
+  /** The email's type/tone/vibe, when known: shapes the scene's ENERGY
+   * (a busy celebratory moment vs. a single still object), never its style
+   * (the scaffold owns palette/lighting/quality words regardless). */
+  emailType?: string;
+  tone?: string;
+  vibe?: VisualVibe;
 }): { system: string; user: string } {
-  const { brandName, topicTitle, headline, style, subject, referenceUse } = args;
+  const { brandName, topicTitle, headline, style, subject, referenceUse, emailType, tone, vibe } =
+    args;
 
   const system = [
     "You write scene descriptions for marketing hero images (emails and blog",
@@ -165,7 +256,11 @@ export function buildImagePromptMessages(args: {
     "  You may add composition detail around their elements, but never remove,",
     "  replace, or reinterpret them into something else.",
     "- Concrete and specific: objects, settings, actions. Never abstract nouns alone.",
-    "- No style, palette, lighting, or quality words; a fixed scaffold adds those.",
+    "- Match the email's energy (given below, when known): a punchy or playful",
+    "  piece wants a scene with movement, a moment, or a bit of surprise; a",
+    "  sleek or premium piece wants one still, considered object with lots of",
+    "  breathing room. Energy shows up in WHAT the scene depicts, never in",
+    "  style, palette, lighting, or quality words, those stay the scaffold's job.",
     "- No text, letters, numbers, screens with readable UI, or logos in the scene.",
     "- For the 'texture' style, describe an abstract composition (shapes,",
     "  gradients, motion), not objects or people.",
@@ -188,6 +283,9 @@ export function buildImagePromptMessages(args: {
     `EMAIL TOPIC: ${topicTitle}`,
     headline ? `EMAIL HEADLINE: ${headline}` : "",
     `CHOSEN STYLE: ${style}`,
+    emailType ? `EMAIL TYPE: ${emailType}` : "",
+    tone ? `TONE: ${tone}` : "",
+    vibe ? `VIBE: ${vibe}` : "",
     referenceLine,
     subject
       ? `THE USER ASKED FOR THIS SUBJECT (hard constraint, keep every element they named): ${subject}`

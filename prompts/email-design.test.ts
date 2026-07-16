@@ -51,6 +51,22 @@ describe("buildEmailDesignBrief", () => {
     expect(brief).toContain(EMAIL_STYLES.soft_card.label);
   });
 
+  it("uses the default accent budget with no vibe or a sleek/premium vibe", () => {
+    for (const vibe of [undefined, "sleek", "premium"] as const) {
+      const brief = buildEmailDesignBrief(TOKENS, "newsletter_tip", { vibe });
+      expect(brief).toContain("at most 2 to 3 places");
+      expect(brief).not.toContain("loosened for this piece's punchy/playful vibe");
+    }
+  });
+
+  it("loosens the accent budget for a punchy or playful vibe", () => {
+    for (const vibe of ["punchy", "playful"] as const) {
+      const brief = buildEmailDesignBrief(TOKENS, "newsletter_tip", { vibe });
+      expect(brief).toContain("loosened for this piece's punchy/playful vibe");
+      expect(brief).not.toContain("at most 2 to 3 places");
+    }
+  });
+
   it("embeds a layout-shape directive for every layout id", () => {
     for (const layout of ALL_LAYOUTS) {
       const brief = buildEmailDesignBrief(TOKENS, layout, {

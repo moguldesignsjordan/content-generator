@@ -18,14 +18,17 @@ import {
   REFERENCE_DIRECTIVES,
   buildFinalImagePrompt,
   buildImagePromptMessages,
+  resolveBrandPalette,
   type ImagePromptOutput,
 } from "@/prompts/generate-image";
 import { stripEmDashes } from "@/lib/text";
 import type {
+  BrandPaletteMode,
   ContentImage,
   ContentImageStyle,
   ImagePromptMode,
   ReferenceUse,
+  VisualVibe,
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import type { UsageDelta } from "./cost";
@@ -71,6 +74,18 @@ export interface GenerateContentImageArgs {
   reference?: { data: string; mimeType: string };
   /** How the reference steers generation. Defaults to "style" when a reference is present. */
   referenceUse?: ReferenceUse;
+  /**
+   * Whether the render leans on brand colors ("accents") or stays neutral
+   * ("none"). Callers pass the resolved mode (per-image choice or brand
+   * pref); omitted, each style's default applies (photo → none, rest →
+   * accents). Ignored on the exactPrompt path, where the prompt is verbatim.
+   */
+  brandPalette?: BrandPaletteMode;
+  /** The email's type/tone/vibe, when known: shapes the scene's energy on
+   * the "auto" scene-crafting path only (ignored on exact/exactPrompt). */
+  emailType?: string;
+  tone?: string;
+  vibe?: VisualVibe;
 }
 
 export interface GenerateContentImageResult {
@@ -101,6 +116,7 @@ export async function generateContentImage(
   const exactPrompt = args.exactPrompt?.trim();
   const subject = args.subject?.trim();
   const wantsExact = args.promptMode === "exact" && Boolean(subject);
+  const brandPalette = resolveBrandPalette(args.style, undefined, args.brandPalette);
 
   // 1. Decide the final prompt. Three paths, cheapest first:
   //    - exactPrompt: the user edited the full prompt; send it verbatim.
@@ -123,6 +139,7 @@ export async function generateContentImage(
       subject!,
       args.tokens,
       referenceUse,
+      brandPalette,
     );
     alt = subject!;
   } else {
@@ -133,6 +150,9 @@ export async function generateContentImage(
       style: args.style,
       subject,
       referenceUse,
+      emailType: args.emailType,
+      tone: args.tone,
+      vibe: args.vibe,
     });
     const userContent: Anthropic.ContentBlockParam[] = [
       { type: "text", text: user },
@@ -178,6 +198,7 @@ export async function generateContentImage(
       promptOut.scene,
       args.tokens,
       referenceUse,
+      brandPalette,
     );
     alt = promptOut.alt;
   }
@@ -209,6 +230,8 @@ export async function generateContentImage(
       height: optimized.height,
       style: args.style,
       prompt: finalPrompt,
+      // Not meaningful on exactPrompt renders: the prompt was verbatim.
+      brand_palette: exactPrompt ? undefined : brandPalette,
     },
     usage,
   };
@@ -237,6 +260,36 @@ export async function saveUploadedHeroImage(args: {
     height: optimized.height,
     style: "uploaded",
   };
+}
+
+/**
+ * Fetches an already-hosted photo (a product's stored image, or one the user
+ * uploaded through the create-agent interview) and hosts it as the draft's
+ * hero AS-IS, no AI involved. Non-fatal by design, exactly like the design
+ * reference fetch in the generation pipeline: a stale URL or an unreadable
+ * file logs a warning and returns undefined so generation falls back to the
+ * normal AI-image path instead of failing the whole draft.
+ */
+export async function useProductPhotoAsHero(
+  url: string,
+  alt: string,
+): Promise<ContentImage | undefined> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    const optimized = await optimizeEmailImage(Buffer.from(await res.arrayBuffer()));
+    const hostedUrl = await uploadContentImage(optimized.data, optimized.format);
+    return {
+      url: hostedUrl,
+      alt: stripEmDashes(alt.trim()).slice(0, 160),
+      width: optimized.width,
+      height: optimized.height,
+      style: "uploaded",
+    };
+  } catch (err) {
+    logError("pipeline:generate-image:product-photo", err);
+    return undefined;
+  }
 }
 
 /** Uploads an image to the content-images bucket, creating it if missing.

@@ -6,6 +6,7 @@ import type {
   Icp,
   Product,
   Strategy,
+  VisualVibe,
 } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
@@ -33,6 +34,9 @@ export interface UpdateBriefInput {
   style_example?: string;
   length?: EmailLengthPreference;
   include_image?: boolean;
+  visual_vibe?: VisualVibe;
+  product_photo_url?: string;
+  use_ai_image_instead?: boolean;
 }
 
 export interface SelectTopicInput {
@@ -115,6 +119,28 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         description:
           "true when the user wants a picture in this email, false when they " +
           "explicitly don't. Leave unset to use the brand's default.",
+      },
+      visual_vibe: {
+        type: "string",
+        enum: ["punchy", "sleek", "playful", "premium"],
+        description:
+          "The visual and verbal energy this piece should have, when the " +
+          "user says (punchy and bold, sleek and minimal, playful and fun, " +
+          "premium and polished). Shapes both the image style and the " +
+          "email's look.",
+      },
+      product_photo_url: {
+        type: "string",
+        description:
+          "An EXACT URL to use as the hero image, verbatim, as it appeared " +
+          "in a system note or tool result you just received (e.g. an " +
+          "'uploaded a product photo' notice). NEVER invent or guess a URL.",
+      },
+      use_ai_image_instead: {
+        type: "boolean",
+        description:
+          "Set true when the user rejects the auto-attached product photo " +
+          "and wants an AI-generated image instead. Clears product_photo_url.",
       },
     },
   },

@@ -76,9 +76,15 @@ export interface BrandFooter {
 // Settings → Visual identity. `auto` means every new email/blog draft gets a
 // generated hero image; the human approval gate still applies to the whole
 // draft, image included, before anything publishes.
+// `brand_palette` controls whether generated images are steered toward the
+// brand's colors: "auto" (default) lets each style decide (realistic photos
+// stay natural, graphic styles get brand accents), "always"/"never" force it.
+export type BrandPalettePref = "auto" | "always" | "never";
+
 export interface ImageGenPrefs {
   auto?: boolean;
   style?: ContentImageStyle;
+  brand_palette?: BrandPalettePref;
 }
 
 export interface VisualIdentity {
@@ -251,6 +257,9 @@ export interface Product {
   deliverables: string[];
   price_point: string | null;
   url: string | null;
+  // A real photo of the product (migration 022), offered as the default
+  // hero image for product emails instead of an AI-imagined stand-in.
+  image_url: string | null;
   created_at: string;
 }
 
@@ -302,6 +311,10 @@ export interface BrandMemory {
 
 export type CampaignStatus = "briefing" | "generating" | "drafted" | "done";
 
+/** The visual/verbal energy the user asked for, captured in the interview and
+ * consumed by image style and email design-style selection. */
+export type VisualVibe = "punchy" | "sleek" | "playful" | "premium";
+
 export interface CampaignBrief {
   goal?: string;
   audience_notes?: string;
@@ -322,6 +335,15 @@ export interface CampaignBrief {
    * auto-image setting is off; false skips it even when auto is on; unset
    * leaves the brand setting in charge. */
   include_image?: boolean;
+  /** The energy the user wants this piece to feel like. Drives image style
+   * and email design-style selection (see prompts/email-styles.ts and
+   * prompts/generate-image.ts). */
+  visual_vibe?: VisualVibe;
+  /** A real, already-hosted photo (usually the mapped product's own image)
+   * to use as the hero AS-IS instead of generating one. Only ever set from a
+   * known-good URL: the selected product's stored image_url, or a photo the
+   * user uploaded through the interview, never invented by the model. */
+  product_photo_url?: string;
 }
 
 /** One draft created as part of a multi-email series (plan_series), kept in
@@ -479,6 +501,9 @@ export type ContentImageStyle =
 /** How an attached reference image steers generation. */
 export type ReferenceUse = "style" | "subject" | "both";
 
+/** Whether one generated image leans on the brand's colors or stays neutral. */
+export type BrandPaletteMode = "accents" | "none";
+
 /** Where the hero image sits in an email's layout. */
 export type HeroPlacement = "top" | "below_headline" | "above_cta";
 
@@ -495,6 +520,10 @@ export interface ContentImage {
   // images generated before this existed). Shown in the image sheet so the
   // user can see exactly what produced the render, tweak it, and regenerate.
   prompt?: string;
+  // Whether this render was steered toward brand colors ("accents") or left
+  // neutral ("none"). Absent on uploads, exact-prompt renders, and images
+  // generated before this existed. Initializes the image sheet's toggle.
+  brand_palette?: BrandPaletteMode;
 }
 
 /** How the user's typed subject is treated when generating an image. */
@@ -757,6 +786,9 @@ export interface DraftForReview {
   job_type: ContentJobType;
   /** Reviewer's thumbs rating (migration 020); fed back into generation. */
   feedback: DraftFeedback | null;
+  /** Optional reason alongside the rating (migration 023), a canned chip or
+   * free text; fed back into generation as WHY a disliked draft missed. */
+  feedback_note: string | null;
 }
 
 /** Thumbs rating a reviewer can put on a draft. */
@@ -770,6 +802,8 @@ export interface FeedbackEmailExample {
   email_type: EmailType | null;
   /** Flattened body copy, truncated at query time to keep prompts lean. */
   excerpt: string;
+  /** Optional reason the reviewer gave alongside a down rating. */
+  note?: string | null;
 }
 
 // Minimal context needed by the regeneration pipeline.

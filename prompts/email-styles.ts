@@ -1,4 +1,4 @@
-import type { EmailStyleId } from "@/lib/db/types";
+import type { EmailStyleId, VisualVibe } from "@/lib/db/types";
 
 // A curated library of professional visual design directions. Each is a
 // distinct "skin" (page background, card frame, header treatment, accent
@@ -199,14 +199,30 @@ export function pickRotation<T>(
   return usable[Math.floor(Math.random() * usable.length)];
 }
 
+// Which curated styles fit each requested vibe (see CampaignBrief.visual_vibe).
+// Kept to 3 per vibe so pickRotation's avoidLastK still means something; a
+// vibe always narrows the pool, it never expands past what was curated here.
+export const VISUAL_VIBE_STYLES: Record<VisualVibe, EmailStyleId[]> = {
+  punchy: ["bold_accent_band", "pill_modern", "warm_gradient_top"],
+  playful: ["pill_modern", "warm_gradient_top", "soft_card"],
+  sleek: ["minimal_mono", "left_rule_editorial", "editorial_serif"],
+  premium: ["editorial_serif", "bordered_ledger", "minimal_mono"],
+};
+
 /**
  * Picks the visual style for a fresh email generation. Never repeats any of
  * the last 3 styles used (across all 8, that's always satisfiable) unless
  * `seedIndex` is given, in which case it's the deterministic series
- * assignment (see pickRotation).
+ * assignment (see pickRotation). When `vibe` is set, the pool narrows to
+ * that vibe's 3 curated styles before rotating.
  */
 export function pickEmailStyle(
-  opts: { recent?: EmailStyleId[]; seedIndex?: number } = {},
+  opts: { recent?: EmailStyleId[]; seedIndex?: number; vibe?: VisualVibe } = {},
 ): EmailStyleId {
-  return pickRotation(EMAIL_STYLE_IDS, { ...opts, avoidLastK: 3 });
+  const ids = opts.vibe ? VISUAL_VIBE_STYLES[opts.vibe] : EMAIL_STYLE_IDS;
+  return pickRotation(ids, {
+    recent: opts.recent,
+    seedIndex: opts.seedIndex,
+    avoidLastK: 3,
+  });
 }

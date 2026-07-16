@@ -35,8 +35,10 @@ import type {
   Brand,
   CampaignBrief,
   FunnelStage,
+  Product,
   SeriesDraftRef,
   Strategy,
+  VisualVibe,
 } from "@/lib/db/types";
 import {
   CREATE_TOOLS,
@@ -191,7 +193,7 @@ export async function POST(req: NextRequest) {
       channel: null,
       series: null,
     };
-    const dispatchCtx = { brand, strategy, topics, campaignId: campaign.id };
+    const dispatchCtx = { brand, strategy, topics, products, campaignId: campaign.id };
 
     // Snapshot readiness BEFORE this turn: if the brief was already complete
     // walking in and the whole turn produces zero tool calls, the model
@@ -374,15 +376,20 @@ async function dispatchTool(
     brand: Brand;
     strategy: Strategy | null;
     topics: CampaignTopicOption[];
+    products: Product[];
     campaignId: string;
   },
 ): Promise<string> {
   switch (block.name) {
     case "update_brief": {
       const input = block.input as UpdateBriefInput;
-      state.brief = mergeBrief(state.brief, input);
+      state.brief = autoAttachProductPhoto(
+        mergeBrief(state.brief, input),
+        input,
+        ctx.products,
+      );
       const saved = (
-        ["goal", "audience_notes", "key_message", "offer_slug", "angle", "constraints", "tone"] as const
+        ["goal", "audience_notes", "key_message", "offer_slug", "angle", "constraints", "tone", "visual_vibe"] as const
       )
         .filter((k) => typeof input[k] === "string" && input[k]!.trim())
         .map((k) => `${k}=${state.brief[k]}`);
@@ -390,6 +397,12 @@ async function dispatchTool(
       // would just re-spend its tokens.
       if (typeof input.style_example === "string" && input.style_example.trim()) {
         saved.push("style_example=(attached, generation will match its style)");
+      }
+      if (state.brief.product_photo_url) {
+        saved.push("product_photo_url=(attached, will be used as the hero image)");
+      }
+      if (input.use_ai_image_instead === true) {
+        saved.push("product_photo_url cleared, an AI image will be generated instead");
       }
       return saved.length ? `Saved: ${saved.join("; ")}` : "No new fields to save.";
     }
@@ -514,10 +527,16 @@ async function dispatchTool(
         const topicCtx = await getTopicContext(topicId);
         if (!topicCtx) continue;
         // Campaign-level context (goal, audience, constraints, tone, length,
-        // image choice, style example) carries over; message, angle, offer,
-        // and a per-email image override are per email so the series doesn't
-        // flatten onto one shared brief.
+        // image choice, style example, vibe) carries over; message, angle,
+        // offer, and a per-email image override are per email so the series
+        // doesn't flatten onto one shared brief. A per-item product photo is
+        // resolved the same way the single-email path does: only when this
+        // item's own offer_slug points at a product with a stored photo.
         const includeImage = item.include_image ?? state.brief.include_image;
+        const itemProduct = item.offer_slug
+          ? ctx.products.find((p) => p.slug === item.offer_slug)
+          : undefined;
+        const productPhotoUrl = itemProduct?.image_url ?? undefined;
         const draftId = await createDraftShell({
           ctx: topicCtx,
           campaignId: ctx.campaignId,
@@ -537,12 +556,18 @@ async function dispatchTool(
             ...(state.brief.style_example
               ? { style_example: state.brief.style_example }
               : {}),
+            ...(state.brief.visual_vibe
+              ? { visual_vibe: state.brief.visual_vibe }
+              : {}),
             ...(typeof includeImage === "boolean"
               ? { include_image: includeImage }
               : {}),
             ...(item.key_message ? { key_message: item.key_message } : {}),
             ...(item.angle ? { angle: item.angle } : {}),
             ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
+            ...(productPhotoUrl
+              ? { product_photo_url: productPhotoUrl, include_image: true }
+              : {}),
           },
         });
         created.push({
@@ -656,6 +681,18 @@ async function dispatchTool(
   }
 }
 
+const VISUAL_VIBES: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
+
+/** True for a well-formed http(s) URL; guards against the model inventing one. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Merges only the fields the model actually passed onto the stored brief. */
 function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBrief {
   const next = { ...current };
@@ -685,6 +722,34 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   if (typeof input.include_image === "boolean") {
     next.include_image = input.include_image;
   }
+  if (input.visual_vibe && VISUAL_VIBES.includes(input.visual_vibe)) {
+    next.visual_vibe = input.visual_vibe;
+  }
+  // A directly-typed URL still has to pass isHttpUrl; the model is told to
+  // only ever echo one back from an upload notice, but this is the real
+  // guard against an invented or malformed value landing in the brief.
+  if (typeof input.product_photo_url === "string" && isHttpUrl(input.product_photo_url.trim())) {
+    next.product_photo_url = input.product_photo_url.trim();
+    next.include_image = true;
+  }
+  if (input.use_ai_image_instead === true) {
+    delete next.product_photo_url;
+  }
   return next;
+}
+
+/** Resolves the product a fresh offer_slug points at, when this exact update_brief
+ * call is the one setting it (never re-triggers on unrelated later turns, so a
+ * manually uploaded photo is never silently clobbered by a stale offer_slug). */
+function autoAttachProductPhoto(
+  brief: CampaignBrief,
+  input: UpdateBriefInput,
+  products: Product[],
+): CampaignBrief {
+  if (input.use_ai_image_instead === true) return brief;
+  if (typeof input.offer_slug !== "string" || !input.offer_slug.trim()) return brief;
+  const product = products.find((p) => p.slug === brief.offer_slug);
+  if (!product?.image_url) return brief;
+  return { ...brief, product_photo_url: product.image_url, include_image: true };
 }
 
