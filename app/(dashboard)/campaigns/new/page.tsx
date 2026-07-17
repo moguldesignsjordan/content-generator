@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getSessionUser } from "@/lib/supabase/server";
-import { getBrandWithIcps, getLatestActiveCampaign } from "@/lib/db/queries";
+import { getBrandWithIcps, listProducts, listTopics } from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../../_components/screen-header";
-import { CampaignChat } from "./_components/campaign-chat";
+import { CampaignForm } from "./_components/campaign-form";
 
 export const dynamic = "force-dynamic";
 
@@ -38,35 +38,21 @@ export default async function NewCampaignPage() {
     );
   }
 
-  // Resume the thread on a hard refresh instead of losing it, but only when
-  // there's an actual conversation to resume (mirrors the dashboard's
-  // create-agent hydration in app/(dashboard)/page.tsx).
-  const activeCampaign = await getLatestActiveCampaign(data.brand.id).catch(
-    () => null,
-  );
-  const activeMessages = activeCampaign?.chat_state?.messages ?? [];
-  const initial =
-    activeCampaign && activeMessages.length > 0
-      ? {
-          campaignId: activeCampaign.id,
-          messages: activeMessages,
-          topicId: activeCampaign.topic_id,
-          brief: activeCampaign.brief,
-          readyToGenerate: !!(
-            activeCampaign.brief.goal &&
-            activeCampaign.brief.key_message &&
-            activeCampaign.topic_id
-          ),
-        }
-      : undefined;
+  const [products, topics] = await Promise.all([
+    listProducts(data.brand.id).catch(() => []),
+    listTopics().catch(() => []),
+  ]);
 
   return (
     <>
       <ScreenHeader
         title="New campaign"
-        subtitle="A quick strategy conversation, then a designed draft to review."
+        subtitle="Pick what you're making, answer a few quick questions, and get a designed draft."
       />
-      <CampaignChat initial={initial} />
+      <CampaignForm
+        products={products.map((p) => ({ slug: p.slug, name: p.name }))}
+        topics={topics.map((t) => ({ id: t.id, title: t.title, pillar: t.pillar }))}
+      />
     </>
   );
 }

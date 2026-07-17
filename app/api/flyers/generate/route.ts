@@ -60,6 +60,7 @@ export async function POST(request: Request) {
   let brief: string | undefined;
   let aspect: FlyerAspect = DEFAULT_FLYER_ASPECT;
   let styleReferenceId: string | undefined;
+  let campaignId: string | undefined;
   try {
     const body = await request.json();
     topicId = body?.topicId || undefined;
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
     brief = typeof body?.brief === "string" ? body.brief.trim() || undefined : undefined;
     if (isFlyerAspect(body?.aspect)) aspect = body.aspect;
     styleReferenceId = body?.styleReferenceId || undefined;
+    campaignId = body?.campaignId || undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -109,6 +111,7 @@ export async function POST(request: Request) {
 
     const draftId = await createDraftShell({
       ctx,
+      campaignId,
       type: "social",
       flyerAspect: aspect,
       flyerBrief: brief,

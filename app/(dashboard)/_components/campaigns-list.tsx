@@ -209,9 +209,9 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                           href="/campaigns/new"
                           className="font-medium text-accent hover:text-accent-press"
                         >
-                          Open in the create chat
+                          Start a new campaign
                         </Link>{" "}
-                        to continue this campaign.
+                        to make one.
                       </p>
                     )}
                   </div>
