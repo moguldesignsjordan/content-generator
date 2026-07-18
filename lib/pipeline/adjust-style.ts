@@ -142,6 +142,7 @@ export async function adjustEmailStyle(
     html: attempt.html,
     label: instruction,
     type: "style",
+    tokens,
   });
   if (!result.ok) return { ok: false, error: result.error };
   return {

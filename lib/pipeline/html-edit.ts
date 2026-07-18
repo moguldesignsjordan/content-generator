@@ -2,6 +2,7 @@ import "server-only";
 import { updateDraftContent } from "@/lib/db/queries";
 import { stripEmDashes } from "@/lib/text";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
+import { ensureBrandLogo } from "@/lib/email/footer-logo";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
 import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
 import type {
@@ -10,6 +11,7 @@ import type {
   EditType,
   StyleEditHistoryEntry,
 } from "@/lib/db/types";
+import type { BrandTokens } from "@/lib/email/templates/types";
 
 // Shared tail of every in-place email edit (style, copy, recolor): take a
 // model-produced HTML patch, validate + sanitize it, push the pre-edit HTML
@@ -85,8 +87,13 @@ export async function commitHtmlEdit(args: {
   type?: EditType;
   /** Meta to merge in (e.g. color_overrides, email_copy) alongside the history push. */
   extraMeta?: Partial<DraftMeta>;
+  /** When known, guarantees the real logo (not a text-wordmark stand-in) in
+   * the header/footer after a model-authored patch. Omitted by callers that
+   * don't already have brand tokens in scope (mechanical, non-AI edits that
+   * can't reintroduce this). */
+  tokens?: BrandTokens;
 }): Promise<HtmlEditResult> {
-  const { draftCtx, html, label, type, extraMeta } = args;
+  const { draftCtx, html, label, type, extraMeta, tokens } = args;
 
   const validated = validateModelEmailHtml(html);
   if (!validated) return { ok: false, error: "That edit produced invalid HTML." };
@@ -94,11 +101,14 @@ export async function commitHtmlEdit(args: {
   // (a model recolor, a user picking black in the Design panel) can't leave the
   // email unreadable in dark mode — and older drafts get repaired on their
   // next edit. Region tagging repairs older drafts the same way, so copy the
-  // model left outside a data-region becomes editable after any edit.
+  // model left outside a data-region becomes editable after any edit. Logo
+  // repair is the same story: a model rewrite can drop the real logo for a
+  // text wordmark, so any edit that has brand tokens available heals it too.
   // ensureUnsubscribeTag stays last: it is the publish guarantee.
-  const safeHtml = ensureUnsubscribeTag(
+  let safeHtml = ensureUnsubscribeTag(
     ensureEditableRegions(ensureDarkModeReadability(stripEmDashes(validated))),
   );
+  if (tokens) safeHtml = ensureBrandLogo(safeHtml, tokens);
 
   const history: StyleEditHistoryEntry[] = [
     ...(draftCtx.meta.style_edit_history ?? []),

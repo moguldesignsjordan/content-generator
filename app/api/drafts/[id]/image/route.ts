@@ -294,6 +294,7 @@ export async function POST(
       label,
       type: "image",
       extraMeta: { hero_image: image, usage: rolled },
+      tokens: resolveBrandTokens(topicCtx.brand),
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 502 });

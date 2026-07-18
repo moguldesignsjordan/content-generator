@@ -35,6 +35,7 @@ import {
 } from "@/lib/email/templates";
 import { hasDarkModeSupport } from "@/lib/email/preview-mode";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
+import { ensureBrandLogo } from "@/lib/email/footer-logo";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
 import type {
   CampaignBrief,
@@ -553,7 +554,10 @@ function renderEmailForContext(
     designSource = "model";
     // The model's dark-mode CSS routinely misses elements (black text on the
     // dark card); repair coverage mechanically rather than trusting the prompt.
-    html = ensureDarkModeReadability(modelHtml);
+    // Same for the footer logo: the model is told to reuse the real uploaded
+    // logo there, same as the header, but sometimes still types the
+    // text-wordmark alternative it's shown for the no-logo case.
+    html = ensureBrandLogo(ensureDarkModeReadability(modelHtml), tokens);
   } else {
     logWarn(
       "pipeline:generate:html-fallback",

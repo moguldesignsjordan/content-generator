@@ -159,6 +159,7 @@ export async function adjustCopy(
     label,
     type: "copy",
     extraMeta,
+    tokens,
   });
   if (!result.ok) return { ok: false, error: result.error };
   return {
