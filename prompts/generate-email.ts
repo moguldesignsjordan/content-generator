@@ -508,8 +508,16 @@ export function buildEmailMessages(
       recent: opts.recentLayouts,
       seedIndex: opts.seedIndex,
     });
+  // A regenerate's styleOverride wins (a locked draft keeps its look), then
+  // the piece's explicit design choice (brief.email_style, guarded against a
+  // stale id in old brief JSON), then the vibe-narrowed rotation.
+  const briefStyle =
+    opts.brief?.email_style && EMAIL_STYLES[opts.brief.email_style]
+      ? opts.brief.email_style
+      : undefined;
   const styleId =
     opts.styleOverride ??
+    briefStyle ??
     pickEmailStyle({
       recent: opts.recentStyles,
       seedIndex: opts.seedIndex,

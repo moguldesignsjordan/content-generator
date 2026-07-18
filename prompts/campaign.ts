@@ -4,12 +4,14 @@ import type {
   CampaignBrief,
   ContentImageStyle,
   EmailLengthPreference,
+  EmailStyleId,
   Icp,
   Product,
   Strategy,
   VisualVibe,
 } from "@/lib/db/types";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 import {
   buildBrandVoiceBlock,
   buildFunnelBlock,
@@ -38,6 +40,7 @@ export interface UpdateBriefInput {
   include_image?: boolean;
   visual_vibe?: VisualVibe;
   image_style?: ContentImageStyle;
+  email_style?: EmailStyleId;
   product_photo_url?: string;
   use_ai_image_instead?: boolean;
 }
@@ -139,6 +142,14 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "The art style for this piece's generated picture, when the user " +
           "asks for one (a photo, an illustration, watercolor, retro poster, " +
           "and so on). Leave unset to let the engine vary it.",
+      },
+      email_style: {
+        type: "string",
+        enum: EMAIL_DESIGN_CATALOG.map((s) => s.id),
+        description:
+          "The email's DESIGN skin, when the user asks for a specific look " +
+          "(a bold color band, magazine serif, minimal, rounded pill style, " +
+          "and so on). Leave unset to let the design vary.",
       },
       product_photo_url: {
         type: "string",

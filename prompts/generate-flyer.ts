@@ -1,6 +1,7 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { EmailCopy, FlyerAspect, FlyerCopy } from "@/lib/db/types";
+import type { EmailCopy, FlyerAspect, FlyerCopy, FlyerStyleId } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
+import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 
 // Flyer prompt assembly: one FAST_MODEL call produces the flyer's copy AND a
 // scene concept together (save_flyer_copy), then buildFlyerImagePrompt turns
@@ -23,6 +24,60 @@ export const DEFAULT_FLYER_ASPECT: FlyerAspect = "1:1";
 
 export function isFlyerAspect(value: unknown): value is FlyerAspect {
   return typeof value === "string" && value in FLYER_ASPECTS;
+}
+
+// Per-preset design directions spliced into the render prompt (and echoed to
+// the copy call so the scene it writes fits the direction). An uploaded style
+// REFERENCE image always wins over these: when a reference is attached the
+// preset is ignored entirely (the reference IS the style).
+export const FLYER_STYLE_DIRECTIONS: Record<FlyerStyleId, string> = {
+  bold_type:
+    "Style direction: a bold typographic poster. The headline is the hero at " +
+    "massive scale, high-contrast solid color blocks, minimal supporting " +
+    "imagery, a confident grid.",
+  minimal:
+    "Style direction: sleek and minimal. Generous empty space, one small " +
+    "focal element, restrained palette, hairline details, quiet premium feel.",
+  photo_backdrop:
+    "Style direction: a full-bleed photographic backdrop drawn from the scene, " +
+    "with a subtle dark or light overlay so every word stays highly legible.",
+  illustrated:
+    "Style direction: flat vector illustration. Friendly geometric shapes, " +
+    "clean edges, generous negative space around the text.",
+  collage:
+    "Style direction: an editorial paper-cutout collage. Layered elements " +
+    "with subtle real shadows, tactile, magazine-cover energy.",
+  retro_print:
+    "Style direction: a vintage screen-print poster. Bold simplified shapes, " +
+    "slightly misregistered ink layers, subtle halftone grain and paper texture.",
+  gradient_glow:
+    "Style direction: smooth flowing brand-color gradients with a soft glow, " +
+    "modern tech-launch energy, crisp type floating on top.",
+  elegant:
+    "Style direction: premium and elegant. Refined serif-led typography, " +
+    "luxurious spacing, delicate rules and details, understated color.",
+};
+
+export function isFlyerStyle(value: unknown): value is FlyerStyleId {
+  return (
+    typeof value === "string" && FLYER_STYLE_CATALOG.some((s) => s.id === value)
+  );
+}
+
+/**
+ * The "no one chose a style" default for flyers, mirroring
+ * pickVariedImageStyle for hero images: a deterministic per-draft rotation so
+ * consecutive flyers don't all come out of the same generic recipe. Only used
+ * when there's no explicit preset AND no uploaded style reference.
+ */
+export function pickVariedFlyerStyle(seed?: string): FlyerStyleId {
+  const pool = FLYER_STYLE_CATALOG.map((s) => s.id);
+  if (!seed) return pool[Math.floor(Math.random() * pool.length)];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return pool[hash % pool.length];
 }
 
 /** What the copy call returns via forced tool use. */
@@ -95,6 +150,9 @@ export function buildFlyerCopyMessages(args: {
   aspect: FlyerAspect;
   /** Freeform creative brief typed at creation time, if any. */
   brief?: string;
+  /** The design-direction preset, so the scene the model writes fits it
+   * (e.g. minimal wants one element, photo_backdrop wants a real setting). */
+  style?: FlyerStyleId;
   /** When the flyer is spun off an email draft: distill this email's offer. */
   emailCopy?: EmailCopy;
   /** Reviewer feedback when regenerating a rejected flyer. */
@@ -153,6 +211,9 @@ export function buildFlyerCopyMessages(args: {
     "",
     `FLYER TOPIC: ${args.topicTitle}`,
     `FLYER SHAPE: ${FLYER_ASPECTS[args.aspect].label}`,
+    args.style
+      ? `DESIGN DIRECTION (the scene you write must fit it): ${FLYER_STYLE_DIRECTIONS[args.style]}`
+      : "",
     args.brief ? `CREATIVE BRIEF FROM THE USER (follow it): ${args.brief}` : "",
     ...emailLines,
     ...rejectionLines,
@@ -174,6 +235,7 @@ export function buildFlyerImagePrompt(
   tokens: BrandTokens,
   aspect: FlyerAspect,
   hasReference: boolean,
+  style?: FlyerStyleId,
 ): string {
   const c = tokens.colors;
   const palette = [c.primary, c.accent, c.secondary, c.background]
@@ -194,6 +256,8 @@ export function buildFlyerImagePrompt(
     `Brand palette (use these colors for backgrounds, accents, and the CTA): ${palette}.`,
     `Typography in the spirit of ${tokens.fonts.heading} for headings and ${tokens.fonts.body} for supporting text.`,
     `Imagery and composition: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    // The uploaded reference IS the style; a preset direction would fight it.
+    ...(style && !hasReference ? [FLYER_STYLE_DIRECTIONS[style]] : []),
     "Clean margins, high contrast between text and background, professional agency quality.",
     "No watermarks, no logos, no borders, no fake UI.",
   ];

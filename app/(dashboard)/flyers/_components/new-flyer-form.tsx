@@ -12,7 +12,9 @@ import {
   Textarea,
   useToast,
 } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
+import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { StylePicker, type StyleOption } from "./style-library";
 
 // Aspect labels mirror FLYER_ASPECTS in prompts/generate-flyer.ts; kept
@@ -47,6 +49,7 @@ export function NewFlyerForm({
   const [brief, setBrief] = useState("");
   const [aspect, setAspect] = useState("1:1");
   const [styleId, setStyleId] = useState("");
+  const [presetStyle, setPresetStyle] = useState("");
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
@@ -66,6 +69,7 @@ export function NewFlyerForm({
           ...(source === "topic" && brief.trim() ? { brief: brief.trim() } : {}),
           aspect,
           styleReferenceId: styleId || undefined,
+          style: presetStyle || undefined,
         }),
       });
       const data = (await res.json()) as {
@@ -149,14 +153,50 @@ export function NewFlyerForm({
           />
         </Field>
 
+        <Field label="Design style">
+          <div className="flex flex-wrap gap-2">
+            <PresetChip
+              active={presetStyle === ""}
+              disabled={busy}
+              onClick={() => setPresetStyle("")}
+            >
+              Surprise me
+            </PresetChip>
+            {FLYER_STYLE_CATALOG.map((s) => (
+              <PresetChip
+                key={s.id}
+                active={presetStyle === s.id}
+                disabled={busy}
+                onClick={() => {
+                  setPresetStyle(s.id);
+                  // A preset and an uploaded reference fight each other (the
+                  // reference wins in the pipeline), so picking one clears
+                  // the other.
+                  setStyleId("");
+                }}
+              >
+                {s.label}
+              </PresetChip>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            {presetStyle
+              ? FLYER_STYLE_CATALOG.find((s) => s.id === presetStyle)?.description
+              : "A different design direction each time."}
+          </p>
+        </Field>
+
         <Field
-          label="Style (optional)"
-          hint="Upload flyers or designs you like once; new flyers can match their look."
+          label="Or match an uploaded style (optional)"
+          hint="Upload flyers or designs you like once; new flyers can match their look. Picking one overrides the design style above."
         >
           <StylePicker
             initialStyles={styles}
             value={styleId}
-            onChange={setStyleId}
+            onChange={(id) => {
+              setStyleId(id);
+              if (id) setPresetStyle("");
+            }}
             disabled={busy}
           />
         </Field>
@@ -174,6 +214,35 @@ export function NewFlyerForm({
         </div>
       </div>
     </Card>
+  );
+}
+
+function PresetChip({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors disabled:opacity-50",
+        active
+          ? "border-accent bg-accent/10 text-foreground"
+          : "border-border text-muted hover:border-accent/50 hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

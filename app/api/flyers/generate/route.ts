@@ -10,8 +10,12 @@ import {
   getBrandForUser,
   getTopicContext,
 } from "@/lib/db/queries";
-import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
-import type { FlyerAspect } from "@/lib/db/types";
+import {
+  DEFAULT_FLYER_ASPECT,
+  isFlyerAspect,
+  isFlyerStyle,
+} from "@/prompts/generate-flyer";
+import type { FlyerAspect, FlyerStyleId } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -60,6 +64,7 @@ export async function POST(request: Request) {
   let brief: string | undefined;
   let aspect: FlyerAspect = DEFAULT_FLYER_ASPECT;
   let styleReferenceId: string | undefined;
+  let flyerStyle: FlyerStyleId | undefined;
   let campaignId: string | undefined;
   try {
     const body = await request.json();
@@ -68,6 +73,7 @@ export async function POST(request: Request) {
     brief = typeof body?.brief === "string" ? body.brief.trim() || undefined : undefined;
     if (isFlyerAspect(body?.aspect)) aspect = body.aspect;
     styleReferenceId = body?.styleReferenceId || undefined;
+    if (isFlyerStyle(body?.style)) flyerStyle = body.style;
     campaignId = body?.campaignId || undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
@@ -116,6 +122,7 @@ export async function POST(request: Request) {
       flyerAspect: aspect,
       flyerBrief: brief,
       styleReferenceId,
+      flyerStyle,
     });
     return NextResponse.json({ draftId });
   } catch (err) {

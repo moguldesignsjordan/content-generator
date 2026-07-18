@@ -47,6 +47,7 @@ import {
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 
 // A chat turn is short, but give the strategist headroom for thinking.
 export const maxDuration = 120;
@@ -417,6 +418,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     IMAGE_STYLE_CATALOG.some((s) => s.id === input.image_style)
   ) {
     next.image_style = input.image_style;
+  }
+  if (
+    input.email_style &&
+    EMAIL_DESIGN_CATALOG.some((s) => s.id === input.email_style)
+  ) {
+    next.email_style = input.email_style;
   }
   return next;
 }

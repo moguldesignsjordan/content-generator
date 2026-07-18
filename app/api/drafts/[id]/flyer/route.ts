@@ -233,6 +233,7 @@ export async function POST(
       copy: copyForRender,
       aspect,
       styleReferenceId,
+      style: meta.flyer_style,
       reference,
       exactPrompt,
       draftId: id,

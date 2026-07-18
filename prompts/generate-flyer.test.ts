@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
+  FLYER_STYLE_DIRECTIONS,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
   isFlyerAspect,
+  isFlyerStyle,
+  pickVariedFlyerStyle,
   type FlyerCopyOutput,
 } from "./generate-flyer";
+import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import type { BrandTokens } from "@/lib/email/templates/types";
+import type { FlyerStyleId } from "@/lib/db/types";
 
 const tokens: BrandTokens = {
   logo_url: null,
@@ -83,6 +88,40 @@ describe("buildFlyerImagePrompt", () => {
     expect(withRef).toContain("reference image is attached");
     expect(withRef).toContain("keep the text content exactly as specified");
   });
+
+  it("splices the design-direction preset when one is chosen", () => {
+    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", false, "retro_print");
+    expect(prompt).toContain(FLYER_STYLE_DIRECTIONS.retro_print);
+  });
+
+  it("drops the preset when a reference is attached (the reference IS the style)", () => {
+    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", true, "retro_print");
+    expect(prompt).not.toContain(FLYER_STYLE_DIRECTIONS.retro_print);
+    expect(prompt).toContain("reference image is attached");
+  });
+});
+
+describe("flyer style presets", () => {
+  it("accepts every catalog id and rejects junk", () => {
+    for (const { id } of FLYER_STYLE_CATALOG) {
+      expect(isFlyerStyle(id)).toBe(true);
+      expect(FLYER_STYLE_DIRECTIONS[id]).toBeTruthy();
+    }
+    expect(isFlyerStyle("vaporwave")).toBe(false);
+    expect(isFlyerStyle(undefined)).toBe(false);
+  });
+
+  it("pickVariedFlyerStyle is deterministic per seed and stays in the catalog", () => {
+    const seed = "11111111-2222-3333-4444-555555555555";
+    expect(pickVariedFlyerStyle(seed)).toBe(pickVariedFlyerStyle(seed));
+    const seen = new Set<FlyerStyleId>();
+    for (let i = 0; i < 40; i++) {
+      const style = pickVariedFlyerStyle(`seed-${i}-${i * 7}`);
+      expect(isFlyerStyle(style)).toBe(true);
+      seen.add(style);
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
 });
 
 describe("buildFlyerCopyMessages", () => {
@@ -127,5 +166,13 @@ describe("buildFlyerCopyMessages", () => {
     });
     expect(user).toContain("CREATIVE BRIEF FROM THE USER");
     expect(user).toContain("summer discount");
+  });
+
+  it("tells the copy call the design direction so the scene fits it", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, style: "minimal" });
+    expect(user).toContain("DESIGN DIRECTION");
+    expect(user).toContain(FLYER_STYLE_DIRECTIONS.minimal);
+    const { user: without } = buildFlyerCopyMessages(base);
+    expect(without).not.toContain("DESIGN DIRECTION");
   });
 });

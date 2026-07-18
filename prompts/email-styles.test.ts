@@ -7,6 +7,7 @@ import {
   pickEmailStyle,
   pickRotation,
 } from "./email-styles";
+import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 
 describe("EMAIL_STYLES", () => {
   it("has a directive for every id in EMAIL_STYLE_IDS, and vice versa", () => {
@@ -20,6 +21,16 @@ describe("EMAIL_STYLES", () => {
 
   it("has at least the 8 curated professional directions", () => {
     expect(EMAIL_STYLE_IDS.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("stays in sync with the client-safe picker catalog (lib/design-styles.ts)", () => {
+    expect(EMAIL_DESIGN_CATALOG.map((s) => s.id).sort()).toEqual(
+      [...EMAIL_STYLE_IDS].sort(),
+    );
+    for (const entry of EMAIL_DESIGN_CATALOG) {
+      expect(entry.label).toBe(EMAIL_STYLES[entry.id].label);
+      expect(entry.description).toBeTruthy();
+    }
   });
 });
 

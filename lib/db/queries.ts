@@ -32,6 +32,7 @@ import type {
   BlogType,
   FeedbackEmailExample,
   FlyerAspect,
+  FlyerStyleId,
   EmailDesignProfile,
   StyleReference,
   StyleReferenceKind,
@@ -273,6 +274,7 @@ export async function createDraftShell(args: {
   flyerAspect?: FlyerAspect;
   flyerBrief?: string;
   styleReferenceId?: string;
+  flyerStyle?: FlyerStyleId;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -288,6 +290,7 @@ export async function createDraftShell(args: {
     flyerAspect,
     flyerBrief,
     styleReferenceId,
+    flyerStyle,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -323,6 +326,7 @@ export async function createDraftShell(args: {
     ...(flyerAspect ? { flyer_aspect: flyerAspect } : {}),
     ...(flyerBrief ? { flyer_brief: flyerBrief } : {}),
     ...(styleReferenceId ? { style_reference_id: styleReferenceId } : {}),
+    ...(flyerStyle ? { flyer_style: flyerStyle } : {}),
   };
 
   const { data: draft, error: draftErr } = await db

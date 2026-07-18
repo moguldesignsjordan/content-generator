@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import { EMAIL_DESIGN_CATALOG, FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 
 // The form-based campaign start: every question the old chat interview asked,
 // as on-page selections. One submit saves the brief (/api/campaigns/start),
@@ -131,7 +132,9 @@ export function CampaignForm({
   const [lengthId, setLengthId] = useState("");
   const [imageChoice, setImageChoice] = useState("default");
   const [imageStyle, setImageStyle] = useState("");
+  const [emailDesign, setEmailDesign] = useState("");
   const [aspect, setAspect] = useState("1:1");
+  const [flyerStyle, setFlyerStyle] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [audience, setAudience] = useState("");
   const [angle, setAngle] = useState("");
@@ -176,6 +179,7 @@ export function CampaignForm({
               : imageChoice === "yes",
           image_style:
             wantsEmail && imageChoice !== "no" ? imageStyle || undefined : undefined,
+          email_style: wantsEmail ? emailDesign || undefined : undefined,
           visual_vibe: vibeId || undefined,
           topic_id: topicId || undefined,
           funnel_stage: GOALS.find((g) => g.id === goalId)?.funnel,
@@ -203,6 +207,7 @@ export function CampaignForm({
             topicId: resolvedTopicId,
             campaignId,
             aspect,
+            style: flyerStyle || undefined,
             brief: buildFlyerBrief(),
           }),
         });
@@ -458,42 +463,48 @@ export function CampaignForm({
             {imageChoice !== "no" && (
               <div className="mt-4">
                 <Section label="What kind of picture?">
-                  <ChipRow>
-                    <Chip
-                      active={imageStyle === ""}
-                      disabled={busy}
-                      onClick={() => setImageStyle("")}
-                    >
-                      Surprise me
-                    </Chip>
-                    {IMAGE_STYLE_CATALOG.map((s) => (
-                      <Chip
-                        key={s.id}
-                        active={imageStyle === s.id}
-                        disabled={busy}
-                        onClick={() => setImageStyle(s.id)}
-                      >
-                        {s.label}
-                      </Chip>
-                    ))}
-                  </ChipRow>
-                  <p className="mt-2 text-xs text-muted">
-                    {imageStyle
-                      ? IMAGE_STYLE_CATALOG.find((s) => s.id === imageStyle)
-                          ?.description
-                      : "A different style each time, matched to the vibe when you picked one."}
-                  </p>
+                  <StyleChips
+                    options={IMAGE_STYLE_CATALOG}
+                    value={imageStyle}
+                    onChange={setImageStyle}
+                    disabled={busy}
+                    autoDescription="A different style each time, matched to the vibe when you picked one."
+                  />
                 </Section>
               </div>
             )}
+            <div className="mt-4">
+              <Section label="How should the email look?">
+                <StyleChips
+                  options={EMAIL_DESIGN_CATALOG}
+                  value={emailDesign}
+                  onChange={setEmailDesign}
+                  disabled={busy}
+                  autoDescription="A different professional design each time."
+                />
+              </Section>
+            </div>
           </Section>
         )}
 
         {/* Social options */}
         {wantsSocial && (
-          <Field label="Post shape">
-            <SegmentedControl value={aspect} onChange={setAspect} options={ASPECTS} />
-          </Field>
+          <Section label="The social post">
+            <Field label="Post shape">
+              <SegmentedControl value={aspect} onChange={setAspect} options={ASPECTS} />
+            </Field>
+            <div className="mt-4">
+              <Section label="What's the flyer's style?">
+                <StyleChips
+                  options={FLYER_STYLE_CATALOG}
+                  value={flyerStyle}
+                  onChange={setFlyerStyle}
+                  disabled={busy}
+                  autoDescription="A different design direction each time."
+                />
+              </Section>
+            </div>
+          </Section>
         )}
 
         {/* More details */}
@@ -615,6 +626,47 @@ function Section({
 
 function ChipRow({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-wrap gap-2">{children}</div>;
+}
+
+/** A "Surprise me" chip + one chip per catalog style, with the selected
+ * style's description (or the auto explanation) below the row. */
+function StyleChips({
+  options,
+  value,
+  onChange,
+  disabled,
+  autoDescription,
+}: {
+  options: ReadonlyArray<{ id: string; label: string; description: string }>;
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  autoDescription: string;
+}) {
+  return (
+    <>
+      <ChipRow>
+        <Chip active={value === ""} disabled={disabled} onClick={() => onChange("")}>
+          Surprise me
+        </Chip>
+        {options.map((s) => (
+          <Chip
+            key={s.id}
+            active={value === s.id}
+            disabled={disabled}
+            onClick={() => onChange(s.id)}
+          >
+            {s.label}
+          </Chip>
+        ))}
+      </ChipRow>
+      <p className="mt-2 text-xs text-muted">
+        {value
+          ? options.find((s) => s.id === value)?.description
+          : autoDescription}
+      </p>
+    </>
+  );
 }
 
 function Chip({

@@ -343,6 +343,11 @@ export interface CampaignBrief {
    * (campaign form / interview answer). Wins over the vibe→style mapping,
    * the brand's stored default, and the varied fallback rotation. */
   image_style?: ContentImageStyle;
+  /** An explicit email DESIGN direction for this piece (campaign form /
+   * interview answer): one of the curated EmailStyleId skins. Wins over the
+   * vibe-narrowed rotation; a regenerate's styleOverride still wins over
+   * this (a locked draft keeps its look). */
+  email_style?: EmailStyleId;
   /** A real, already-hosted photo (usually the mapped product's own image)
    * to use as the hero AS-IS instead of generating one. Only ever set from a
    * known-good URL: the selected product's stored image_url, or a photo the
@@ -633,6 +638,20 @@ export interface BlogCopy {
  * prompts/generate-flyer.ts (FLYER_ASPECTS). */
 export type FlyerAspect = "1:1" | "4:5" | "9:16";
 
+/** A curated design direction for a flyer (a DESIGNED graphic with typeset
+ * text, so these are poster aesthetics, not the hero-image art styles).
+ * Labels/descriptions live in lib/design-styles.ts; the render-prompt
+ * directions in prompts/generate-flyer.ts (FLYER_STYLE_DIRECTIONS). */
+export type FlyerStyleId =
+  | "bold_type"
+  | "minimal"
+  | "photo_backdrop"
+  | "illustrated"
+  | "collage"
+  | "retro_print"
+  | "gradient_glow"
+  | "elegant";
+
 export interface FlyerCopy {
   /** Rendered IN the image, as-is. Keep it short. */
   headline: string;
@@ -773,6 +792,10 @@ export interface DraftMeta {
   flyer_brief?: string;
   // The style_references row whose image steers this flyer's look, if any.
   style_reference_id?: string;
+  // The design-direction preset this flyer was rendered with. Persisted as
+  // the RESOLVED style (an explicit pick or the varied-rotation result), so
+  // regenerations keep the same look instead of re-rolling.
+  flyer_style?: FlyerStyleId;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation
   // calls assign distinct style/layout by index (rotation.length-cycle),

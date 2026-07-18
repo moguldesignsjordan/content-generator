@@ -32,6 +32,7 @@ import {
   FLYER_COPY_TOOL,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
+  pickVariedFlyerStyle,
   type FlyerCopyOutput,
 } from "@/prompts/generate-flyer";
 import { stripEmDashes, stripMarkdown } from "@/lib/text";
@@ -42,6 +43,7 @@ import type {
   EmailCopy,
   FlyerAspect,
   FlyerCopy,
+  FlyerStyleId,
   TopicContext,
 } from "@/lib/db/types";
 import { MAX_DRAFT_VERSIONS } from "./constants";
@@ -79,6 +81,12 @@ export async function generateFlyerForTopicStreamed(
     if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
     const meta = draftCtx.meta;
     const aspect: FlyerAspect = meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT;
+    // Explicit preset → keep it; uploaded reference → no preset (the
+    // reference IS the style); neither → varied per-draft rotation, same
+    // "never the same recipe twice" default hero images got.
+    const style: FlyerStyleId | undefined =
+      meta.flyer_style ??
+      (meta.style_reference_id ? undefined : pickVariedFlyerStyle(draftId));
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
     await patchDraftGeneration(draftId, writing);
@@ -101,6 +109,7 @@ export async function generateFlyerForTopicStreamed(
     const copy = await generateFlyerCopy(ctx, {
       aspect,
       brief: meta.flyer_brief,
+      style,
       emailCopy,
       usageDeltas,
     });
@@ -112,6 +121,7 @@ export async function generateFlyerForTopicStreamed(
     const flyerImage = await renderFlyer(ctx, copy, {
       aspect,
       styleReferenceId: meta.style_reference_id,
+      style,
       draftId,
       usageDeltas,
     });
@@ -124,6 +134,8 @@ export async function generateFlyerForTopicStreamed(
       flyer_image: flyerImage,
       flyer_aspect: aspect,
       flyer_scene: copy.scene,
+      // The RESOLVED style, so regenerations keep this look, never re-roll.
+      ...(style ? { flyer_style: style } : {}),
       usage,
     };
 
@@ -185,6 +197,7 @@ export async function regenerateFlyerDraft(
   const copy = await generateFlyerCopy(ctx, {
     aspect,
     brief: meta.flyer_brief,
+    style: meta.flyer_style,
     emailCopy,
     usageDeltas,
     rejection: {
@@ -197,6 +210,7 @@ export async function regenerateFlyerDraft(
   const flyerImage = await renderFlyer(ctx, copy, {
     aspect,
     styleReferenceId: meta.style_reference_id,
+    style: meta.flyer_style,
     draftId,
     usageDeltas,
   });
@@ -221,6 +235,7 @@ export async function regenerateFlyerDraft(
       ...(meta.style_reference_id
         ? { style_reference_id: meta.style_reference_id }
         : {}),
+      ...(meta.flyer_style ? { flyer_style: meta.flyer_style } : {}),
       ...(meta.source_draft_id ? { source_draft_id: meta.source_draft_id } : {}),
       usage,
     },
@@ -240,6 +255,10 @@ export async function regenerateFlyerImage(args: {
   copy: FlyerCopyOutput;
   aspect: FlyerAspect;
   styleReferenceId?: string;
+  /** The draft's persisted design-direction preset (meta.flyer_style), so an
+   * image-only re-render keeps the same look. Ignored when a reference or
+   * exact prompt is in play. */
+  style?: FlyerStyleId;
   /** One-off reference attached in the sheet; wins over styleReferenceId. */
   reference?: { data: string; mimeType: string };
   /** Full final prompt override, sent verbatim (plus the style directive
@@ -268,6 +287,7 @@ export async function regenerateFlyerImage(args: {
         resolveBrandTokens(args.ctx.brand),
         args.aspect,
         Boolean(reference),
+        args.style,
       );
 
   const rendered = await generateGeminiImage({
@@ -323,6 +343,7 @@ async function renderFlyer(
   opts: {
     aspect: FlyerAspect;
     styleReferenceId?: string;
+    style?: FlyerStyleId;
     draftId: string;
     usageDeltas: UsageDelta[];
   },
@@ -334,6 +355,7 @@ async function renderFlyer(
     tokens,
     opts.aspect,
     Boolean(reference),
+    opts.style,
   );
 
   const rendered = await generateGeminiImage({
@@ -425,6 +447,7 @@ async function generateFlyerCopy(
   opts: {
     aspect: FlyerAspect;
     brief?: string;
+    style?: FlyerStyleId;
     emailCopy: EmailCopy | null;
     usageDeltas: UsageDelta[];
     rejection?: {
@@ -441,6 +464,7 @@ async function generateFlyerCopy(
     topicTitle: ctx.topic.title,
     aspect: opts.aspect,
     brief: opts.brief,
+    style: opts.style,
     emailCopy: opts.emailCopy ?? undefined,
     rejection: opts.rejection,
   });
