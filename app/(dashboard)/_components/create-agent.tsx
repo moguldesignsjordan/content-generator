@@ -80,9 +80,13 @@ interface BriefCard {
   audience: string | null;
   goal: string | null;
   keyMessage: string | null;
+  proof: string | null;
+  hook: string | null;
   angle: string | null;
+  readerBelief: string | null;
   offerName: string | null;
   offerPrice: string | null;
+  offerSummary: string | null;
   tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
@@ -510,8 +514,18 @@ export function CreateAgent({
                   if (pending.Topic) parts.push(`the topic to "${pending.Topic}"`);
                   if (pending.For) parts.push(`the audience to "${pending.For}"`);
                   if (pending.Goal) parts.push(`the goal to "${pending.Goal}"`);
+                  if (pending.Message) parts.push(`the key message to "${pending.Message}"`);
+                  if (pending.Proof) parts.push(`the proof to "${pending.Proof}"`);
+                  if (pending.Hook) parts.push(`the hook to "${pending.Hook}"`);
+                  if (pending.Angle) parts.push(`the angle to "${pending.Angle}"`);
                   if (pending.Offer) parts.push(`the offer to "${pending.Offer}"`);
+                  if (pending["Reader belief"]) {
+                    parts.push(
+                      `what readers should believe after reading to "${pending["Reader belief"]}"`,
+                    );
+                  }
                   if (pending.Tone) parts.push(`the tone to "${pending.Tone}"`);
+                  if (pending.Vibe) parts.push(`the vibe to "${pending.Vibe}"`);
                   if (!parts.length) return;
                   send(`Update the brief: change ${parts.join(", ")}.`);
                 }}
@@ -934,13 +948,18 @@ function BriefCardView({
         ? `${card.funnelStage}${card.ctaLabel ? ` · ${card.ctaLabel}` : ""}`
         : undefined,
     },
+    { label: "Message", value: card.keyMessage },
+    { label: "Proof", value: card.proof },
+    { label: "Hook", value: card.hook },
+    { label: "Angle", value: card.angle },
     {
       label: "Offer",
       value: card.offerName,
-      hint: [card.offerPrice, card.hasProductPhoto ? "photo attached" : null]
+      hint: [card.offerSummary, card.offerPrice, card.hasProductPhoto ? "photo attached" : null]
         .filter(Boolean)
         .join(" · ") || undefined,
     },
+    { label: "Reader belief", value: card.readerBelief },
     {
       label: "Tone",
       value: card.tone,

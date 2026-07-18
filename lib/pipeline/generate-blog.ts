@@ -153,7 +153,7 @@ export async function regenerateBlogDraft(
   const ctx = await getTopicContext(draftCtx.topicId);
   if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
 
-  const brief = await loadBrief(draftCtx.campaignId);
+  const brief = draftCtx.meta.series_brief ?? (await loadBrief(draftCtx.campaignId));
   const { system, user, blogType } = buildBlogMessages(ctx, {
     brief,
     blogTypeOverride: draftCtx.blogType ?? undefined,

@@ -3,6 +3,7 @@ import { FAST_MODEL, cacheableSystem, getAnthropic, logUsage } from "@/lib/clien
 import { getDraftWithJobContext, getTopicContext } from "@/lib/db/queries";
 import { buildRewriteMessages, REWRITE_REGION_TOOL, type RewriteToolInput } from "@/prompts/rewrite-region";
 import { stripEmDashes } from "@/lib/text";
+import { loadCampaignBrief } from "./generate";
 
 // Proposes new wording for one section. COMMITS NOTHING.
 //
@@ -39,6 +40,8 @@ export async function rewriteRegion(
   const ctx = await getTopicContext(draftCtx.topicId);
   if (!ctx) return { ok: false, error: "Topic not found for this draft." };
 
+  const brief =
+    draftCtx.meta.series_brief ?? (await loadCampaignBrief(draftCtx.campaignId));
   const channel = draftCtx.jobType === "blog" ? "blog" : "email";
   const { system, user } = buildRewriteMessages({
     brand: ctx.brand,
@@ -48,6 +51,7 @@ export async function rewriteRegion(
     currentText,
     instruction,
     allowMarkdown,
+    brief,
   });
 
   try {

@@ -196,7 +196,7 @@ export async function generateEmailForTopicStreamed(
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType);
+    const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
     usageDeltas.push(...qa.usageDeltas);
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -346,7 +346,7 @@ export async function maybeAutoHeroImage(
 }
 
 /** Loads a campaign's brief, or null when no campaign is driving this draft. */
-async function loadCampaignBrief(
+export async function loadCampaignBrief(
   campaignId: string | undefined | null,
 ): Promise<CampaignBrief | null> {
   if (!campaignId) return null;
@@ -629,13 +629,14 @@ async function runQaPass(
   html: string,
   lengthTarget?: EmailLengthTarget,
   emailType?: EmailType,
+  brief?: CampaignBrief | null,
 ): Promise<{ meta: DraftMeta; seoData: DraftSeoData; usageDeltas: UsageDelta[] }> {
   const usageDeltas: UsageDelta[] = [];
   let meta: DraftMeta = {};
   let seoData: DraftSeoData = {};
 
   try {
-    const { system, user } = buildQaMessages(ctx, copy);
+    const { system, user } = buildQaMessages(ctx, copy, brief);
     const response = await getAnthropic().messages.create({
       model: FAST_MODEL,
       max_tokens: 1024,
@@ -664,8 +665,18 @@ async function runQaPass(
           keyword_placement: qa.keyword_placement,
           banned_terms_found: qa.banned_terms_found,
           readability_note: qa.readability_note,
-          qa_pass: qa.qa_pass,
-          issues: qa.issues,
+          // Authoritative regardless of what the model set qa_pass to: an
+          // unsupported specific always fails QA, same as a banned term.
+          qa_pass: qa.qa_pass && qa.unsupported_specifics.length === 0,
+          issues: qa.unsupported_specifics.length
+            ? [
+                ...qa.issues,
+                `Unsupported specifics (not backed by the brief or brand facts): ${qa.unsupported_specifics.join("; ")}`,
+              ]
+            : qa.issues,
+          unsupported_specifics: qa.unsupported_specifics,
+          proof_used: qa.proof_used,
+          offer_terms_accurate: qa.offer_terms_accurate,
         };
       } else {
         logError("pipeline:generate:qa-invalid", parsed.error, {
@@ -790,7 +801,7 @@ export async function regenerateEmailDraft(
     heroImage,
   );
 
-  const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType);
+  const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
   usageDeltas.push(...qa.usageDeltas);
   let usage: DraftUsage | undefined;
   for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);

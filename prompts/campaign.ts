@@ -43,6 +43,13 @@ export interface UpdateBriefInput {
   email_style?: EmailStyleId;
   product_photo_url?: string;
   use_ai_image_instead?: boolean;
+  proof?: string;
+  hook?: string;
+  offer_deal?: string;
+  offer_deadline?: string;
+  offer_price?: string;
+  offer_exclusions?: string;
+  reader_belief?: string;
 }
 
 export interface SelectTopicInput {
@@ -91,7 +98,12 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         type: "string",
         description: "Slug of the product/offer this campaign promotes, from the PRODUCTS list.",
       },
-      angle: { type: "string", description: "The hook or angle for this piece." },
+      angle: {
+        type: "string",
+        description:
+          "The editorial lens/angle for the whole piece (e.g. 'behind the scenes', " +
+          "'customer story'). Not the opening line, that's hook.",
+      },
       constraints: {
         type: "string",
         description: "Anything to avoid or must-include the user mentioned.",
@@ -163,6 +175,39 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         description:
           "Set true when the user rejects the auto-attached product photo " +
           "and wants an AI-generated image instead. Clears product_photo_url.",
+      },
+      proof: {
+        type: "string",
+        description:
+          "A REAL number, result, or story the user gave you (e.g. 'cut load times " +
+          "from 4.2s to 0.9s for Acme Co'). Never invent one yourself; only set this " +
+          "from something the user actually said.",
+      },
+      hook: {
+        type: "string",
+        description:
+          "How this piece should open: the first beat or line, not the overall " +
+          "editorial lens (that's angle).",
+      },
+      offer_deal: {
+        type: "string",
+        description: "The deal itself, what's included, when the user describes an offer.",
+      },
+      offer_deadline: {
+        type: "string",
+        description: "A real deadline or scarcity detail the user gave (e.g. 'ends Friday').",
+      },
+      offer_price: {
+        type: "string",
+        description: "The price, when it differs from (or isn't yet on) the mapped product.",
+      },
+      offer_exclusions: {
+        type: "string",
+        description: "Who this offer is explicitly NOT for, if the user says.",
+      },
+      reader_belief: {
+        type: "string",
+        description: "What the reader should believe or feel after reading, in the user's own words.",
       },
     },
   },

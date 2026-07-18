@@ -362,7 +362,50 @@ export interface CampaignBrief {
    * known-good URL: the selected product's stored image_url, or a photo the
    * user uploaded through the interview, never invented by the model. */
   product_photo_url?: string;
+  /** A real number, result, or story the user gave, to point at near-verbatim
+   * instead of the model inventing one. The anti-fabrication rule in
+   * generate-email.ts RULES is the floor; this is the ceiling it can reach for. */
+  proof?: string;
+  /** How this piece should open: the first beat. Distinct from `angle` (the
+   * editorial lens for the whole piece) — this is just the opening move. */
+  hook?: string;
+  /** The deal itself / what's included in the offer. Merged into
+   * buildOfferBlock (prompts/generate-email.ts), winning over the mapped
+   * product's own fields. */
+  offer_deal?: string;
+  /** A deadline or scarcity line. Feeds prompts/email-design.ts's existing
+   * promotional-layout urgency slot, and resolveEmailType's promo detection. */
+  offer_deadline?: string;
+  /** Overrides the mapped product's price_point when set. */
+  offer_price?: string;
+  /** Who this offer is NOT for (exclusions/fine print). */
+  offer_exclusions?: string;
+  /** What the reader should believe/feel after reading, in their own words. */
+  reader_belief?: string;
 }
+
+/** Every string-valued CampaignBrief field that a UI or chat surface can save
+ * directly (excludes non-string fields like length/include_image/visual_vibe/
+ * image_style/email_style, which need their own enum validation). Iterate this
+ * at every "which fields does this allowlist carry" site (chat mergeBrief,
+ * the "saved" echo list, seriesBrief/flyerBrief spreads, AUTO_MODE_LINES) so a
+ * newly added field can't be silently dropped at one of them again. */
+export const CAMPAIGN_BRIEF_TEXT_FIELDS = [
+  "goal",
+  "audience_notes",
+  "key_message",
+  "offer_slug",
+  "angle",
+  "constraints",
+  "tone",
+  "proof",
+  "hook",
+  "offer_deal",
+  "offer_deadline",
+  "offer_price",
+  "offer_exclusions",
+  "reader_belief",
+] as const satisfies readonly (keyof CampaignBrief)[];
 
 /** One draft created as part of a multi-email series (plan_series), kept in
  * chat_state so the chat can re-render the series card on reload. */
@@ -838,6 +881,17 @@ export interface DraftSeoData {
   readability_note?: string;
   qa_pass?: boolean;
   issues?: string[];
+  /** Numbers/statistics/dates/prices/named claims in the copy that don't trace
+   * back to the brief's proof/offer facts or the mapped product (email only;
+   * blog QA is code-only and never sets this). Empty/absent means every
+   * specific claim was grounded. */
+  unsupported_specifics?: string[];
+  /** Whether the brief's proof actually made it into the copy; false when a
+   * proof was given but unused, absent when no proof was given at all. */
+  proof_used?: boolean;
+  /** Whether the offer terms in the copy match the brief/product exactly,
+   * with nothing invented. */
+  offer_terms_accurate?: boolean;
 }
 
 // Shape returned by getDraftForReview: a draft plus the topic it belongs to.

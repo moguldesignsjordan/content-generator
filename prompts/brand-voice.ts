@@ -286,13 +286,20 @@ export function buildBriefStateBlock(
   brief: CampaignBrief,
   topicId: string | null,
 ): string {
+  const offerParts = [brief.offer_deal, brief.offer_deadline, brief.offer_price].filter(
+    Boolean,
+  );
   return [
     "BRIEF SO FAR (current saved state, refreshed automatically each turn):",
     `  Goal: ${brief.goal ?? "(not set)"}`,
     `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
     `  Key message: ${brief.key_message ?? "(not set)"}`,
+    `  Proof: ${brief.proof ?? "(not set)"}`,
+    `  Hook: ${brief.hook ?? "(not set)"}`,
+    `  Reader belief: ${brief.reader_belief ?? "(not set)"}`,
     `  Angle: ${brief.angle ?? "(not set)"}`,
     `  Offer: ${brief.offer_slug ?? "(not set)"}`,
+    `  Offer terms: ${offerParts.length ? offerParts.join("; ") : "(not set)"}`,
     `  Constraints: ${brief.constraints ?? "(none)"}`,
     `  Tone: ${brief.tone ?? "(brand voice as-is)"}`,
     // Presence only: re-injecting the full example every turn would bloat the
@@ -319,8 +326,21 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
   if (!brief) return "";
   const lines: string[] = [];
   if (brief.goal) lines.push(`  Goal: ${brief.goal}`);
-  if (brief.audience_notes) lines.push(`  Audience notes: ${brief.audience_notes}`);
   if (brief.key_message) lines.push(`  Key message: ${brief.key_message}`);
+  if (brief.proof) {
+    lines.push(
+      `  PROOF (real, from the user, use it near-verbatim; do not paraphrase into vagueness): ${brief.proof}`,
+    );
+  }
+  if (brief.hook) {
+    lines.push(
+      `  HOOK (open with this; if it says "surprise me", ignore it and open per RULES): ${brief.hook}`,
+    );
+  }
+  if (brief.reader_belief) {
+    lines.push(`  Reader belief: after reading they should ${brief.reader_belief}`);
+  }
+  if (brief.audience_notes) lines.push(`  Audience notes: ${brief.audience_notes}`);
   if (brief.angle) lines.push(`  Angle: ${brief.angle}`);
   if (brief.constraints) lines.push(`  Constraints: ${brief.constraints}`);
   if (brief.tone)

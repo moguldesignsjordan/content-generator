@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -125,7 +125,12 @@ export function CampaignForm({
   const [goalId, setGoalId] = useState("");
   const [customGoal, setCustomGoal] = useState("");
   const [keyMessage, setKeyMessage] = useState("");
+  const [proof, setProof] = useState("");
   const [offerSlug, setOfferSlug] = useState("");
+  const [offerDeal, setOfferDeal] = useState("");
+  const [offerDeadline, setOfferDeadline] = useState("");
+  const [offerPrice, setOfferPrice] = useState("");
+  const [offerExclusions, setOfferExclusions] = useState("");
   const [toneId, setToneId] = useState("");
   const [customTone, setCustomTone] = useState("");
   const [vibeId, setVibeId] = useState("");
@@ -138,6 +143,8 @@ export function CampaignForm({
   const [moreOpen, setMoreOpen] = useState(false);
   const [audience, setAudience] = useState("");
   const [angle, setAngle] = useState("");
+  const [hook, setHook] = useState("");
+  const [readerBelief, setReaderBelief] = useState("");
   const [constraints, setConstraints] = useState("");
   const [topicId, setTopicId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -145,12 +152,29 @@ export function CampaignForm({
 
   const wantsEmail = channel !== "social";
   const wantsSocial = channel !== "email";
+  // Only goals with a real offer behind them get the offer block; "Book more
+  // calls" and "Announce something new" have no hard deal to describe.
+  const showOffer =
+    wantsEmail && (goalId === "sales" || goalId === "signups" || Boolean(offerSlug));
+
+  // A stale deadline/deal must never ship once the offer block hides again
+  // (e.g. the user switches goal or clears the product).
+  useEffect(() => {
+    if (showOffer) return;
+    setOfferDeal("");
+    setOfferDeadline("");
+    setOfferPrice("");
+    setOfferExclusions("");
+  }, [showOffer]);
 
   const goalText =
     goalId === "custom"
       ? customGoal.trim()
       : (GOALS.find((g) => g.id === goalId)?.goal ?? "");
-  const canSubmit = Boolean(goalText && keyMessage.trim()) && !busy;
+  const canSubmit =
+    Boolean(goalText && keyMessage.trim()) &&
+    (!showOffer || Boolean(offerDeal.trim())) &&
+    !busy;
 
   async function launch() {
     if (!canSubmit) return;
@@ -167,9 +191,12 @@ export function CampaignForm({
         body: JSON.stringify({
           goal: goalText,
           key_message: keyMessage.trim(),
+          proof: proof.trim() || undefined,
           audience_notes: audience.trim() || undefined,
           offer_slug: offerSlug || undefined,
           angle: angle.trim() || undefined,
+          hook: hook.trim() || undefined,
+          reader_belief: readerBelief.trim() || undefined,
           constraints: constraints.trim() || undefined,
           tone,
           length: lengthId || undefined,
@@ -183,6 +210,10 @@ export function CampaignForm({
           visual_vibe: vibeId || undefined,
           topic_id: topicId || undefined,
           funnel_stage: GOALS.find((g) => g.id === goalId)?.funnel,
+          offer_deal: showOffer ? offerDeal.trim() || undefined : undefined,
+          offer_deadline: showOffer ? offerDeadline.trim() || undefined : undefined,
+          offer_price: showOffer ? offerPrice.trim() || undefined : undefined,
+          offer_exclusions: showOffer ? offerExclusions.trim() || undefined : undefined,
         }),
       });
       const startData = (await startRes.json()) as {
@@ -265,6 +296,8 @@ export function CampaignForm({
       angle.trim() && `Angle: ${angle.trim()}`,
       audience.trim() && `Audience: ${audience.trim()}`,
       constraints.trim() && `Notes: ${constraints.trim()}`,
+      proof.trim() && `Proof: ${proof.trim()}`,
+      showOffer && offerDeadline.trim() && `Deadline: ${offerDeadline.trim()}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -358,6 +391,20 @@ export function CampaignForm({
           />
         </Field>
 
+        {/* Proof */}
+        <Field
+          label="Got a real number or result?"
+          hint="A real stat, before/after, or story lands better than a generic claim. Leave blank if you don't have one, we won't make one up."
+        >
+          <Textarea
+            value={proof}
+            onChange={(e) => setProof(e.target.value)}
+            placeholder="e.g. Cut load times from 4.2s to 0.9s for Acme Co"
+            rows={2}
+            disabled={busy}
+          />
+        </Field>
+
         {/* Product */}
         {products.length > 0 && (
           <Section label="Is this about one of your products?">
@@ -380,6 +427,52 @@ export function CampaignForm({
                 </Chip>
               ))}
             </ChipRow>
+          </Section>
+        )}
+
+        {/* Offer terms */}
+        {showOffer && (
+          <Section label="What's the deal?">
+            <div className="flex flex-col gap-4">
+              <Field label="Deal" hint="What's included, or the discount, in your own words.">
+                <Input
+                  value={offerDeal}
+                  onChange={(e) => setOfferDeal(e.target.value)}
+                  placeholder="e.g. 25% off for past clients"
+                  disabled={busy}
+                  maxLength={200}
+                />
+              </Field>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Deadline" hint="Optional, a real date or scarcity line.">
+                  <Input
+                    value={offerDeadline}
+                    onChange={(e) => setOfferDeadline(e.target.value)}
+                    placeholder="e.g. Ends Friday"
+                    disabled={busy}
+                    maxLength={100}
+                  />
+                </Field>
+                <Field label="Price" hint="Only if it differs from the product's own price.">
+                  <Input
+                    value={offerPrice}
+                    onChange={(e) => setOfferPrice(e.target.value)}
+                    placeholder="e.g. $499"
+                    disabled={busy}
+                    maxLength={100}
+                  />
+                </Field>
+              </div>
+              <Field label="Not for" hint="Optional, who this offer explicitly excludes.">
+                <Input
+                  value={offerExclusions}
+                  onChange={(e) => setOfferExclusions(e.target.value)}
+                  placeholder="e.g. Not for current subscribers"
+                  disabled={busy}
+                  maxLength={200}
+                />
+              </Field>
+            </div>
           </Section>
         )}
 
@@ -531,11 +624,29 @@ export function CampaignForm({
                   maxLength={200}
                 />
               </Field>
-              <Field label="Got an angle or hook in mind?">
+              <Field label="Got an angle in mind?">
                 <Input
                   value={angle}
                   onChange={(e) => setAngle(e.target.value)}
                   placeholder="e.g. behind the scenes of the redesign"
+                  disabled={busy}
+                  maxLength={200}
+                />
+              </Field>
+              <Field label="How should it open?">
+                <Input
+                  value={hook}
+                  onChange={(e) => setHook(e.target.value)}
+                  placeholder="e.g. start with the customer's before/after"
+                  disabled={busy}
+                  maxLength={200}
+                />
+              </Field>
+              <Field label="After reading, they should…">
+                <Input
+                  value={readerBelief}
+                  onChange={(e) => setReaderBelief(e.target.value)}
+                  placeholder="e.g. feel ready to book a call"
                   disabled={busy}
                   maxLength={200}
                 />

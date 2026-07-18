@@ -53,6 +53,13 @@ interface StartCampaignBody {
   email_style?: string;
   topic_id?: string;
   funnel_stage?: string;
+  proof?: string;
+  hook?: string;
+  offer_deal?: string;
+  offer_deadline?: string;
+  offer_price?: string;
+  offer_exclusions?: string;
+  reader_belief?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -122,6 +129,13 @@ export async function POST(req: NextRequest) {
       ...(EMAIL_DESIGN_CATALOG.some((s) => s.id === body.email_style)
         ? { email_style: body.email_style as EmailStyleId }
         : {}),
+      ...optional("proof", cleanText(body.proof)),
+      ...optional("hook", cleanText(body.hook)),
+      ...optional("offer_deal", cleanText(body.offer_deal)),
+      ...optional("offer_deadline", cleanText(body.offer_deadline)),
+      ...optional("offer_price", cleanText(body.offer_price)),
+      ...optional("offer_exclusions", cleanText(body.offer_exclusions)),
+      ...optional("reader_belief", cleanText(body.reader_belief)),
     };
 
     // Same auto-attach the chat interview did: a selected product with a real

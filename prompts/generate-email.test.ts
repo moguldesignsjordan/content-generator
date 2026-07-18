@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type {
+  Brand,
   CampaignBrief,
   EmailTemplateId,
   EmailType,
   FeedbackEmailExample,
   Product,
   Topic,
+  TopicContext,
   TopicStatus,
 } from "@/lib/db/types";
 import {
   EMAIL_LENGTH_TARGETS,
   buildFeedbackBlock,
+  buildOfferBlock,
   countEmailWords,
   resolveEmailLayout,
   resolveEmailTemplateId,
@@ -106,6 +109,21 @@ describe("resolveEmailType", () => {
       goal: "Explain how we run audits",
       angle: "Educational walkthrough",
     };
+    expect(resolveEmailType(makeTopic(), { brief })).toBe("newsletter");
+  });
+
+  it("classifies an offer with a real deadline as promotional even with no promo keyword", () => {
+    const brief: CampaignBrief = {
+      offer_slug: "brand-audit",
+      goal: "Explain how we run audits",
+      angle: "Educational walkthrough",
+      offer_deadline: "ends Friday",
+    };
+    expect(resolveEmailType(makeTopic(), { brief })).toBe("promotional");
+  });
+
+  it("still requires an offer_slug; a deadline alone doesn't flip an unrelated topic", () => {
+    const brief: CampaignBrief = { offer_deadline: "ends Friday" };
     expect(resolveEmailType(makeTopic(), { brief })).toBe("newsletter");
   });
 });
@@ -311,5 +329,72 @@ describe("buildFeedbackBlock", () => {
     expect(block).toContain("Loved this one");
     expect(block).toContain("Emails they DISLIKED");
     expect(block).toContain("Hated this one");
+  });
+});
+
+function makeCtx(topic: Topic, product: Product | null): TopicContext {
+  return {
+    topic,
+    brand: {} as Brand,
+    strategy: {} as TopicContext["strategy"],
+    primaryIcp: null,
+    product,
+  };
+}
+
+describe("buildOfferBlock", () => {
+  it("falls back to naming the slug when there's no product row and no brief offer", () => {
+    const ctx = makeCtx(makeTopic({ maps_to_product: "ghost-slug" }), null);
+    expect(buildOfferBlock(ctx)).toBe("RELATED OFFER: ghost-slug");
+  });
+
+  it("returns empty when there's nothing at all to offer", () => {
+    const ctx = makeCtx(makeTopic({ maps_to_product: null }), null);
+    expect(buildOfferBlock(ctx)).toBe("");
+  });
+
+  it("renders the product row's own fields with no brief", () => {
+    const product = makeProduct({ price_point: "$500" });
+    const ctx = makeCtx(makeTopic({ maps_to_product: "brand-audit" }), product);
+    const block = buildOfferBlock(ctx);
+    expect(block).toContain("RELATED OFFER: Brand audit");
+    expect(block).toContain("Price point: $500");
+  });
+
+  it("brief offer_price wins over the product's own price_point", () => {
+    const product = makeProduct({ price_point: "$500" });
+    const ctx = makeCtx(makeTopic({ maps_to_product: "brand-audit" }), product);
+    const block = buildOfferBlock(ctx, { offer_price: "$299 launch price" });
+    expect(block).toContain("Price point: $299 launch price");
+    expect(block).not.toContain("$500");
+  });
+
+  it("the product row fills gaps the brief doesn't cover (deliverables, description)", () => {
+    const product = makeProduct({
+      description: "A full audit of your brand.",
+      deliverables: ["Report", "Working session"],
+    });
+    const ctx = makeCtx(makeTopic({ maps_to_product: "brand-audit" }), product);
+    const block = buildOfferBlock(ctx, { offer_deal: "25% off for past clients" });
+    expect(block).toContain("What it is: A full audit of your brand.");
+    expect(block).toContain("Includes: Report; Working session");
+    expect(block).toContain("Deal: 25% off for past clients");
+  });
+
+  it("renders a deadline as a plain fact and includes exclusions", () => {
+    const ctx = makeCtx(makeTopic({ maps_to_product: "brand-audit" }), makeProduct());
+    const block = buildOfferBlock(ctx, {
+      offer_deadline: "ends Friday",
+      offer_exclusions: "not for current clients",
+    });
+    expect(block).toContain("ends Friday");
+    expect(block).toContain("Not for: not for current clients");
+  });
+
+  it("renders brief-only offer terms even with no product row at all", () => {
+    const ctx = makeCtx(makeTopic({ maps_to_product: null }), null);
+    const block = buildOfferBlock(ctx, { offer_deal: "25% off", offer_deadline: "ends Friday" });
+    expect(block).toContain("Deal: 25% off");
+    expect(block).toContain("ends Friday");
   });
 });

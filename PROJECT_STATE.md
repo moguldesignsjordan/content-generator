@@ -7,10 +7,75 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-15 (email editor sweep — see session below; also still
+Last updated: 2026-07-18 (intake grounding — see session below; also still
 open: **migrations 020 AND 021 need applying in the Supabase SQL editor** —
 until 021 is applied, prompt capture silently no-ops and /prompts stays empty;
 until 020, rating an email 500s).
+
+## Session 2026-07-18: intake grounding (fix "sounds like AI" copy)
+
+Full plan at `~/.claude/plans/how-can-we-enhance-cheeky-pudding.md` (memory:
+`project-intake-grounding-plan`), implemented in one session, all three steps.
+`npm run typecheck` + `npm run build` + `npm test` (404 tests, up from 383)
+all green. **Not yet committed.**
+
+- **Step 1, grounding/enforcement (applies to every draft, even an empty
+  brief):** `prompts/generate-email.ts`/`generate-blog.ts` RULES gained a
+  "never invent numbers/stats/dates/prices/testimonials/names" bullet;
+  COPY PRINCIPLES' unqualified specificity demand was softened to stop
+  compelling fabrication. QA (`prompts/qa-email.ts`) now takes the brief and
+  checks copy against a GROUNDING FACTS block (brief proof/offer terms +
+  product price/deliverables); `QaSchema`/`QA_TOOL` gained
+  `unsupported_specifics[]` / `proof_used` / `offer_terms_accurate`,
+  `unsupported_specifics.length` folds into `qa_pass` and `issues`. Surfaced
+  as a "Couldn't verify" list in both `review-actions.tsx` and
+  `blog-review-actions.tsx` (blog has no model QA, so it just never fires
+  there). `rewriteRegion`/`buildRewriteMessages` now load the campaign brief
+  and treat its proof/offer facts as authoritative (keep verbatim, don't
+  paraphrase into vagueness).
+- **Step 2, reconciled naming:** `angle` no longer described as "the hook" in
+  `prompts/campaign.ts`/`agent-tools.ts` (it's the editorial lens; `hook` is
+  the new, distinct "how it opens" field). `buildOfferBlock` now takes
+  `(ctx, brief)` and is the ONE offer section (brief `offer_*` fields win,
+  product row fills gaps); no competing offer block was added to
+  `buildCampaignBriefBlock`.
+- **Step 3, new fields:** `CampaignBrief` +7 (`proof`, `hook`, `offer_deal`,
+  `offer_deadline`, `offer_price`, `offer_exclusions`, `reader_belief`) plus a
+  new `CAMPAIGN_BRIEF_TEXT_FIELDS` const (`lib/db/types.ts`) iterated at every
+  allowlist site instead of a hand-copied array, with a compile-time
+  drift-guard test (`lib/db/types.test.ts`) that fails typecheck if a future
+  plain-text field is added without updating the const. All seven
+  allowlist/plumbing sites fixed: chat `mergeBrief`, the "saved" echo list,
+  `seriesBrief` (also fixed the pre-existing `email_style`/`image_style` drop
+  on every series), `flyerBrief`, `AUTO_MODE_LINES`, the campaign form +
+  `/api/campaigns/start`, and the brief card. `PlanSeriesItem`/`PLAN_SERIES_TOOL`
+  gained per-email `proof`/`offer_deadline` overrides. `resolveEmailType` folds
+  `offer_deadline` into promo detection (still requires `offer_slug`).
+  `regenerateBlogDraft` now reads `meta.series_brief` first, matching its email
+  twin (was silently ignoring per-email series briefs on every blog reject).
+  **Deleted `app/api/campaigns/chat/route.ts`** (confirmed dead: no
+  `fetch("/api/campaigns/chat")` anywhere, already drifted from the real
+  create-chat route). Create-agent chat stages renumbered/added: general flow
+  gained PROOF (stage 5) and READER BELIEF (stage 8); product flow's "p2. THE
+  HOOK" now actually saves `hook` (plus `key_message`, since for a short
+  product email they're the same content) instead of misrouting to
+  `key_message` alone; "p3. THE OFFER" now parses one answer onto
+  `offer_deal`/`offer_deadline`/`offer_price`/`offer_exclusions` instead of
+  dumping into `angle`/`constraints`; campaign series flow (c1-c12) got the
+  same PROOF/READER BELIEF additions. Campaign form gained a "Got a real
+  number or result?" field and a conditional "What's the deal?" section
+  (deal/deadline/price/exclusions, shown for sales/signups/product goals,
+  cleared via `useEffect` when it hides). Brief card round-trip fixed two
+  pre-existing bugs while adding proof/hook/angle/reader-belief/offer-summary
+  rows: the `Vibe` row rendered but was absent from `onApply` (edits silently
+  discarded), and `keyMessage`/`angle` had no editable row at all.
+- **Verification still open (not code, needs Jordan or a follow-up session):**
+  browser click-through (Playwright MCP is off by default per this repo's
+  CLAUDE.md); reading `/prompts` to confirm the assembled PROOF/HOOK/OFFER
+  blocks render as expected is blocked on migration 021 (see
+  [[project-prompt-capture]]); a 3-email `plan_series` run to confirm
+  per-item proof/offer_deadline overrides and that `email_style`/`image_style`
+  now survive a series.
 
 ## Session 2026-07-15 (latest): email editor sweep
 

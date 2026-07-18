@@ -4,8 +4,9 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 // auto-generate, recall of past content, and durable brand memory. Kept apart
 // from prompts/campaign.ts, whose tool set (update_brief, select_topic,
 // create_topic, suggest_options, start_generation, propose_voice_updates) is
-// shared with the older campaign-interview surface (app/api/campaigns/chat) —
-// none of these six are relevant there, so they don't belong in that file.
+// still imported by create-agent.ts even though the older standalone
+// campaign-interview route has been removed — none of these six generate/
+// recall/memory tools are relevant there, so they don't belong in that file.
 
 export interface GenerateContentInput {
   channel: "email" | "blog" | "social";
@@ -70,6 +71,13 @@ export interface PlanSeriesItem {
   email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
   funnel_stage?: "awareness" | "consideration" | "decision" | "brand";
   include_image?: boolean;
+  /** A real number, result, or story for THIS email specifically. Without a
+   * per-email proof, a 5-email series would otherwise point at the same one
+   * number five times, which reads worse than no proof at all. */
+  proof?: string;
+  /** A real deadline/scarcity detail for THIS email, when it differs from the
+   * campaign-wide offer terms. */
+  offer_deadline?: string;
 }
 
 export interface PlanSeriesInput {
@@ -113,7 +121,7 @@ export const PLAN_SERIES_TOOL: Anthropic.Tool = {
             },
             angle: {
               type: "string",
-              description: "The hook or angle for THIS email specifically.",
+              description: "The editorial lens/angle for THIS email specifically.",
             },
             key_message: {
               type: "string",
@@ -141,6 +149,19 @@ export const PLAN_SERIES_TOOL: Anthropic.Tool = {
               description:
                 "Whether THIS email gets a picture, when it should differ from " +
                 "the campaign-wide answer. Omit to follow the campaign answer.",
+            },
+            proof: {
+              type: "string",
+              description:
+                "A REAL number, result, or story for THIS email specifically, if the " +
+                "user gave one. Never invent one; never reuse the same proof across " +
+                "every email in the series.",
+            },
+            offer_deadline: {
+              type: "string",
+              description:
+                "A real deadline/scarcity detail for THIS email, when it differs from " +
+                "the campaign-wide offer terms.",
             },
           },
           required: ["title"],

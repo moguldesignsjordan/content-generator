@@ -124,6 +124,28 @@ describe("buildBriefStateBlock", () => {
     const block = buildBriefStateBlock({} as CampaignBrief, null);
     expect(block).toContain("Vibe: (not set)");
     expect(block).toContain("Product photo: (none)");
+    expect(block).toContain("Proof: (not set)");
+    expect(block).toContain("Hook: (not set)");
+    expect(block).toContain("Reader belief: (not set)");
+    expect(block).toContain("Offer terms: (not set)");
+  });
+
+  it("reports proof, hook, reader belief, and joined offer terms when set", () => {
+    const block = buildBriefStateBlock(
+      {
+        proof: "Cut load times from 4.2s to 0.9s",
+        hook: "Open with the before/after",
+        reader_belief: "feel ready to book",
+        offer_deal: "25% off",
+        offer_deadline: "ends Friday",
+        offer_price: "$499",
+      } as CampaignBrief,
+      null,
+    );
+    expect(block).toContain("Proof: Cut load times from 4.2s to 0.9s");
+    expect(block).toContain("Hook: Open with the before/after");
+    expect(block).toContain("Reader belief: feel ready to book");
+    expect(block).toContain("Offer terms: 25% off; ends Friday; $499");
   });
 });
 
@@ -139,6 +161,28 @@ describe("buildCampaignBriefBlock", () => {
   it("omits the vibe line when unset", () => {
     const block = buildCampaignBriefBlock({ goal: "Sell the thing" } as CampaignBrief);
     expect(block).not.toContain("Visual/verbal vibe");
+  });
+
+  it("renders proof, hook, and reader belief with their per-field framing", () => {
+    const block = buildCampaignBriefBlock({
+      goal: "Sell the thing",
+      proof: "Cut load times from 4.2s to 0.9s for Acme Co",
+      hook: "Open with the before/after",
+      reader_belief: "feel ready to book",
+    } as CampaignBrief);
+    expect(block).toContain("PROOF");
+    expect(block).toContain("use it near-verbatim");
+    expect(block).toContain("Cut load times from 4.2s to 0.9s for Acme Co");
+    expect(block).toContain("HOOK");
+    expect(block).toContain("Open with the before/after");
+    expect(block).toContain("Reader belief: after reading they should feel ready to book");
+  });
+
+  it("omits proof/hook/reader belief lines when unset", () => {
+    const block = buildCampaignBriefBlock({ goal: "Sell the thing" } as CampaignBrief);
+    expect(block).not.toContain("PROOF");
+    expect(block).not.toContain("HOOK");
+    expect(block).not.toContain("Reader belief");
   });
 });
 

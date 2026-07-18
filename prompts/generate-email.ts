@@ -355,11 +355,14 @@ export function resolveEmailType(
   const { brief, product, override } = opts;
   if (override) return override;
 
+  // A real deadline or deal is itself promo evidence, not just keyword bait:
+  // a piece with offer_deadline set should flip to promotional even when the
+  // goal/angle/key_message never say "sale" or "limited".
   const promoHaystack =
-    `${brief?.goal ?? ""} ${brief?.angle ?? ""} ${brief?.key_message ?? ""}`.toLowerCase();
+    `${brief?.goal ?? ""} ${brief?.angle ?? ""} ${brief?.key_message ?? ""} ${brief?.offer_deal ?? ""}`.toLowerCase();
   if (
     brief?.offer_slug &&
-    PROMO_KEYWORDS.some((k) => promoHaystack.includes(k))
+    (Boolean(brief.offer_deadline) || PROMO_KEYWORDS.some((k) => promoHaystack.includes(k)))
   ) {
     return "promotional";
   }
@@ -387,22 +390,40 @@ export function countEmailWords(
   );
 }
 
-/** Builds the offer block from the topic's resolved product row. */
-export function buildOfferBlock(ctx: TopicContext): string {
+/**
+ * Builds the offer block from the topic's resolved product row, merged with
+ * the brief's own offer_* fields when given: brief values win (they're what
+ * the user just told the interview), the product row fills any gaps. This is
+ * the ONE offer section in the prompt; buildCampaignBriefBlock deliberately
+ * does not render a competing one.
+ */
+export function buildOfferBlock(
+  ctx: TopicContext,
+  brief?: CampaignBrief | null,
+): string {
   const p = ctx.product;
-  if (!p) {
-    // No product row for the slug: fall back to naming it so the model at
-    // least knows an offer exists.
+  const deal = brief?.offer_deal;
+  const deadline = brief?.offer_deadline;
+  const price = brief?.offer_price ?? p?.price_point;
+  const exclusions = brief?.offer_exclusions;
+
+  if (!p && !deal && !deadline && !price && !exclusions) {
+    // No product row and nothing from the brief: fall back to naming the
+    // slug so the model at least knows an offer exists.
     return ctx.topic.maps_to_product
       ? `RELATED OFFER: ${ctx.topic.maps_to_product}`
       : "";
   }
+
   return [
-    `RELATED OFFER: ${p.name}`,
-    p.description ? `  What it is: ${p.description}` : "",
-    p.deliverables?.length ? `  Includes: ${p.deliverables.join("; ")}` : "",
-    p.price_point ? `  Price point: ${p.price_point}` : "",
-    p.url ? `  Link: ${p.url}` : "",
+    `RELATED OFFER: ${p?.name ?? ctx.topic.maps_to_product ?? "this offer"}`,
+    p?.description ? `  What it is: ${p.description}` : "",
+    deal ? `  Deal: ${deal}` : "",
+    p?.deliverables?.length ? `  Includes: ${p.deliverables.join("; ")}` : "",
+    price ? `  Price point: ${price}` : "",
+    deadline ? `  Deadline (state as a plain fact, never manufactured urgency): ${deadline}` : "",
+    exclusions ? `  Not for: ${exclusions}` : "",
+    p?.url ? `  Link: ${p.url}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -553,8 +574,11 @@ export function buildEmailMessages(
     "  words like 'just', 'we think', 'maybe'.",
     "- One email, one job: a single core idea and a single desired action. Nothing",
     "  competes with the CTA.",
-    "- Specificity beats adjectives: concrete numbers, timeframes, and named",
-    "  outcomes over 'powerful', 'seamless', 'amazing'.",
+    "- Specificity beats adjectives: when a real number, timeframe, or named",
+    "  outcome is available (see RULES below), lead with it over 'powerful',",
+    "  'seamless', 'amazing'. When none is available, get concrete a different",
+    "  way: name the specific situation, object, or step instead of reaching",
+    "  for an invented figure.",
     "- Subject lines: front-load the hook in the first 30 to 40 characters (mobile",
     "  truncates), curiosity or specificity over hype. No ALL CAPS, no 'FREE!!!',",
     "  no stacked punctuation or emoji, no misleading claims (spam triggers).",
@@ -580,6 +604,11 @@ export function buildEmailMessages(
     "    here and there reads more human than a fully grammatical one.",
     "  - One genuinely specific, concrete detail beats three vague superlatives;",
     "    if a line could open literally any brand's email, cut or sharpen it.",
+    "- Never invent numbers, statistics, dates, prices, testimonials, or customer",
+    "  names. Use only what the CAMPAIGN BRIEF, the offer block, or the brand",
+    "  facts above give you. With no real number available, get concrete WITHOUT",
+    "  one: name the specific situation, object, or step instead. An invented",
+    "  specific is worse than an honest general.",
     "- Use the target keyword and the audience's own vocabulary naturally; never keyword-stuff.",
     "- Match the email's call-to-action to the funnel stage (provided below).",
     "- Fill the plain-text copy fields (no markup in them) AND the html field with the",
@@ -608,7 +637,7 @@ export function buildEmailMessages(
     ctaText
       ? `CALL TO ACTION (use this intent, write the button text in brand voice): ${ctaText}`
       : "CALL TO ACTION: a soft invitation to reply or learn more.",
-    buildOfferBlock(ctx),
+    buildOfferBlock(ctx, opts.brief),
     ctx.product?.url
       ? `CTA URL: use the offer link above when the CTA points at the offer.`
       : `CTA URL: leave blank unless the related offer implies an obvious destination.`,

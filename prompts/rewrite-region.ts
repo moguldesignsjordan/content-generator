@@ -1,6 +1,26 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { Brand, Icp } from "@/lib/db/types";
+import type { Brand, CampaignBrief, Icp } from "@/lib/db/types";
 import { buildBrandVoiceBlock } from "./brand-voice";
+
+/** The brief's real, human-provided facts, rendered as an authoritative source
+ * a rewrite must keep verbatim rather than paraphrase away. Empty string when
+ * the brief carries none, so callers' .filter(Boolean) drops it cleanly. */
+function buildAuthoritativeFactsBlock(brief: CampaignBrief | null): string {
+  if (!brief) return "";
+  const lines: string[] = [];
+  if (brief.proof) lines.push(`  Proof: ${brief.proof}`);
+  if (brief.offer_deal) lines.push(`  Offer: ${brief.offer_deal}`);
+  if (brief.offer_deadline) lines.push(`  Deadline: ${brief.offer_deadline}`);
+  if (brief.offer_price) lines.push(`  Price: ${brief.offer_price}`);
+  if (brief.key_message) lines.push(`  Key message: ${brief.key_message}`);
+  if (!lines.length) return "";
+  return [
+    "AUTHORITATIVE FACTS (from the campaign brief; if the current text already",
+    "states one of these, keep it verbatim, never paraphrase a real number or",
+    "term into vagueness):",
+    ...lines,
+  ].join("\n");
+}
 
 // PROPOSE-ONLY rewrite of one section's text. The important difference from
 // adjust-copy.ts: this asks for TEXT, not for HTML patches, and it commits
@@ -59,12 +79,17 @@ export function buildRewriteMessages(args: {
   instruction?: string;
   /** Whether light markdown (**bold**, links, bullets) is meaningful here. */
   allowMarkdown: boolean;
+  /** The campaign brief driving this draft, if any: its real proof/offer
+   * facts are authoritative and must survive a rewrite verbatim. */
+  brief?: CampaignBrief | null;
 }): { system: string; user: string } {
-  const { brand, icp, channel, label, currentText, instruction, allowMarkdown } = args;
+  const { brand, icp, channel, label, currentText, instruction, allowMarkdown, brief } = args;
+  const factsBlock = buildAuthoritativeFactsBlock(brief ?? null);
 
   const system = [
     buildBrandVoiceBlock(brand, icp, channel),
     "",
+    factsBlock,
     `You are rewriting ONE section (the "${label}") of an existing ${channel}.`,
     "",
     "RULES:",
@@ -74,14 +99,17 @@ export function buildRewriteMessages(args: {
     "  paragraphs (separated by blank lines).",
     "- Match the brand voice above. Do not drift into generic marketing filler.",
     "- Do not invent facts, statistics, product names, prices, or claims that",
-    "  are not already present in the current text.",
+    "  are not already present in the current text or in AUTHORITATIVE FACTS",
+    "  above; a real number or term already in the text stays exactly as-is.",
     "- NEVER use em dashes or en dashes. Use commas, colons, or the word to.",
     allowMarkdown
       ? "- Light markdown is allowed and encouraged where it already fits: **bold**, *italic*, - bullets, [text](url). Do not add links that were not already there."
       : "- No markdown syntax. This section renders as plain words.",
     "",
     "Call save_rewritten_text once with the new text.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const user = [
     `Section: ${label}`,

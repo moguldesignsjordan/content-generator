@@ -143,7 +143,7 @@ export const BLOG_LENGTH_TARGETS: Record<BlogType, BlogLengthTarget> = {
     words: [1500, 2500],
     sections: [4, 6],
     directive:
-      "a case study. Structure it as the client and their problem, the approach, what was actually done, the results with numbers, and the takeaways. Specific and concrete throughout, never generic.",
+      "a case study. Structure it as the client and their problem, the approach, what was actually done, the real results (with numbers when the brief or brand facts actually give you one, otherwise describe the concrete outcome without inventing a figure), and the takeaways. Specific and concrete throughout, never generic.",
   },
   thought_leadership: {
     words: [1000, 1800],
@@ -242,7 +242,7 @@ export function buildBlogMessages(
   const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "blog");
   const positioningBlock = buildPositioningBlock(brand);
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
-  const offerBlock = buildOfferBlock(ctx);
+  const offerBlock = buildOfferBlock(ctx, opts.brief);
   const { ctaText } = resolveCta(ctx);
   const blogType = resolveBlogType(topic, {
     brief: opts.brief ?? null,
@@ -263,8 +263,14 @@ export function buildBlogMessages(
     "- Lead with the reader's problem or outcome; the brand earns its place after.",
     "  Second person, active voice, cut hedging ('just', 'we think', 'maybe').",
     "- Teach something real in every section: concrete steps, numbers, examples,",
-    "  and named outcomes over adjectives. A reader should be able to act on it.",
+    "  and named outcomes over adjectives, when a real one is available (see",
+    "  below). A reader should be able to act on it.",
     "- One post, one job: everything builds toward the single CTA at the end.",
+    "- Never invent numbers, statistics, dates, prices, testimonials, or customer",
+    "  names. Use only what the CAMPAIGN BRIEF, the offer block, or the brand",
+    "  facts above give you. With no real number available, get concrete WITHOUT",
+    "  one: name the specific situation, object, or step instead. An invented",
+    "  specific is worse than an honest general.",
     "",
     "SEO RULES (enforced, not optional):",
     "- ONE idea per heading, logical H2 flow (heading text only, the H1 is the title).",

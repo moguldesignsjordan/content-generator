@@ -40,6 +40,7 @@ import type {
   Strategy,
   VisualVibe,
 } from "@/lib/db/types";
+import { CAMPAIGN_BRIEF_TEXT_FIELDS } from "@/lib/db/types";
 import {
   CREATE_TOOLS,
   buildCreateAgentSystem,
@@ -326,8 +327,8 @@ export async function POST(req: NextRequest) {
       messages.push({ role: "user", content: toolResults });
     }
 
-    // Stall recovery, mirroring /api/campaigns/chat: brief was already ready
-    // going into this turn but nothing happened. Force one more step; if that
+    // Stall recovery: brief was already ready going into this turn but
+    // nothing happened. Force one more step; if that
     // still doesn't produce a tool call, at least readyToGenerate (computed
     // below from state.brief/topicId, unaffected by whether a tool fired)
     // will be true so the client's manual Generate button is there instead of
@@ -468,9 +469,7 @@ async function dispatchTool(
         input,
         ctx.products,
       );
-      const saved = (
-        ["goal", "audience_notes", "key_message", "offer_slug", "angle", "constraints", "tone", "visual_vibe"] as const
-      )
+      const saved = ([...CAMPAIGN_BRIEF_TEXT_FIELDS, "visual_vibe"] as const)
         .filter((k) => typeof input[k] === "string" && input[k]!.trim())
         .map((k) => `${k}=${state.brief[k]}`);
       // Presence only: echoing the whole pasted email back as a tool result
@@ -543,6 +542,8 @@ async function dispatchTool(
               state.brief.goal ? `Goal: ${state.brief.goal}` : "",
               state.brief.tone ? `Tone: ${state.brief.tone}` : "",
               state.brief.constraints,
+              state.brief.proof ? `Proof: ${state.brief.proof}` : "",
+              state.brief.offer_deadline ? `Deadline: ${state.brief.offer_deadline}` : "",
             ]
               .filter(Boolean)
               .join("\n") || undefined
@@ -578,6 +579,8 @@ async function dispatchTool(
           title: stripEmDashes(i.title.trim()),
           angle: i.angle ? stripEmDashes(i.angle) : undefined,
           key_message: i.key_message ? stripEmDashes(i.key_message) : undefined,
+          proof: i.proof ? stripEmDashes(i.proof) : undefined,
+          offer_deadline: i.offer_deadline ? stripEmDashes(i.offer_deadline) : undefined,
         }));
       if (items.length < 2) {
         return "plan_series needs 2 to 10 emails, each with a title.";
@@ -639,12 +642,38 @@ async function dispatchTool(
             ...(state.brief.visual_vibe
               ? { visual_vibe: state.brief.visual_vibe }
               : {}),
+            // Campaign-wide defaults that were silently dropped on every
+            // multi-email series until now.
+            ...(state.brief.image_style ? { image_style: state.brief.image_style } : {}),
+            ...(state.brief.email_style ? { email_style: state.brief.email_style } : {}),
+            ...(state.brief.hook ? { hook: state.brief.hook } : {}),
+            ...(state.brief.offer_deal ? { offer_deal: state.brief.offer_deal } : {}),
+            ...(state.brief.offer_price ? { offer_price: state.brief.offer_price } : {}),
+            ...(state.brief.offer_exclusions
+              ? { offer_exclusions: state.brief.offer_exclusions }
+              : {}),
+            ...(state.brief.reader_belief
+              ? { reader_belief: state.brief.reader_belief }
+              : {}),
             ...(typeof includeImage === "boolean"
               ? { include_image: includeImage }
               : {}),
             ...(item.key_message ? { key_message: item.key_message } : {}),
             ...(item.angle ? { angle: item.angle } : {}),
             ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
+            // Per-item proof/deadline win over the campaign-wide default (set
+            // above from state.brief) so a 5-email series doesn't recite the
+            // same one number five times.
+            ...(item.proof
+              ? { proof: item.proof }
+              : state.brief.proof
+                ? { proof: state.brief.proof }
+                : {}),
+            ...(item.offer_deadline
+              ? { offer_deadline: item.offer_deadline }
+              : state.brief.offer_deadline
+                ? { offer_deadline: state.brief.offer_deadline }
+                : {}),
             ...(productPhotoUrl
               ? { product_photo_url: productPhotoUrl, include_image: true }
               : {}),
@@ -776,15 +805,7 @@ function isHttpUrl(value: string): boolean {
 /** Merges only the fields the model actually passed onto the stored brief. */
 function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBrief {
   const next = { ...current };
-  for (const key of [
-    "goal",
-    "audience_notes",
-    "key_message",
-    "offer_slug",
-    "angle",
-    "constraints",
-    "tone",
-  ] as const) {
+  for (const key of CAMPAIGN_BRIEF_TEXT_FIELDS) {
     const value = input[key];
     if (typeof value === "string" && value.trim()) {
       next[key] = stripEmDashes(value.trim());

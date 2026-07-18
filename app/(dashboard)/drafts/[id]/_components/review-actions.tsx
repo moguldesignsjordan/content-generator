@@ -254,6 +254,7 @@ export function ReviewActions({
   const isActionable = state === "in_review";
   const hasQa = seoData.qa_pass !== undefined;
   const hasBannedTerms = (seoData.banned_terms_found?.length ?? 0) > 0;
+  const hasUnsupportedSpecifics = (seoData.unsupported_specifics?.length ?? 0) > 0;
 
   const subjectVariants = initialMeta.email_copy?.subject_variants ?? [];
   const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
@@ -695,6 +696,22 @@ export function ReviewActions({
               <p className="text-danger">
                 Words we avoided: {seoData.banned_terms_found!.join(", ")}
               </p>
+            )}
+
+            {hasUnsupportedSpecifics && (
+              <div>
+                <p className="mb-1.5 text-danger">
+                  Couldn&apos;t verify (no matching fact in the brief or brand):
+                </p>
+                <ul className="space-y-1 text-foreground/80">
+                  {seoData.unsupported_specifics!.map((claim, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-danger">·</span>
+                      <span>{claim}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {seoData.keyword_used !== undefined && (

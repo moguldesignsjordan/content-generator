@@ -19,9 +19,15 @@ export interface CreateBriefCard {
   audience: string | null;
   goal: string | null;
   keyMessage: string | null;
+  proof: string | null;
+  hook: string | null;
   angle: string | null;
+  readerBelief: string | null;
   offerName: string | null;
   offerPrice: string | null;
+  /** Deal/deadline/exclusions from the brief's own offer_* fields, joined for
+   * display (distinct from offerPrice, which is the product row's own). */
+  offerSummary: string | null;
   tone: string | null;
   funnelStage: FunnelStage | null;
   ctaLabel: string | null;
@@ -58,15 +64,23 @@ export function buildBriefCard(args: {
   const offer = brief.offer_slug
     ? (products.find((p) => p.slug === brief.offer_slug) ?? null)
     : null;
+  const offerSummary =
+    [brief.offer_deal, brief.offer_deadline, brief.offer_exclusions]
+      .filter(Boolean)
+      .join(" · ") || null;
 
   return {
     topicTitle,
     audience: brief.audience_notes ?? primaryIcp?.label ?? null,
     goal: brief.goal ?? null,
     keyMessage: brief.key_message ?? null,
+    proof: brief.proof ?? null,
+    hook: brief.hook ?? null,
     angle: brief.angle ?? null,
+    readerBelief: brief.reader_belief ?? null,
     offerName: offer?.name ?? null,
-    offerPrice: offer?.price_point ?? null,
+    offerPrice: brief.offer_price ?? offer?.price_point ?? null,
+    offerSummary,
     tone: brief.tone ?? null,
     funnelStage,
     ctaLabel: resolveCtaLabel(brand, strategy, funnelStage),
