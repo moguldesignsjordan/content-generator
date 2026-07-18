@@ -118,6 +118,7 @@ export interface Positioning {
 export interface OnboardingMessage {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
 }
 
 export interface OnboardingState {
@@ -374,6 +375,7 @@ export interface SeriesDraftRef {
 export interface CampaignChatState {
   messages?: OnboardingMessage[];
   series?: SeriesDraftRef[];
+  auto?: boolean;
 }
 
 export interface Campaign {

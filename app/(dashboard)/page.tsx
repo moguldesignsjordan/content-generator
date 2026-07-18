@@ -96,6 +96,7 @@ export default async function DashboardPage() {
           messages: activeMessages,
           topicId: activeCampaign.topic_id,
           series: activeCampaign.chat_state?.series ?? null,
+          auto: activeCampaign.chat_state?.auto ?? false,
           ready: !!(
             activeCampaign.brief.goal &&
             activeCampaign.brief.key_message &&

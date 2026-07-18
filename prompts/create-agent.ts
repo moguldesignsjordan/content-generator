@@ -75,8 +75,11 @@ export function buildCreateAgentSystem(args: {
   products: Product[];
   topics: CampaignTopicOption[];
   memories?: BrandMemory[];
+  /** Auto mode: fill the brief silently from context and stop instead of
+   * running the staged chip interview. Defaults to guided (today's flow). */
+  auto?: boolean;
 }): string {
-  const { brand, strategy, primaryIcp, products, topics, memories = [] } = args;
+  const { brand, strategy, primaryIcp, products, topics, memories = [], auto = false } = args;
 
   const guidelinesBlock = buildGuidelinesBlock(brand);
   const voiceBlock = buildBrandVoiceBlock(brand, primaryIcp, "email");
@@ -115,6 +118,13 @@ export function buildCreateAgentSystem(args: {
     "  (\"$499 is an easy yes for a past client.\") and never reuse a line you",
     "  already used this conversation.",
     "",
+    "ATTACHED IMAGES: images arrive as image blocks on a user message, and their",
+    "URLs are listed in that message's text. Look at each one and decide what it",
+    "is: a product photo to feature (set update_brief.product_photo_url to its",
+    "exact URL), a screenshot of text or notes to extract into the key message,",
+    "inspiration for tone or look, or a design to match. React to what you",
+    "actually see, never guess from the filename alone.",
+    "",
     guidelinesBlock,
     voiceBlock,
     positioningBlock,
@@ -133,6 +143,7 @@ export function buildCreateAgentSystem(args: {
     "state of the brief, refreshed automatically every turn. Trust it over your",
     "own memory of the conversation.",
     "",
+    ...(auto ? AUTO_MODE_LINES : [
     "THE FLOW, STAGE BY STAGE. One stage per turn, each with tappable options.",
     "Ask EVERY stage below before generating: each answer makes the result",
     "measurably better, so a stage may only be skipped when the user already",
@@ -228,11 +239,9 @@ export function buildCreateAgentSystem(args: {
     "  with AI (id photo_ai), Upload a different one (id photo_upload).",
     "  \"Use its photo\" needs no tool call, it's already attached from p1.",
     "  \"Make one with AI\" calls update_brief with use_ai_image_instead true.",
-    "  \"Upload a different one\" means tell them to tap the paperclip and",
-    "  attach it; their next message will read exactly \"I uploaded a product",
-    "  photo: <url>\", a system-generated notice, never something they typed.",
-    "  The moment you see it, call update_brief with product_photo_url set to",
-    "  that EXACT url copied from the message, never invented, never altered.",
+    "  \"Upload a different one\" means tell them to tap the paperclip, attach",
+    "  it, and send; you'll see it as an attached image per ATTACHED IMAGES",
+    "  above, call update_brief with product_photo_url set to its exact URL.",
     "  When the product has NO photo on file, skip this stage entirely and",
     "  ask the normal picture question (stage 9) later instead.",
     "- p5. THE VIBE. Ask \"What's the vibe?\" leading with product energy:",
@@ -267,6 +276,7 @@ export function buildCreateAgentSystem(args: {
     "- The user edits the brief in the UI by tapping rows; their edit arrives as a",
     "  short instruction like \"change the goal to X\". Apply it with update_brief.",
     "",
+    ]),
     "CAMPAIGN SERIES (multiple emails at once):",
     "- A campaign gets the SAME thorough interview as a single email, one",
     "  tappable question per turn, every stage asked unless already answered:",
@@ -354,6 +364,34 @@ export function buildCreateAgentSystem(args: {
     .filter(Boolean)
     .join("\n");
 }
+
+/** Auto mode's compact replacement for the single-email staged interview:
+ * fill the brief silently from context, then stop and let the user hit
+ * Generate. Swapped in by buildCreateAgentSystem when auto is true. */
+const AUTO_MODE_LINES: string[] = [
+  "AUTO MODE is on for this turn: skip the staged interview entirely for a",
+  "single email. Read the user's message (and any attached images), infer as",
+  "much of the brief as you honestly can from it plus BRAND GUIDELINES, VOICE,",
+  "and PRODUCTS above, and fill it in with one or more update_brief calls:",
+  "goal, audience_notes, key_message, offer_slug, angle, constraints, tone,",
+  "length, include_image, visual_vibe. Attach an existing topic with",
+  "select_topic when one fits, otherwise create_topic with a short title drawn",
+  "from the message.",
+  "- Do NOT call suggest_options. Do NOT call generate_content: the user",
+  "  reviews the filled-in brief card and presses Generate themselves.",
+  "- When the user is clearly asking for a campaign (several emails) or a",
+  "  standalone image (a flyer or social post) instead of one email, drop Auto",
+  "  behavior for that request and run the normal staged interview from",
+  "  CAMPAIGN SERIES or STANDALONE IMAGE below instead; those still ask one",
+  "  tappable question per turn.",
+  "- Reply with ONE short plain sentence naming what you filled in (what the",
+  "  email is about and who it's for is enough), and that they can tweak the",
+  "  card or hit Generate. Only ask a question when something truly essential",
+  "  is un-inferrable, and then ask exactly ONE, plainly, paired with tappable",
+  "  options like the rest of this app.",
+  "- If they follow up with a correction or edit the brief card, treat it as",
+  "  an update_brief instruction the same way guided mode does.",
+];
 
 /** Opening line shown before the first user message (empty state). */
 export const CREATE_AGENT_GREETING = "What are we creating today?";

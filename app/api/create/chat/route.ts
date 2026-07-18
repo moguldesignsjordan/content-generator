@@ -84,6 +84,55 @@ const MAX_STEPS = 8;
 interface ChatMsg {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
+}
+
+/** Only the app's own Supabase storage host may be injected as an image
+ * block (SSRF guard against a client-supplied URL pointing anywhere else). */
+function allowedImageHost(): string | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return null;
+  try {
+    return new URL(supabaseUrl).host;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeImageUrls(urls: string[] | undefined): string[] | undefined {
+  if (!urls?.length) return undefined;
+  const host = allowedImageHost();
+  if (!host) return undefined;
+  const safe = urls.filter((u) => {
+    try {
+      return new URL(u).host === host;
+    } catch {
+      return false;
+    }
+  });
+  return safe.length ? safe : undefined;
+}
+
+/** Wraps a user message's text as a plain string (cheap) or, when images are
+ * attached, a content array carrying real image blocks so the model sees
+ * them (vision) plus their URLs in the text so it can echo one back into
+ * update_brief.product_photo_url. */
+function withImageBlocks(
+  text: string,
+  images: string[] | undefined,
+): Anthropic.MessageParam["content"] {
+  if (!images?.length) return text;
+  const urlList = images.map((u, i) => `u${i + 1}: ${u}`).join(", ");
+  return [
+    {
+      type: "text",
+      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL.`,
+    },
+    ...images.map((url) => ({
+      type: "image" as const,
+      source: { type: "url" as const, url },
+    })),
+  ];
 }
 
 export type { CreateBriefCard };
@@ -122,10 +171,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, campaignId } = (await req.json()) as {
+    const { message, history, campaignId, images, auto } = (await req.json()) as {
       message?: string;
       history?: ChatMsg[];
       campaignId?: string | null;
+      images?: string[];
+      auto?: boolean;
     };
     if (!message?.trim()) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -154,19 +205,37 @@ export async function POST(req: NextRequest) {
       listBrandMemory(brand.id),
     ]);
 
+    // Mode persists on the campaign's chat_state across turns; the client
+    // resends it every turn, but fall back to whatever was last saved so a
+    // stray request that omits it doesn't silently drop back to guided.
+    const autoMode = typeof auto === "boolean" ? auto : (campaign.chat_state?.auto ?? false);
+
     // The system prompt holds only the STABLE brand context (+ learned
     // memory) so it caches across turns; the mutating brief-so-far rides in
     // the latest user turn instead (it's never persisted to history, so it
-    // can't go stale there).
+    // can't go stale there). Toggling mode deliberately busts the cache
+    // since it's a different prompt; that's fine, it's not a per-turn event.
     const system = cacheableSystem(
-      buildCreateAgentSystem({ brand, strategy, primaryIcp, products, topics, memories }),
+      buildCreateAgentSystem({
+        brand,
+        strategy,
+        primaryIcp,
+        products,
+        topics,
+        memories,
+        auto: autoMode,
+      }),
     );
 
     // Cache the prefix through the end of the prior turn so each new message
     // only pays full price on the small bit that's actually new.
     const priorTurns: Anthropic.MessageParam[] = (history ?? [])
       .slice(-10)
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({
+        role: m.role,
+        content:
+          m.role === "user" ? withImageBlocks(m.content, sanitizeImageUrls(m.images)) : m.content,
+      }));
     if (priorTurns.length > 0) {
       priorTurns[priorTurns.length - 1] = withCacheBreakpoint(
         priorTurns[priorTurns.length - 1],
@@ -176,11 +245,15 @@ export async function POST(req: NextRequest) {
       campaign.brief ?? {},
       campaign.topic_id,
     );
+    const sanitizedImages = sanitizeImageUrls(images);
     const messages: Anthropic.MessageParam[] = [
       ...priorTurns,
       {
         role: "user",
-        content: `${briefState}\n\nUSER MESSAGE:\n${message.trim()}`,
+        content: withImageBlocks(
+          `${briefState}\n\nUSER MESSAGE:\n${message.trim()}`,
+          sanitizedImages,
+        ),
       },
     ];
 
@@ -317,7 +390,11 @@ export async function POST(req: NextRequest) {
     // tokens without adding information.
     const transcript: ChatMsg[] = [
       ...(history ?? []).slice(-38),
-      { role: "user" as const, content: message.trim() },
+      {
+        role: "user" as const,
+        content: message.trim(),
+        ...(sanitizedImages ? { images: sanitizedImages } : {}),
+      },
       { role: "assistant" as const, content: reply },
     ].slice(-40);
 
@@ -328,7 +405,7 @@ export async function POST(req: NextRequest) {
     await updateCampaign(campaign.id, {
       brief: state.brief,
       topic_id: state.topicId,
-      chat_state: { messages: transcript, ...(series ? { series } : {}) },
+      chat_state: { messages: transcript, auto: autoMode, ...(series ? { series } : {}) },
       ...(state.draftId || state.series
         ? { status: "generating" as const }
         : {}),
@@ -355,6 +432,7 @@ export async function POST(req: NextRequest) {
       draftId: state.draftId,
       channel: state.channel,
       series,
+      auto: autoMode,
     });
   } catch (err) {
     logError("api:/api/create/chat", err);

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AccentSpinner, Button, Logo, Select, useToast } from "@/components/ui";
 import {
+  CloseIcon,
   FlyerIcon,
   MailIcon,
   MegaphoneIcon,
@@ -48,6 +49,13 @@ const BLOG_TYPE_OPTIONS: { value: BlogType; label: string }[] = [
 interface Msg {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
+}
+
+/** An image staged on the composer, uploaded and hosted but not yet sent. */
+interface PendingImage {
+  url: string;
+  name: string;
 }
 
 /* Concrete things you can type, cycled through the empty composer so the
@@ -97,6 +105,7 @@ interface CreateResponse {
   readyToGenerate?: boolean;
   draftId?: string | null;
   series?: SeriesDraftRef[] | null;
+  auto?: boolean;
   error?: string;
 }
 
@@ -109,6 +118,7 @@ export interface CreateAgentInitialState {
   topicId: string | null;
   ready: boolean;
   series: SeriesDraftRef[] | null;
+  auto: boolean;
 }
 
 /**
@@ -144,13 +154,16 @@ export function CreateAgent({
   const [series, setSeries] = useState<SeriesDraftRef[] | null>(initial?.series ?? null);
   const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
-  // An attached image is uploaded and analyzed before the user can send, so the
-  // paperclip needs its own pending state (send() has its own `loading`).
+  // An attached image is uploaded before the user can send, so the paperclip
+  // needs its own pending state (send() has its own `loading`).
   const [uploading, setUploading] = useState(false);
-  // Set when the agent's PRODUCT EMAIL FLOW just asked "upload a different
-  // photo": the NEXT image attach is the product's own photo (hero material),
-  // not a design to copy, so the paperclip has to route it differently.
-  const [awaitingProductPhoto, setAwaitingProductPhoto] = useState(false);
+  // Images staged on the composer: hosted, thumbnailed, and sent as real
+  // image content with the next message so the agent can actually see them
+  // (vision) instead of the image being diverted client-side.
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  // Guided runs the staged chip interview (default); Auto fills the brief
+  // silently from context and stops so the user presses Generate.
+  const [mode, setMode] = useState<"guided" | "auto">(initial?.auto ? "auto" : "guided");
   // Quick-action panel open state. Open in the landing; tapping + toggles it.
   // Closes on send so the conversation reads clean.
   const [actionsOpen, setActionsOpen] = useState(true);
@@ -172,38 +185,6 @@ export function CreateAgent({
   function appendToInput(text: string) {
     setInput((cur) => (cur.trim() ? cur.trimEnd() + "\n\n" : "") + text);
     inputRef.current?.focus();
-  }
-
-  /**
-   * An IMAGE attachment is an email design to copy: it goes straight to the
-   * design library (kind=email), which analyzes it once and attaches it to
-   * every following email generation. Nothing about it belongs in the chat
-   * transcript, so only a plain sentence lands in the composer, and the agent
-   * acknowledges it in flow.
-   */
-  async function uploadDesignImage(file: File) {
-    setUploading(true);
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      body.append("kind", "email");
-      body.append(
-        "name",
-        `Uploaded design, ${new Date().toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        })}`,
-      );
-      const res = await fetch("/api/style-references", { method: "POST", body });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Couldn't save that design.");
-      appendToInput("I uploaded a design example, make the email look like it.");
-      toast.success("Got it. Your email will copy that design.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't save that design.");
-    } finally {
-      setUploading(false);
-    }
   }
 
   /**
@@ -233,23 +214,22 @@ export function CreateAgent({
   }
 
   /**
-   * A real product photo: hosted as-is (no AI, no design analysis) and
-   * reported back as a plain chat message carrying the URL, which the agent
-   * is instructed to save verbatim as update_brief.product_photo_url.
+   * A real image: hosted as-is (no AI, no design analysis) and staged as a
+   * thumbnail on the composer. It rides with the NEXT message as a real
+   * image block, so the agent actually sees it (vision) and decides what it
+   * is: a product photo, a design to match, a screenshot of notes, etc.
    */
-  async function uploadProductPhoto(file: File) {
+  async function uploadPendingImage(file: File) {
     setUploading(true);
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("kind", "product");
       const res = await fetch("/api/uploads/image", { method: "POST", body });
       const data = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that photo.");
-      setAwaitingProductPhoto(false);
-      void send(`I uploaded a product photo: ${data.url}`);
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that image.");
+      setPendingImages((imgs) => [...imgs, { url: data.url!, name: file.name }]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't upload that photo.");
+      toast.error(err instanceof Error ? err.message : "Couldn't upload that image.");
     } finally {
       setUploading(false);
     }
@@ -258,11 +238,7 @@ export function CreateAgent({
   /** The paperclip: takes anything a non-technical user might have on hand. */
   function handleAttachFile(file: File) {
     if (file.type.startsWith("image/")) {
-      if (awaitingProductPhoto) {
-        void uploadProductPhoto(file);
-      } else {
-        void uploadDesignImage(file);
-      }
+      void uploadPendingImage(file);
       return;
     }
     attachTextFile(file);
@@ -303,13 +279,24 @@ export function CreateAgent({
 
   async function send(text: string) {
     const t = text.trim();
-    if (!t || loading || generating) return;
+    const imageUrls = pendingImages.map((p) => p.url);
+    if ((!t && imageUrls.length === 0) || loading || generating) return;
+    const displayText =
+      t || (imageUrls.length === 1 ? "(attached a photo)" : "(attached photos)");
     setInput("");
+    setPendingImages([]);
     setError(null);
     setHint(false);
     setOptions(null);
     setActionsOpen(false);
-    setMessages((m) => [...m, { role: "user", content: t }]);
+    setMessages((m) => [
+      ...m,
+      {
+        role: "user",
+        content: displayText,
+        ...(imageUrls.length ? { images: imageUrls } : {}),
+      },
+    ]);
     setLoading(true);
     const hintTimer = setTimeout(() => setHint(true), 6000);
     const controller = new AbortController();
@@ -322,7 +309,13 @@ export function CreateAgent({
       const res = await fetch("/api/create/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: t, history: messages, campaignId }),
+        body: JSON.stringify({
+          message: displayText,
+          history: messages,
+          campaignId,
+          images: imageUrls.length ? imageUrls : undefined,
+          auto: mode === "auto",
+        }),
         signal: controller.signal,
       });
       const data = (await res.json()) as CreateResponse;
@@ -336,6 +329,7 @@ export function CreateAgent({
       setOptions(data.options ?? null);
       if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
+      if (typeof data.auto === "boolean") setMode(data.auto ? "auto" : "guided");
       // The agent already generated (or reused) a draft this turn; skip the
       // manual Generate fallback and open it directly.
       if (data.draftId) {
@@ -388,6 +382,7 @@ export function CreateAgent({
     setGenerating(false);
     setError(null);
     setActionsOpen(true);
+    setPendingImages([]);
   }
 
   async function generate() {
@@ -443,6 +438,9 @@ export function CreateAgent({
             today?
           </h2>
           <div className="w-full max-w-xl">
+            <div className="mb-2 flex justify-end">
+              <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
+            </div>
             <ComposerBar
               inputRef={inputRef}
               input={input}
@@ -460,6 +458,10 @@ export function CreateAgent({
               ready={ready}
               disabled={loading || generating}
               placeholderCycle={PROMPT_IDEAS[phIndex]}
+              pendingImages={pendingImages}
+              onRemoveImage={(url) =>
+                setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
+              }
             />
             {actionsOpen && (
               <ActionGrid
@@ -477,7 +479,8 @@ export function CreateAgent({
       ) : (
         // Conversation — scrolling thread + docked composer.
         <>
-          <div className="flex items-center justify-end border-b border-border px-3 py-1.5">
+          <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+            <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
             <button
               type="button"
               onClick={clearChat}
@@ -528,10 +531,7 @@ export function CreateAgent({
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => {
-                      if (opt.id.startsWith("photo_upload")) setAwaitingProductPhoto(true);
-                      send(opt.label);
-                    }}
+                    onClick={() => send(opt.label)}
                     disabled={loading || generating}
                     className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
                   >
@@ -569,10 +569,50 @@ export function CreateAgent({
               uploading={uploading}
               ready={ready}
               disabled={loading || generating}
+              pendingImages={pendingImages}
+              onRemoveImage={(url) =>
+                setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
+              }
             />
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Guided runs today's staged chip interview; Auto fills the brief silently
+ * from context and stops so the user reviews the card and hits Generate. */
+function ModeToggle({
+  mode,
+  onChange,
+  disabled,
+}: {
+  mode: "guided" | "auto";
+  onChange: (m: "guided" | "auto") => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5">
+      {(["guided", "auto"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          disabled={disabled}
+          title={
+            m === "auto"
+              ? "Fill the brief automatically from your brand, then you hit Generate"
+              : "Answer a short chip interview"
+          }
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+            mode === m ? "bg-accent text-white" : "text-muted hover:text-foreground",
+          )}
+        >
+          {m === "guided" ? "Guided" : "Auto"}
+        </button>
+      ))}
     </div>
   );
 }
@@ -589,6 +629,8 @@ function ComposerBar({
   ready,
   disabled,
   placeholderCycle,
+  pendingImages,
+  onRemoveImage,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -597,21 +639,49 @@ function ComposerBar({
   onSend: () => void;
   onPlus?: () => void;
   /** Attach an example: a text/HTML/eml file drops into the composer as an
-   * email to READ like; an image uploads as a design to LOOK like. */
+   * email to READ like; an image stages a thumbnail and sends with the next
+   * message so the agent can actually see it (vision). */
   onAttachFile?: (file: File) => void;
-  /** An attached image is still uploading and being read. */
+  /** An attached image is still uploading. */
   uploading?: boolean;
   ready: boolean;
   disabled: boolean;
   /** When set (landing), the placeholder cycles through example prompts as a
    * faded-in overlay; the native placeholder is suppressed in its favor. */
   placeholderCycle?: string;
+  /** Images uploaded and staged, waiting to ride with the next send. */
+  pendingImages?: PendingImage[];
+  onRemoveImage?: (url: string) => void;
 }) {
   const attachRef = useRef<HTMLInputElement>(null);
   const cycling = placeholderCycle !== undefined && !ready;
-  const hasText = Boolean(input.trim());
+  const hasText = Boolean(input.trim()) || Boolean(pendingImages?.length);
   return (
-    <div className="hero-ring composer-glow flex items-end gap-1.5 rounded-[28px] border border-border bg-surface-2 p-2 pl-2.5">
+    <div className="hero-ring composer-glow flex flex-col gap-1.5 rounded-[28px] border border-border bg-surface-2 p-2 pl-2.5">
+      {pendingImages && pendingImages.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-0.5 pt-0.5">
+          {pendingImages.map((img) => (
+            <div
+              key={img.url}
+              className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[var(--radius-md)] border border-border"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.url} alt={img.name} className="h-full w-full object-cover" />
+              {onRemoveImage && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveImage(img.url)}
+                  aria-label={`Remove ${img.name}`}
+                  className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <CloseIcon size={10} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-end gap-1.5">
       {onPlus && (
         <button
           type="button"
@@ -628,8 +698,8 @@ function ComposerBar({
             type="button"
             onClick={() => attachRef.current?.click()}
             disabled={uploading}
-            aria-label="Attach an example email or a screenshot of a design to copy"
-            title="Attach an example email or a design screenshot"
+            aria-label="Attach a photo or an example email"
+            title="Attach a photo or an example email"
             className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground disabled:opacity-50"
           >
             {uploading ? <AccentSpinner size={14} /> : <PaperclipIcon size={18} />}
@@ -639,8 +709,8 @@ function ComposerBar({
             type="file"
             // image/* first and unrestricted: a phone screenshot can be HEIC,
             // and naming only png/jpeg/webp made the picker grey out real
-            // photos. Text-ish files become "write like this"; images become
-            // "look like this" (uploaded to the email design library).
+            // photos. Text-ish files stage as "write like this"; images stage
+            // as a thumbnail and send with the next message (vision).
             accept="image/*,.txt,.md,.html,.htm,.eml,text/plain,text/html,message/rfc822"
             className="hidden"
             onChange={(e) => {
@@ -691,6 +761,7 @@ function ComposerBar({
       >
         <SendIcon size={18} />
       </Button>
+      </div>
     </div>
   );
 }
@@ -780,8 +851,21 @@ function Bubble({ msg }: { msg: Msg }) {
   if (isUser) {
     return (
       <div className="bubble-in flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
-          {msg.content}
+        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
+          {msg.images && msg.images.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {msg.images.map((url) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={url}
+                  src={url}
+                  alt=""
+                  className="h-16 w-16 rounded-[var(--radius-md)] object-cover"
+                />
+              ))}
+            </div>
+          )}
+          <span className="whitespace-pre-wrap">{msg.content}</span>
         </div>
       </div>
     );
