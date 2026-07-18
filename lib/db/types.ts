@@ -339,6 +339,10 @@ export interface CampaignBrief {
    * and email design-style selection (see prompts/email-styles.ts and
    * prompts/generate-image.ts). */
   visual_vibe?: VisualVibe;
+  /** An explicit art-style choice for this piece's generated hero image
+   * (campaign form / interview answer). Wins over the vibe→style mapping,
+   * the brand's stored default, and the varied fallback rotation. */
+  image_style?: ContentImageStyle;
   /** A real, already-hosted photo (usually the mapped product's own image)
    * to use as the hero AS-IS instead of generating one. Only ever set from a
    * known-good URL: the selected product's stored image_url, or a photo the
@@ -496,7 +500,10 @@ export type ContentImageStyle =
   | "texture"
   | "render3d"
   | "collage"
-  | "lineart";
+  | "lineart"
+  | "watercolor"
+  | "retro"
+  | "duotone";
 
 /** How an attached reference image steers generation. */
 export type ReferenceUse = "style" | "subject" | "both";

@@ -2,12 +2,14 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   Brand,
   CampaignBrief,
+  ContentImageStyle,
   EmailLengthPreference,
   Icp,
   Product,
   Strategy,
   VisualVibe,
 } from "@/lib/db/types";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import {
   buildBrandVoiceBlock,
   buildFunnelBlock,
@@ -35,6 +37,7 @@ export interface UpdateBriefInput {
   length?: EmailLengthPreference;
   include_image?: boolean;
   visual_vibe?: VisualVibe;
+  image_style?: ContentImageStyle;
   product_photo_url?: string;
   use_ai_image_instead?: boolean;
 }
@@ -128,6 +131,14 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "user says (punchy and bold, sleek and minimal, playful and fun, " +
           "premium and polished). Shapes both the image style and the " +
           "email's look.",
+      },
+      image_style: {
+        type: "string",
+        enum: IMAGE_STYLE_CATALOG.map((s) => s.id),
+        description:
+          "The art style for this piece's generated picture, when the user " +
+          "asks for one (a photo, an illustration, watercolor, retro poster, " +
+          "and so on). Leave unset to let the engine vary it.",
       },
       product_photo_url: {
         type: "string",

@@ -69,6 +69,7 @@ import {
 } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -724,6 +725,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   }
   if (input.visual_vibe && VISUAL_VIBES.includes(input.visual_vibe)) {
     next.visual_vibe = input.visual_vibe;
+  }
+  if (
+    input.image_style &&
+    IMAGE_STYLE_CATALOG.some((s) => s.id === input.image_style)
+  ) {
+    next.image_style = input.image_style;
   }
   // A directly-typed URL still has to pass isHttpUrl; the model is told to
   // only ever echo one back from an upload notice, but this is the real

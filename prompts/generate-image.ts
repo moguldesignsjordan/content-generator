@@ -7,6 +7,7 @@ import type {
   VisualVibe,
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 // Which image style best carries each requested vibe (see
 // CampaignBrief.visual_vibe), used as the auto-image default in place of the
@@ -25,24 +26,47 @@ export const VISUAL_VIBE_IMAGE_STYLE: Record<VisualVibe, ContentImageStyle> = {
 // deterministic code, only the scene/subject description is model-crafted,
 // so a style always looks like itself regardless of sampling.
 
-export const IMAGE_STYLE_LABELS: Record<ContentImageStyle, string> = {
-  illustration: "Illustration",
-  photo: "Photo",
-  texture: "Brand texture",
-  render3d: "Soft 3D",
-  collage: "Collage",
-  lineart: "Line art",
-};
+// Labels/descriptions derive from the one shared catalog (lib/image-styles.ts,
+// client-safe) so the pickers and this prompt layer can never drift apart.
+export const IMAGE_STYLE_LABELS = Object.fromEntries(
+  IMAGE_STYLE_CATALOG.map((s) => [s.id, s.label]),
+) as Record<ContentImageStyle, string>;
 
-/** One-line descriptions for the style picker UI. Keep in sync with the scaffolds. */
-export const IMAGE_STYLE_DESCRIPTIONS: Record<ContentImageStyle, string> = {
-  illustration: "Flat editorial vector art, neutral base with brand-color accents.",
-  photo: "Premium photography, natural light, true-to-life color.",
-  texture: "Abstract gradient backdrop built only from brand colors.",
-  render3d: "Soft matte 3D shapes with studio lighting, playful but polished.",
-  collage: "Layered paper-cutout collage, tactile and editorial.",
-  lineart: "Minimal single-line drawing with one accent fill, gallery-sparse.",
-};
+export const IMAGE_STYLE_DESCRIPTIONS = Object.fromEntries(
+  IMAGE_STYLE_CATALOG.map((s) => [s.id, s.description]),
+) as Record<ContentImageStyle, string>;
+
+// The pool the no-preference fallback rotates through. Deliberately excludes
+// `texture` (an abstract backdrop, not a hero subject) and `lineart` (too
+// sparse to be a good every-email default); both stay available as explicit
+// choices everywhere.
+export const VARIED_STYLE_POOL: ContentImageStyle[] = [
+  "illustration",
+  "photo",
+  "render3d",
+  "collage",
+  "watercolor",
+  "retro",
+  "duotone",
+];
+
+/**
+ * The "no one chose a style" default: a per-draft rotation through the varied
+ * pool instead of a hardcoded single style (which made every email hero the
+ * same illustration). Deterministic for a given seed (the draft id) so
+ * retries of one draft re-render in the same style; different drafts land on
+ * different styles.
+ */
+export function pickVariedImageStyle(seed?: string): ContentImageStyle {
+  if (!seed) {
+    return VARIED_STYLE_POOL[Math.floor(Math.random() * VARIED_STYLE_POOL.length)];
+  }
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return VARIED_STYLE_POOL[hash % VARIED_STYLE_POOL.length];
+}
 
 // The deterministic halves of each prompt. {SCENE} is the model-crafted
 // subject; {COLOR} is the style's color treatment (branded or neutral, below).
@@ -77,6 +101,21 @@ const STYLE_SCAFFOLDS: Record<ContentImageStyle, string> = {
     "strokes in a dark neutral ink on a clean near-white background, {COLOR} " +
     "Elegant, sparse, gallery quality. No text, no words, no letters, no " +
     "logos, no watermarks.",
+  watercolor:
+    "A hand-painted watercolor illustration of {SCENE}. Soft translucent " +
+    "washes, organic bleeding edges, visible paper texture, a loose but " +
+    "confident composition with generous white space. {COLOR} No text, no " +
+    "words, no letters, no logos, no watermarks. Gallery quality.",
+  retro:
+    "A retro screen-print style poster illustration of {SCENE}. Bold " +
+    "simplified shapes, slightly misregistered ink layers, subtle halftone " +
+    "grain and paper texture, mid-century poster energy. {COLOR} No text, no " +
+    "words, no letters, no logos, no watermarks. Clean edges, print quality.",
+  duotone:
+    "A bold duotone graphic treatment of {SCENE}. One strong subject with a " +
+    "clean silhouette rendered in exactly two tones, high contrast, dramatic " +
+    "and modern, generous negative space. {COLOR} No text, no words, no " +
+    "letters, no logos, no watermarks. Sharp, poster quality.",
 };
 
 // Per-style color treatments: `accents` steers toward the brand palette
@@ -132,6 +171,29 @@ const COLOR_TREATMENTS: Record<
     none:
       "with at most one or two small flat accent fills in a color that suits " +
       "the subject.",
+  },
+  watercolor: {
+    accents:
+      "Mostly soft diluted neutral washes, with these brand colors appearing " +
+      "as concentrated pigment in the focal areas: {PALETTE}.",
+    none:
+      "A soft, harmonious wash palette that suits the subject, with one or " +
+      "two richer pigment accents.",
+  },
+  retro: {
+    accents:
+      "A limited ink palette of two or three flat colors drawn from these " +
+      "brand colors, printed over an off-white paper base: {PALETTE}.",
+    none:
+      "A limited vintage ink palette of two or three flat colors over an " +
+      "off-white paper base.",
+  },
+  duotone: {
+    accents:
+      "The two tones come from the brand: one deep shade and one bright " +
+      "accent built from {PALETTE}.",
+    none:
+      "Two complementary tones that suit the mood, one deep and one bright.",
   },
 };
 
@@ -267,6 +329,9 @@ export function buildImagePromptMessages(args: {
     "- For 'lineart', keep it to ONE simple subject that reads as a line drawing.",
     "- For 'collage', describe 2 to 4 distinct elements that can layer as cutouts.",
     "- For 'render3d', favor simple chunky objects over busy environments.",
+    "- For 'watercolor', pick ONE clear subject with room for the washes to breathe.",
+    "- For 'retro', keep it to 1 to 3 bold, iconic shapes a poster could carry.",
+    "- For 'duotone', describe ONE strong subject with a clean, readable silhouette.",
     "- NEVER use em dashes anywhere.",
     "Call save_image_prompt once.",
   ].join("\n");

@@ -9,6 +9,7 @@ import type {
   HeroPlacement,
   MediaAsset,
 } from "@/lib/db/types";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
 // steered by a reference image), upload your own, move it, or remove it.
@@ -16,38 +17,7 @@ import type {
 // spliced into the email HTML) and the blog review screen (hero pinned under
 // the title; published to Sanity as the post's main image).
 
-const IMAGE_STYLES = [
-  {
-    id: "illustration",
-    label: "Illustration",
-    description: "Flat editorial vector art in brand colors, bold and clean.",
-  },
-  {
-    id: "photo",
-    label: "Photo",
-    description: "Premium photography, natural light, true-to-life color.",
-  },
-  {
-    id: "texture",
-    label: "Brand texture",
-    description: "Abstract gradient backdrop built only from brand colors.",
-  },
-  {
-    id: "render3d",
-    label: "Soft 3D",
-    description: "Soft matte 3D shapes with studio lighting, playful but polished.",
-  },
-  {
-    id: "collage",
-    label: "Collage",
-    description: "Layered paper-cutout collage, tactile and editorial.",
-  },
-  {
-    id: "lineart",
-    label: "Line art",
-    description: "Minimal single-line drawing with one accent fill, gallery-sparse.",
-  },
-] as const;
+const IMAGE_STYLES = IMAGE_STYLE_CATALOG;
 
 const REFERENCE_USES = [
   { id: "style", label: "Match its style" },

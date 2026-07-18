@@ -39,6 +39,7 @@ import { ensureEditableRegions } from "@/lib/email/inline-style";
 import type {
   CampaignBrief,
   ContentImage,
+  ContentImageStyle,
   EmailCopy,
   EmailDraftContent,
   EmailTemplateId,
@@ -58,7 +59,11 @@ import {
   spliceHeroImage,
   useProductPhotoAsHero,
 } from "./generate-image";
-import { VISUAL_VIBE_IMAGE_STYLE, resolveBrandPalette } from "@/prompts/generate-image";
+import {
+  VISUAL_VIBE_IMAGE_STYLE,
+  pickVariedImageStyle,
+  resolveBrandPalette,
+} from "@/prompts/generate-image";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { logError, logWarn } from "@/lib/log";
@@ -174,7 +179,12 @@ export async function generateEmailForTopicStreamed(
         copy.headline,
         usageDeltas,
         { draftId, onEvent, skip: skipImage, force: wantsImage },
-        { emailType, tone: brief?.tone, vibe: brief?.visual_vibe },
+        {
+          emailType,
+          tone: brief?.tone,
+          vibe: brief?.visual_vibe,
+          imageStyle: brief?.image_style,
+        },
       );
     }
     if (heroImage) {
@@ -280,7 +290,14 @@ export async function maybeAutoHeroImage(
     skip?: boolean;
     force?: boolean;
   },
-  emailContext?: { emailType?: string; tone?: string; vibe?: VisualVibe },
+  emailContext?: {
+    emailType?: string;
+    tone?: string;
+    vibe?: VisualVibe;
+    /** The piece's explicit art-style choice (brief.image_style): wins over
+     * the vibe mapping, the brand default, and the varied rotation. */
+    imageStyle?: ContentImageStyle;
+  },
 ): Promise<ContentImage | undefined> {
   const prefs = ctx.brand.visual_identity?.image_gen;
   const optedOut = prefs?.auto === false && !progress?.force;
@@ -294,11 +311,17 @@ export async function maybeAutoHeroImage(
     progress.onEvent({ type: "phase", ...imaging });
   }
   try {
-    // A per-piece vibe (a fresh, specific answer from the interview) wins
-    // over the brand's generic stored default; an explicit user style choice
-    // never reaches this path at all (that's the image sheet, unaffected).
+    // Style precedence: the piece's explicit choice (the campaign form's
+    // "what kind of picture" answer) → the per-piece vibe's mapped style →
+    // the brand's stored default → a per-draft varied rotation. The rotation
+    // replaced a hardcoded "illustration" fallback that made every no-
+    // preference email hero look the same.
     const vibe = emailContext?.vibe;
-    const style = (vibe && VISUAL_VIBE_IMAGE_STYLE[vibe]) || prefs?.style || "illustration";
+    const style =
+      emailContext?.imageStyle ||
+      (vibe && VISUAL_VIBE_IMAGE_STYLE[vibe]) ||
+      prefs?.style ||
+      pickVariedImageStyle(progress?.draftId);
     const generated = await generateContentImage({
       tokens: resolveBrandTokens(ctx.brand),
       brandId: ctx.brand.id,

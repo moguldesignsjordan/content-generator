@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 // The form-based campaign start: every question the old chat interview asked,
 // as on-page selections. One submit saves the brief (/api/campaigns/start),
@@ -129,6 +130,7 @@ export function CampaignForm({
   const [vibeId, setVibeId] = useState("");
   const [lengthId, setLengthId] = useState("");
   const [imageChoice, setImageChoice] = useState("default");
+  const [imageStyle, setImageStyle] = useState("");
   const [aspect, setAspect] = useState("1:1");
   const [moreOpen, setMoreOpen] = useState(false);
   const [audience, setAudience] = useState("");
@@ -172,6 +174,8 @@ export function CampaignForm({
             !wantsEmail || imageChoice === "default"
               ? undefined
               : imageChoice === "yes",
+          image_style:
+            wantsEmail && imageChoice !== "no" ? imageStyle || undefined : undefined,
           visual_vibe: vibeId || undefined,
           topic_id: topicId || undefined,
           funnel_stage: GOALS.find((g) => g.id === goalId)?.funnel,
@@ -451,6 +455,37 @@ export function CampaignForm({
                 />
               </Field>
             </div>
+            {imageChoice !== "no" && (
+              <div className="mt-4">
+                <Section label="What kind of picture?">
+                  <ChipRow>
+                    <Chip
+                      active={imageStyle === ""}
+                      disabled={busy}
+                      onClick={() => setImageStyle("")}
+                    >
+                      Surprise me
+                    </Chip>
+                    {IMAGE_STYLE_CATALOG.map((s) => (
+                      <Chip
+                        key={s.id}
+                        active={imageStyle === s.id}
+                        disabled={busy}
+                        onClick={() => setImageStyle(s.id)}
+                      >
+                        {s.label}
+                      </Chip>
+                    ))}
+                  </ChipRow>
+                  <p className="mt-2 text-xs text-muted">
+                    {imageStyle
+                      ? IMAGE_STYLE_CATALOG.find((s) => s.id === imageStyle)
+                          ?.description
+                      : "A different style each time, matched to the vibe when you picked one."}
+                  </p>
+                </Section>
+              </div>
+            )}
           </Section>
         )}
 

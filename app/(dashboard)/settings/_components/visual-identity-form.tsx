@@ -18,6 +18,7 @@ import type {
   ContentImageStyle,
   VisualIdentity,
 } from "@/lib/db/types";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
   { value: "auto", label: "Auto (photos stay natural, everything else gets accents)" },
@@ -25,13 +26,11 @@ const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
   { value: "never", label: "Never force brand colors" },
 ];
 
-const IMAGE_STYLE_OPTIONS: { value: ContentImageStyle; label: string }[] = [
-  { value: "illustration", label: "Illustration" },
-  { value: "photo", label: "Photo" },
-  { value: "texture", label: "Brand texture" },
-  { value: "render3d", label: "Soft 3D" },
-  { value: "collage", label: "Collage" },
-  { value: "lineart", label: "Line art" },
+// "" = no pinned style: each draft rotates through varied styles (see
+// pickVariedImageStyle). A concrete value pins every auto image to one style.
+const IMAGE_STYLE_OPTIONS: { value: ContentImageStyle | ""; label: string }[] = [
+  { value: "", label: "Auto (a different style each time)" },
+  ...IMAGE_STYLE_CATALOG.map((s) => ({ value: s.id, label: s.label })),
 ];
 
 interface VisualIdentityFormProps {
@@ -77,8 +76,8 @@ export function VisualIdentityForm({
   // Auto image generation is on by default (see maybeAutoHeroImage); only an
   // explicit false in saved settings turns it off.
   const [autoImages, setAutoImages] = useState(vi.image_gen?.auto !== false);
-  const [imageStyle, setImageStyle] = useState<ContentImageStyle>(
-    vi.image_gen?.style ?? "illustration",
+  const [imageStyle, setImageStyle] = useState<ContentImageStyle | "">(
+    vi.image_gen?.style ?? "",
   );
   const [brandPalette, setBrandPalette] = useState<BrandPalettePref>(
     vi.image_gen?.brand_palette ?? "auto",
@@ -131,7 +130,9 @@ export function VisualIdentityForm({
             },
             image_gen: {
               auto: autoImages,
-              style: imageStyle,
+              // "" (Auto) saves no style at all, which is what lets each
+              // draft rotate through varied styles instead of pinning one.
+              style: imageStyle || undefined,
               brand_palette: brandPalette,
             },
           },
@@ -311,10 +312,15 @@ export function VisualIdentityForm({
         </label>
         {autoImages && (
           <div className="mt-3 max-w-xs">
-            <Field label="Default style">
+            <Field
+              label="Default style"
+              hint="Auto keeps your emails from all looking the same; pick a style to lock every image to it."
+            >
               <Select
                 value={imageStyle}
-                onChange={(e) => setImageStyle(e.target.value as ContentImageStyle)}
+                onChange={(e) =>
+                  setImageStyle(e.target.value as ContentImageStyle | "")
+                }
               >
                 {IMAGE_STYLE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>

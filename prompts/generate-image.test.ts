@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { ContentImageStyle, VisualVibe } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import {
+  IMAGE_STYLE_DESCRIPTIONS,
+  IMAGE_STYLE_LABELS,
+  VARIED_STYLE_POOL,
   VISUAL_VIBE_IMAGE_STYLE,
   buildFinalImagePrompt,
   buildImagePromptMessages,
+  pickVariedImageStyle,
   resolveBrandPalette,
 } from "./generate-image";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 const TOKENS: BrandTokens = {
   logo_url: null,
@@ -27,13 +32,9 @@ const TOKENS: BrandTokens = {
 describe("resolveBrandPalette", () => {
   it("defaults photo to none and every other style to accents", () => {
     expect(resolveBrandPalette("photo")).toBe("none");
-    const others: ContentImageStyle[] = [
-      "illustration",
-      "texture",
-      "render3d",
-      "collage",
-      "lineart",
-    ];
+    const others = IMAGE_STYLE_CATALOG.map((s) => s.id).filter(
+      (id) => id !== "photo",
+    );
     for (const style of others) {
       expect(resolveBrandPalette(style)).toBe("accents");
     }
@@ -79,16 +80,8 @@ describe("buildFinalImagePrompt", () => {
     expect(illustrationPrompt).toContain(TOKENS.colors.accent);
   });
 
-  it("never leaves the {SCENE} or {COLOR} placeholders unfilled", () => {
-    const styles: ContentImageStyle[] = [
-      "illustration",
-      "photo",
-      "texture",
-      "render3d",
-      "collage",
-      "lineart",
-    ];
-    for (const style of styles) {
+  it("never leaves the {SCENE} or {COLOR} placeholders unfilled, for every catalog style", () => {
+    for (const { id: style } of IMAGE_STYLE_CATALOG) {
       for (const mode of ["accents", "none"] as const) {
         const prompt = buildFinalImagePrompt(style, "a desk", TOKENS, undefined, mode);
         expect(prompt).not.toContain("{SCENE}");
@@ -96,6 +89,37 @@ describe("buildFinalImagePrompt", () => {
         expect(prompt).not.toContain("{PALETTE}");
       }
     }
+  });
+});
+
+describe("style catalog", () => {
+  it("has a label and description for every style", () => {
+    for (const { id } of IMAGE_STYLE_CATALOG) {
+      expect(IMAGE_STYLE_LABELS[id]).toBeTruthy();
+      expect(IMAGE_STYLE_DESCRIPTIONS[id]).toBeTruthy();
+    }
+  });
+});
+
+describe("pickVariedImageStyle", () => {
+  it("always returns a style from the varied pool", () => {
+    for (let i = 0; i < 20; i++) {
+      expect(VARIED_STYLE_POOL).toContain(pickVariedImageStyle(`draft-${i}`));
+    }
+    expect(VARIED_STYLE_POOL).toContain(pickVariedImageStyle());
+  });
+
+  it("is deterministic for the same seed (a retried draft keeps its style)", () => {
+    const seed = "11111111-2222-3333-4444-555555555555";
+    expect(pickVariedImageStyle(seed)).toBe(pickVariedImageStyle(seed));
+  });
+
+  it("actually varies across different seeds", () => {
+    const seen = new Set<ContentImageStyle>();
+    for (let i = 0; i < 40; i++) {
+      seen.add(pickVariedImageStyle(`seed-${i}-${i * 7}`));
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 });
 

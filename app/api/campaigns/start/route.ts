@@ -12,10 +12,12 @@ import {
 } from "@/lib/db/queries";
 import type {
   CampaignBrief,
+  ContentImageStyle,
   EmailLengthPreference,
   FunnelStage,
   VisualVibe,
 } from "@/lib/db/types";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -45,6 +47,7 @@ interface StartCampaignBody {
   length?: string;
   include_image?: boolean;
   visual_vibe?: string;
+  image_style?: string;
   topic_id?: string;
   funnel_stage?: string;
 }
@@ -109,6 +112,9 @@ export async function POST(req: NextRequest) {
         : {}),
       ...(VIBES.includes(body.visual_vibe as VisualVibe)
         ? { visual_vibe: body.visual_vibe as VisualVibe }
+        : {}),
+      ...(IMAGE_STYLE_CATALOG.some((s) => s.id === body.image_style)
+        ? { image_style: body.image_style as ContentImageStyle }
         : {}),
     };
 

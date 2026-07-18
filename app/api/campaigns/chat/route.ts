@@ -46,6 +46,7 @@ import {
 } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
+import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 
 // A chat turn is short, but give the strategist headroom for thinking.
 export const maxDuration = 120;
@@ -410,6 +411,12 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   }
   if (typeof input.include_image === "boolean") {
     next.include_image = input.include_image;
+  }
+  if (
+    input.image_style &&
+    IMAGE_STYLE_CATALOG.some((s) => s.id === input.image_style)
+  ) {
+    next.image_style = input.image_style;
   }
   return next;
 }
