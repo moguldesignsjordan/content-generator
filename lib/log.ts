@@ -2,7 +2,7 @@ import "server-only";
 import { debitForUsage } from "@/lib/billing/credits";
 import { getAdminClient, isSupabaseConfigured } from "@/lib/db/client";
 import { isMissingColumnError, isMissingTableError } from "@/lib/db/table-guard";
-import { IMAGE_COST_USD, priceUsage } from "@/lib/pipeline/cost";
+import { imageCostUsd, priceUsage } from "@/lib/pipeline/cost";
 import type { AppLogLevel, PromptProvider } from "@/lib/db/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ export function logImageUsage(
   count = 1,
   opts?: UsageOpts,
 ): void {
-  const realUsd = count * IMAGE_COST_USD;
+  const realUsd = count * imageCostUsd(model);
   console.log(`[usage:${source}] images=${count} (~$${realUsd.toFixed(3)})`);
   void insertLog({
     level: "usage",

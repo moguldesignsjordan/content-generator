@@ -81,10 +81,18 @@ export interface BrandFooter {
 // stay natural, graphic styles get brand accents), "always"/"never" force it.
 export type BrandPalettePref = "auto" | "always" | "never";
 
+/** Which Gemini image model renders generated images: a quality/cost tier,
+ * not a raw model id (ids live in lib/clients/gemini-image.ts and stay
+ * swappable without touching stored prefs). "standard" is today's model. */
+export type ImageModelTier = "lite" | "standard" | "pro";
+
 export interface ImageGenPrefs {
   auto?: boolean;
   style?: ContentImageStyle;
   brand_palette?: BrandPalettePref;
+  /** Brand-default render model tier; unset = "standard". A per-image choice
+   * in the image sheet overrides it for that render only. */
+  model?: ImageModelTier;
 }
 
 export interface VisualIdentity {

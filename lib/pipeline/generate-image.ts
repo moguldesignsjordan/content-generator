@@ -7,9 +7,9 @@ import {
   logUsage,
 } from "@/lib/clients/anthropic";
 import {
-  IMAGE_MODEL,
   generateGeminiImage,
   isGeminiConfigured,
+  resolveImageModel,
 } from "@/lib/clients/gemini-image";
 import { getAdminClient } from "@/lib/db/client";
 import { createMediaAsset } from "@/lib/db/queries";
@@ -27,6 +27,7 @@ import type {
   BrandPaletteMode,
   ContentImage,
   ContentImageStyle,
+  ImageModelTier,
   ImagePromptMode,
   ReferenceUse,
   VisualVibe,
@@ -87,6 +88,9 @@ export interface GenerateContentImageArgs {
   emailType?: string;
   tone?: string;
   vibe?: VisualVibe;
+  /** Render-model quality tier (per-image choice or the brand's stored
+   * default); unset = the standard workhorse, today's behavior. */
+  modelTier?: ImageModelTier;
 }
 
 export interface GenerateContentImageResult {
@@ -205,13 +209,17 @@ export async function generateContentImage(
   }
 
   // 2. Render. 16:9 fits the 600px email column as a wide hero.
+  const imageModel = resolveImageModel(args.modelTier);
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: "16:9",
     reference,
+    model: imageModel,
   });
-  usage.push({ model: FAST_MODEL, images: 1 });
-  logImageUsage("image-render", IMAGE_MODEL, 1, {
+  // Image deltas carry the IMAGE model id so cost rollups price the render
+  // at the right tier (tokens are 0 on these, so token rates never apply).
+  usage.push({ model: imageModel, images: 1 });
+  logImageUsage("image-render", imageModel, 1, {
     brandId: args.brandId,
     draftId: args.draftId,
     metered: true,

@@ -18,7 +18,20 @@ const RATES: Record<string, ModelRates> = {
   [FAST_MODEL]: { inputPerMTok: 1, outputPerMTok: 5 },
 };
 
-export const IMAGE_COST_USD = 0.04; // ~ Gemini flash-image per render
+// Per-render estimates by image model (Gemini pricing, 2026-07). Image usage
+// deltas carry the IMAGE model id in `model` (tokens are always 0 on those
+// deltas, so the Claude token rates never misfire on them).
+export const IMAGE_COSTS_USD: Record<string, number> = {
+  "gemini-3.1-flash-lite-image": 0.02,
+  "gemini-3.1-flash-image": 0.045,
+  "gemini-3-pro-image": 0.134,
+};
+
+export const IMAGE_COST_USD = 0.045; // fallback for unknown/legacy image models
+
+export function imageCostUsd(model?: string): number {
+  return (model && IMAGE_COSTS_USD[model]) || IMAGE_COST_USD;
+}
 
 export interface UsageDelta {
   model: string;
@@ -71,7 +84,7 @@ export function accumulateUsage(
 ): DraftUsage {
   const base = current ?? emptyUsage();
   const images = delta.images ?? 0;
-  const usd = priceUsage(delta.model, delta) + images * IMAGE_COST_USD;
+  const usd = priceUsage(delta.model, delta) + images * imageCostUsd(delta.model);
 
   return {
     input_tokens: base.input_tokens + (delta.input_tokens ?? 0),

@@ -28,6 +28,7 @@ import type {
   ReferenceUse,
   TopicContext,
 } from "@/lib/db/types";
+import { isImageModelTier } from "@/lib/image-models";
 import type { UsageDelta } from "@/lib/pipeline/cost";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
@@ -231,6 +232,12 @@ export async function POST(
           ? (rawPalette as BrandPaletteMode)
           : undefined,
       );
+      // Per-render quality choice from the sheet; absent falls back to the
+      // brand's stored default tier (Settings → Visual identity).
+      const rawModel = form.get("model") as string | null;
+      const modelTier = isImageModelTier(rawModel)
+        ? rawModel
+        : topicCtx.brand.visual_identity?.image_gen?.model;
 
       const generated = await generateContentImage({
         tokens: resolveBrandTokens(topicCtx.brand),
@@ -248,6 +255,7 @@ export async function POST(
         reference,
         referenceUse,
         brandPalette,
+        modelTier,
       });
       image = {
         ...generated.image,

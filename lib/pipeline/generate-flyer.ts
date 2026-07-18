@@ -6,9 +6,9 @@ import {
   logUsage,
 } from "@/lib/clients/anthropic";
 import {
-  IMAGE_MODEL,
   generateGeminiImage,
   isGeminiConfigured,
+  resolveImageModel,
 } from "@/lib/clients/gemini-image";
 import {
   createMediaAsset,
@@ -290,13 +290,17 @@ export async function regenerateFlyerImage(args: {
         args.style,
       );
 
+  const imageModel = resolveImageModel(
+    args.ctx.brand.visual_identity?.image_gen?.model,
+  );
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: args.aspect,
     reference,
+    model: imageModel,
   });
-  usageDeltas.push({ model: FAST_MODEL, images: 1 });
-  logImageUsage("flyer-image-regenerate", IMAGE_MODEL, 1, {
+  usageDeltas.push({ model: imageModel, images: 1 });
+  logImageUsage("flyer-image-regenerate", imageModel, 1, {
     brandId: args.ctx.brand.id,
     draftId: args.draftId,
     metered: true,
@@ -358,13 +362,17 @@ async function renderFlyer(
     opts.style,
   );
 
+  const imageModel = resolveImageModel(
+    ctx.brand.visual_identity?.image_gen?.model,
+  );
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: opts.aspect,
     reference: reference ?? undefined,
+    model: imageModel,
   });
-  opts.usageDeltas.push({ model: FAST_MODEL, images: 1 });
-  logImageUsage("flyer-image", IMAGE_MODEL, 1, {
+  opts.usageDeltas.push({ model: imageModel, images: 1 });
+  logImageUsage("flyer-image", imageModel, 1, {
     brandId: ctx.brand.id,
     draftId: opts.draftId,
     metered: true,

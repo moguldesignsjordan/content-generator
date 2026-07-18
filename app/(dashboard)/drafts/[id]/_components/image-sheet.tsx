@@ -10,6 +10,7 @@ import type {
   MediaAsset,
 } from "@/lib/db/types";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import { IMAGE_MODEL_CATALOG } from "@/lib/image-models";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
 // steered by a reference image), upload your own, move it, or remove it.
@@ -183,6 +184,8 @@ export function ImageSheet({
   const [tab, setTab] = useState<"generate" | "upload" | "library">("generate");
   const [libraryAssets, setLibraryAssets] = useState<MediaAsset[] | null>(null);
   const [style, setStyle] = useState<string>("illustration");
+  // "" = the brand's stored default tier; a tap overrides for this render only.
+  const [modelTier, setModelTier] = useState<string>("");
   // null = follow the style's default (photos natural, graphic styles branded).
   const [brandColors, setBrandColors] = useState<BrandPaletteMode | null>(null);
   const [subject, setSubject] = useState("");
@@ -203,6 +206,7 @@ export function ImageSheet({
     if (!open) return;
     setTab("generate");
     setSubject("");
+    setModelTier("");
     setBrandColors(paletteUsed ?? null);
     setPromptMode("auto");
     setShowPrompt(false);
@@ -270,6 +274,7 @@ export function ImageSheet({
           // Only an explicit tap overrides the brand-level preference; the
           // untouched toggle lets the server resolve the default.
           if (brandColors) form.set("brandColors", brandColors);
+          if (modelTier) form.set("model", modelTier);
           if (subject.trim()) form.set("subject", subject.trim());
           if (promptMode === "exact") form.set("promptMode", "exact");
           if (opts?.exactPrompt) form.set("exactPrompt", opts.exactPrompt);
@@ -406,6 +411,33 @@ export function ImageSheet({
               {effectiveBrandColors === "accents"
                 ? "Your brand colors appear as accents in the image."
                 : "No brand colors forced in; the image keeps its natural palette."}
+            </p>
+          </div>
+          <div className="mt-3">
+            <p className="text-xs font-medium text-muted">Quality</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Chip
+                active={modelTier === ""}
+                disabled={busy}
+                onClick={() => setModelTier("")}
+              >
+                My default
+              </Chip>
+              {IMAGE_MODEL_CATALOG.map((m) => (
+                <Chip
+                  key={m.id}
+                  active={modelTier === m.id}
+                  disabled={busy}
+                  onClick={() => setModelTier(m.id)}
+                >
+                  {m.label}
+                </Chip>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted">
+              {modelTier
+                ? IMAGE_MODEL_CATALOG.find((m) => m.id === modelTier)?.description
+                : "Uses the model picked in Settings, Standard unless you changed it."}
             </p>
           </div>
           <div className="mt-3">

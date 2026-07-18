@@ -16,9 +16,14 @@ import type {
   BrandFonts,
   BrandPalettePref,
   ContentImageStyle,
+  ImageModelTier,
   VisualIdentity,
 } from "@/lib/db/types";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import {
+  DEFAULT_IMAGE_MODEL_TIER,
+  IMAGE_MODEL_CATALOG,
+} from "@/lib/image-models";
 
 const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
   { value: "auto", label: "Auto (photos stay natural, everything else gets accents)" },
@@ -79,6 +84,9 @@ export function VisualIdentityForm({
   const [imageStyle, setImageStyle] = useState<ContentImageStyle | "">(
     vi.image_gen?.style ?? "",
   );
+  const [imageModel, setImageModel] = useState<ImageModelTier>(
+    vi.image_gen?.model ?? DEFAULT_IMAGE_MODEL_TIER,
+  );
   const [brandPalette, setBrandPalette] = useState<BrandPalettePref>(
     vi.image_gen?.brand_palette ?? "auto",
   );
@@ -134,6 +142,7 @@ export function VisualIdentityForm({
               // draft rotate through varied styles instead of pinning one.
               style: imageStyle || undefined,
               brand_palette: brandPalette,
+              model: imageModel,
             },
           },
         }),
@@ -331,6 +340,26 @@ export function VisualIdentityForm({
             </Field>
           </div>
         )}
+        <div className="mt-3 max-w-xs">
+          <Field
+            label="Image quality"
+            hint={
+              IMAGE_MODEL_CATALOG.find((m) => m.id === imageModel)?.description
+            }
+          >
+            <Select
+              value={imageModel}
+              onChange={(e) => setImageModel(e.target.value as ImageModelTier)}
+            >
+              {IMAGE_MODEL_CATALOG.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                  {m.id === DEFAULT_IMAGE_MODEL_TIER ? " (default)" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
         <div className="mt-3 max-w-xs">
           <Field
             label="Brand colors in images"

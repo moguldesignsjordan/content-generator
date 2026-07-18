@@ -334,6 +334,7 @@ export async function maybeAutoHeroImage(
       emailType: emailContext?.emailType,
       tone: emailContext?.tone,
       vibe,
+      modelTier: prefs?.model,
     });
     usageDeltas.push(...generated.usage);
     return { ...generated.image, placement: "top" };
