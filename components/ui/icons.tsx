@@ -248,3 +248,17 @@ export const QrCodeIcon = (p: IconProps) => (
     <path d="M19 14h2v2M14 19h2M19 19h2v2h-2z" />
   </Svg>
 );
+
+export const MoreGridIcon = (p: IconProps) => (
+  <Svg {...p} strokeWidth={0} fill="currentColor">
+    <circle cx="5.5" cy="5.5" r="1.9" />
+    <circle cx="12" cy="5.5" r="1.9" />
+    <circle cx="18.5" cy="5.5" r="1.9" />
+    <circle cx="5.5" cy="12" r="1.9" />
+    <circle cx="12" cy="12" r="1.9" />
+    <circle cx="18.5" cy="12" r="1.9" />
+    <circle cx="5.5" cy="18.5" r="1.9" />
+    <circle cx="12" cy="18.5" r="1.9" />
+    <circle cx="18.5" cy="18.5" r="1.9" />
+  </Svg>
+);
