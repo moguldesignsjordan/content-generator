@@ -238,3 +238,13 @@ export const CreditIcon = (p: IconProps) => (
     <path d="M12 7v10M9.5 9.5c0-1.1 1.12-2 2.5-2s2.5.7 2.5 1.75-1.12 1.75-2.5 1.75-2.5.65-2.5 1.75S10.62 15 12 15s2.5-.9 2.5-2" />
   </Svg>
 );
+
+export const QrCodeIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1.2" />
+    <rect x="14" y="3" width="7" height="7" rx="1.2" />
+    <rect x="3" y="14" width="7" height="7" rx="1.2" />
+    <path d="M14 14h3v3h-3z" />
+    <path d="M19 14h2v2M14 19h2M19 19h2v2h-2z" />
+  </Svg>
+);
