@@ -327,6 +327,11 @@ export function buildBriefStateBlock(
     }`,
     `  Vibe: ${brief.visual_vibe ?? "(not set)"}`,
     `  Product photo: ${brief.product_photo_url ? "attached, will be the hero as-is" : "(none)"}`,
+    `  Photos in the email: ${
+      brief.photo_urls?.length
+        ? `${brief.photo_urls.length} attached, each will be placed in the email`
+        : "(none)"
+    }`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }

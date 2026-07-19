@@ -362,6 +362,13 @@ export interface CampaignBrief {
    * known-good URL: the selected product's stored image_url, or a photo the
    * user uploaded through the interview, never invented by the model. */
   product_photo_url?: string;
+  /** Real, already-hosted photos the user attached in chat (uploaded or
+   * picked from the media library) to place INSIDE the email, in order.
+   * Generation places every one; a code backstop splices any it missed.
+   * Distinct from product_photo_url (the hero): these can be several and
+   * land in the body. Same URL rule: only echoed from an attached-image
+   * notice or the library, never invented. */
+  photo_urls?: string[];
   /** A real number, result, or story the user gave, to point at near-verbatim
    * instead of the model inventing one. The anti-fabrication rule in
    * generate-email.ts RULES is the floor; this is the ceiling it can reach for. */

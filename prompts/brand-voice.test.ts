@@ -120,10 +120,23 @@ describe("buildBriefStateBlock", () => {
     expect(block).toContain("Product photo: attached, will be the hero as-is");
   });
 
+  it("reports attached photos with a count", () => {
+    const block = buildBriefStateBlock(
+      {
+        photo_urls: ["https://example.com/a.jpg", "https://example.com/b.jpg"],
+      } as CampaignBrief,
+      null,
+    );
+    expect(block).toContain(
+      "Photos in the email: 2 attached, each will be placed in the email",
+    );
+  });
+
   it("shows the not-set defaults when the brief is empty", () => {
     const block = buildBriefStateBlock({} as CampaignBrief, null);
     expect(block).toContain("Vibe: (not set)");
     expect(block).toContain("Product photo: (none)");
+    expect(block).toContain("Photos in the email: (none)");
     expect(block).toContain("Proof: (not set)");
     expect(block).toContain("Hook: (not set)");
     expect(block).toContain("Reader belief: (not set)");

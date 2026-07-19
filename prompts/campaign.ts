@@ -42,6 +42,7 @@ export interface UpdateBriefInput {
   image_style?: ContentImageStyle;
   email_style?: EmailStyleId;
   product_photo_url?: string;
+  photo_urls?: string[];
   use_ai_image_instead?: boolean;
   proof?: string;
   hook?: string;
@@ -176,11 +177,23 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "in a system note or tool result you just received (e.g. an " +
           "'uploaded a product photo' notice). NEVER invent or guess a URL.",
       },
+      photo_urls: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "EXACT URLs of photos the user wants placed INSIDE the email, " +
+          "verbatim from the attached-image list on their message. Pass the " +
+          "COMPLETE list each time (it replaces the saved one); order is the " +
+          "order they'll appear. Use product_photo_url for THE product hero; " +
+          "use this for everything else, or for several photos at once. " +
+          "NEVER invent or guess a URL.",
+      },
       use_ai_image_instead: {
         type: "boolean",
         description:
           "Set true when the user rejects the auto-attached product photo " +
-          "and wants an AI-generated image instead. Clears product_photo_url.",
+          "and wants an AI-generated image instead. Clears product_photo_url " +
+          "and photo_urls.",
       },
       proof: {
         type: "string",

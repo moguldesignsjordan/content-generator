@@ -430,6 +430,30 @@ export function buildOfferBlock(
 }
 
 /**
+ * The user's attached photos (brief.photo_urls), rendered as a hard placement
+ * instruction. The pipeline's ensureBriefPhotos backstop splices any the
+ * model skips, but model placement is much better (it weaves them between the
+ * right sections with real alt text), so the prompt asks first. Empty string
+ * when none are attached, so the prompt is unchanged.
+ */
+export function buildBriefPhotosBlock(brief?: CampaignBrief | null): string {
+  const urls = brief?.photo_urls;
+  if (!urls?.length) return "";
+  return [
+    `PHOTOS TO PLACE (${urls.length} real photo${urls.length === 1 ? "" : "s"} the user attached for THIS email; every`,
+    "single one MUST appear in the html, each exactly once, in this order):",
+    ...urls.map((u, i) => `  ${i + 1}. ${u}`),
+    "- Use each as a real <img> with the exact src URL above, never a CSS",
+    "  background image. display:block, width 100% of the card (max-width:100%),",
+    "  height auto, and a short meaningful alt written from the email's content.",
+    "- Place them where they support the copy: between body sections, beside the",
+    "  offer, above the CTA. Spread them out; never stack them all in one place.",
+    "- These are the user's own photos: never crop notes about them into the",
+    "  copy, never invent extra images beyond these plus the hero.",
+  ].join("\n");
+}
+
+/**
  * The reviewer's thumbs history, rendered as taste examples. Liked emails are
  * studied for their qualities (never copied); disliked ones become explicit
  * anti-patterns. Empty string when nothing has been rated, so the prompt is
@@ -638,6 +662,7 @@ export function buildEmailMessages(
       ? `CALL TO ACTION (use this intent, write the button text in brand voice): ${ctaText}`
       : "CALL TO ACTION: a soft invitation to reply or learn more.",
     buildOfferBlock(ctx, opts.brief),
+    buildBriefPhotosBlock(opts.brief),
     ctx.product?.url
       ? `CTA URL: use the offer link above when the CTA points at the offer.`
       : `CTA URL: leave blank unless the related offer implies an obvious destination.`,

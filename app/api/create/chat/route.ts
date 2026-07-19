@@ -63,6 +63,7 @@ import {
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
+import { MAX_BRIEF_PHOTOS } from "@/lib/email/brief-photos";
 import {
   emailHtmlToText,
   joinReplySegments,
@@ -128,7 +129,7 @@ function withImageBlocks(
   return [
     {
       type: "text",
-      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL.`,
+      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order).`,
     },
     ...images.map((url) => ({
       type: "image" as const,
@@ -481,8 +482,16 @@ async function dispatchTool(
       if (state.brief.product_photo_url) {
         saved.push("product_photo_url=(attached, will be used as the hero image)");
       }
+      if (Array.isArray(input.photo_urls)) {
+        const count = state.brief.photo_urls?.length ?? 0;
+        saved.push(
+          count
+            ? `photo_urls=(${count} photo${count === 1 ? "" : "s"} attached, each will be placed in the email)`
+            : "photo_urls cleared",
+        );
+      }
       if (input.use_ai_image_instead === true) {
-        saved.push("product_photo_url cleared, an AI image will be generated instead");
+        saved.push("product_photo_url and photo_urls cleared, an AI image will be generated instead");
       }
       if (input.campaign_kind === "single") {
         saved.push("campaign_kind cleared, back to a single email");
@@ -702,6 +711,11 @@ async function dispatchTool(
             ...(productPhotoUrl
               ? { product_photo_url: productPhotoUrl, include_image: true }
               : {}),
+            // Photos the user attached for the campaign ride into every
+            // email of the series (they asked for them in these emails).
+            ...(state.brief.photo_urls?.length
+              ? { photo_urls: state.brief.photo_urls }
+              : {}),
           },
         });
         created.push({
@@ -877,8 +891,24 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
     next.product_photo_url = input.product_photo_url.trim();
     next.include_image = true;
   }
+  // Replace semantics (the model resends the whole list), same URL guard as
+  // product_photo_url, deduped and capped so a runaway call can't balloon
+  // the brief. An explicit empty array clears the list.
+  if (Array.isArray(input.photo_urls)) {
+    const urls = Array.from(
+      new Set(
+        input.photo_urls
+          .filter((u): u is string => typeof u === "string")
+          .map((u) => u.trim())
+          .filter(isHttpUrl),
+      ),
+    ).slice(0, MAX_BRIEF_PHOTOS);
+    if (urls.length) next.photo_urls = urls;
+    else delete next.photo_urls;
+  }
   if (input.use_ai_image_instead === true) {
     delete next.product_photo_url;
+    delete next.photo_urls;
   }
   // Campaign mode is an explicit enum, entered and left deliberately:
   // "single" drops the whole campaign interview state (kind, products,

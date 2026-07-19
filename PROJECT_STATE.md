@@ -7,10 +7,40 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-18 (campaign per-product plans + email names — see
-session below; also still open: **migrations 020 AND 021 need applying in the
-Supabase SQL editor** — until 021 is applied, prompt capture silently no-ops
-and /prompts stays empty; until 020, rating an email 500s).
+Last updated: 2026-07-19 (multiple photos in an email + chat library picker —
+see session below; also still open: **migrations 020 AND 021 need applying in
+the Supabase SQL editor** — until 021 is applied, prompt capture silently
+no-ops and /prompts stays empty; until 020, rating an email 500s).
+
+## Session 2026-07-19: multiple photos in an email + chat library picker
+
+Jordan's ask: attach several photos in the create chat (upload or pull from
+the media library) and have ALL of them placed in the generated email, not
+just one hero. Verified with `npm run typecheck` + `npm test` (421) +
+`npm run build`, all green. UNCOMMITTED; browser click-through open (needs a
+real login; Playwright MCP off by default).
+
+- **Brief:** new `CampaignBrief.photo_urls` (string[], max 6, validated
+  isHttpUrl, replace semantics, deduped; `use_ai_image_instead` clears it).
+  `update_brief` gained the field; BRIEF SO FAR shows a "Photos in the
+  email: N attached" line; brief card shows a photo count.
+- **Generation:** `buildBriefPhotosBlock` (prompts/generate-email.ts) lists
+  the URLs as a hard "place every one" instruction; new
+  `lib/email/brief-photos.ts` `ensureBriefPhotos` is the code backstop that
+  splices any the model skipped (before CTA → footer → </body>), tagged
+  `data-region="photo"` so `removeHeroImage` can't eat them. Runs in
+  renderEmailForContext (fresh + regenerate + template fallback). When
+  photos are attached and there's no product_photo_url, the AI auto-hero is
+  skipped: the photos ARE the imagery.
+- **Series:** `photo_urls` carries into every series email's series_brief.
+- **Chat UI (create-agent.tsx):** new photo button on the composer opens a
+  media-library Sheet (GET /api/media, lazy, cached) — tap to stage/unstage
+  images onto pendingImages with no re-upload; the paperclip now accepts
+  MULTIPLE photos in one pick (single uploading flag covers the batch so
+  Send can't fire half-staged).
+- **Agent prompt:** ATTACHED IMAGES + stage 11 + campaign c11 + Auto mode
+  all teach photo_urls ("photos for the email itself" vs product hero vs
+  style reference).
 
 ## Session 2026-07-18 (later): campaign per-product plans + email names
 

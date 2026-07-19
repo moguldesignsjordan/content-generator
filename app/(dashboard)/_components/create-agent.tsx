@@ -11,10 +11,12 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AccentSpinner, Button, Logo, Select, useToast } from "@/components/ui";
+import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
+  CheckIcon,
   CloseIcon,
   FlyerIcon,
+  ImageIcon,
   MailIcon,
   MegaphoneIcon,
   PaperclipIcon,
@@ -24,7 +26,13 @@ import {
 import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { useGenerationStream } from "@/lib/use-generation-stream";
-import type { BlogType, EmailType, FunnelStage, SeriesDraftRef } from "@/lib/db/types";
+import type {
+  BlogType,
+  EmailType,
+  FunnelStage,
+  MediaAsset,
+  SeriesDraftRef,
+} from "@/lib/db/types";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
 // unset, generation derives the type from the topic as before; picking one
@@ -94,6 +102,7 @@ interface BriefCard {
   ctaLabel: string | null;
   visualVibe: string | null;
   hasProductPhoto: boolean;
+  photoCount: number;
 }
 
 interface Option {
@@ -167,6 +176,11 @@ export function CreateAgent({
   // image content with the next message so the agent can actually see them
   // (vision) instead of the image being diverted client-side.
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  // The media-library picker: stages already-hosted images from /media onto
+  // the composer without re-uploading. Assets are fetched lazily on first
+  // open, then cached for the session.
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryAssets, setLibraryAssets] = useState<MediaAsset[] | null>(null);
   // Guided runs the staged chip interview (default); Auto fills the brief
   // silently from context and stops so the user presses Generate.
   const [mode, setMode] = useState<"guided" | "auto">(initial?.auto ? "auto" : "guided");
@@ -220,34 +234,66 @@ export function CreateAgent({
   }
 
   /**
-   * A real image: hosted as-is (no AI, no design analysis) and staged as a
-   * thumbnail on the composer. It rides with the NEXT message as a real
-   * image block, so the agent actually sees it (vision) and decides what it
-   * is: a product photo, a design to match, a screenshot of notes, etc.
+   * Real images: hosted as-is (no AI, no design analysis) and staged as
+   * thumbnails on the composer. They ride with the NEXT message as real
+   * image blocks, so the agent actually sees them (vision) and decides what
+   * each is: a product photo, photos for the email, a design to match, etc.
+   * One uploading flag covers the whole batch so a multi-photo pick can't be
+   * half-sent while the tail is still uploading.
    */
-  async function uploadPendingImage(file: File) {
+  async function uploadPendingImages(files: File[]) {
     setUploading(true);
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/uploads/image", { method: "POST", body });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that image.");
-      setPendingImages((imgs) => [...imgs, { url: data.url!, name: file.name }]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't upload that image.");
+      for (const file of files) {
+        try {
+          const body = new FormData();
+          body.append("file", file);
+          const res = await fetch("/api/uploads/image", { method: "POST", body });
+          const data = (await res.json()) as { url?: string; error?: string };
+          if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that image.");
+          setPendingImages((imgs) => [...imgs, { url: data.url!, name: file.name }]);
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Couldn't upload that image.");
+        }
+      }
     } finally {
       setUploading(false);
     }
   }
 
-  /** The paperclip: takes anything a non-technical user might have on hand. */
-  function handleAttachFile(file: File) {
-    if (file.type.startsWith("image/")) {
-      void uploadPendingImage(file);
-      return;
+  /** The paperclip: takes anything a non-technical user might have on hand,
+   * several photos at once included. */
+  function handleAttachFiles(files: File[]) {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) attachTextFile(file);
     }
-    attachTextFile(file);
+    if (images.length) void uploadPendingImages(images);
+  }
+
+  useEffect(() => {
+    if (!libraryOpen || libraryAssets !== null) return;
+    let cancelled = false;
+    fetch("/api/media")
+      .then((res) => res.json())
+      .then((data: { assets?: MediaAsset[] }) => {
+        if (!cancelled) setLibraryAssets(data.assets ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryAssets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryOpen, libraryAssets]);
+
+  /** Tapping a library image toggles it on/off the composer's staged set. */
+  function toggleLibraryImage(asset: MediaAsset) {
+    setPendingImages((imgs) =>
+      imgs.some((i) => i.url === asset.url)
+        ? imgs.filter((i) => i.url !== asset.url)
+        : [...imgs, { url: asset.url, name: asset.alt ?? "Saved image" }],
+    );
   }
 
   const empty = messages.length === 0;
@@ -459,7 +505,8 @@ export function CreateAgent({
               }}
               onSend={() => send(input)}
               onPlus={() => setActionsOpen((v) => !v)}
-              onAttachFile={handleAttachFile}
+              onAttachFiles={handleAttachFiles}
+              onOpenLibrary={() => setLibraryOpen(true)}
               uploading={uploading}
               ready={ready}
               disabled={loading || generating}
@@ -583,7 +630,8 @@ export function CreateAgent({
                 }
               }}
               onSend={() => send(input)}
-              onAttachFile={handleAttachFile}
+              onAttachFiles={handleAttachFiles}
+              onOpenLibrary={() => setLibraryOpen(true)}
               uploading={uploading}
               ready={ready}
               disabled={loading || generating}
@@ -595,6 +643,60 @@ export function CreateAgent({
           </div>
         </>
       )}
+
+      <Sheet
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        title="Your saved images"
+        description="Tap to add photos to your message. They'll be placed in the email."
+        size="lg"
+      >
+        {libraryAssets === null ? (
+          <p className="mt-3 text-[12.5px] text-muted">Loading…</p>
+        ) : libraryAssets.length === 0 ? (
+          <p className="mt-3 text-[12.5px] text-muted">
+            Nothing saved yet. Images you upload or generate show up here to
+            reuse later, for free.
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {libraryAssets.map((asset) => {
+              const staged = pendingImages.some((i) => i.url === asset.url);
+              return (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => toggleLibraryImage(asset)}
+                  aria-pressed={staged}
+                  className={cn(
+                    "relative h-[76px] w-[100px] shrink-0 overflow-hidden rounded-xl border text-left transition-colors",
+                    staged ? "border-accent ring-2 ring-accent/40" : "border-border hover:border-accent",
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={asset.url}
+                    alt={asset.alt ?? ""}
+                    className="h-full w-full object-cover"
+                  />
+                  {staged && (
+                    <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white">
+                      <CheckIcon size={12} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {pendingImages.length > 0 && (
+          <div className="mt-4 flex justify-end">
+            <Button variant="gradient" size="sm" onClick={() => setLibraryOpen(false)}>
+              Done ({pendingImages.length} added)
+            </Button>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
@@ -642,7 +744,8 @@ function ComposerBar({
   onKeyDown,
   onSend,
   onPlus,
-  onAttachFile,
+  onAttachFiles,
+  onOpenLibrary,
   uploading,
   ready,
   disabled,
@@ -656,10 +759,13 @@ function ComposerBar({
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
   onPlus?: () => void;
-  /** Attach an example: a text/HTML/eml file drops into the composer as an
-   * email to READ like; an image stages a thumbnail and sends with the next
-   * message so the agent can actually see it (vision). */
-  onAttachFile?: (file: File) => void;
+  /** Attach examples/photos: a text/HTML/eml file drops into the composer as
+   * an email to READ like; images (several at once welcome) stage thumbnails
+   * and send with the next message so the agent can actually see them
+   * (vision). */
+  onAttachFiles?: (files: File[]) => void;
+  /** Opens the media-library picker to stage saved images without re-uploading. */
+  onOpenLibrary?: () => void;
   /** An attached image is still uploading. */
   uploading?: boolean;
   ready: boolean;
@@ -710,14 +816,14 @@ function ComposerBar({
           <PlusIcon size={20} />
         </button>
       )}
-      {onAttachFile && (
+      {onAttachFiles && (
         <>
           <button
             type="button"
             onClick={() => attachRef.current?.click()}
             disabled={uploading}
-            aria-label="Attach a photo or an example email"
-            title="Attach a photo or an example email"
+            aria-label="Attach photos or an example email"
+            title="Attach photos or an example email"
             className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground disabled:opacity-50"
           >
             {uploading ? <AccentSpinner size={14} /> : <PaperclipIcon size={18} />}
@@ -725,19 +831,31 @@ function ComposerBar({
           <input
             ref={attachRef}
             type="file"
+            multiple
             // image/* first and unrestricted: a phone screenshot can be HEIC,
             // and naming only png/jpeg/webp made the picker grey out real
             // photos. Text-ish files stage as "write like this"; images stage
-            // as a thumbnail and send with the next message (vision).
+            // as thumbnails and send with the next message (vision).
             accept="image/*,.txt,.md,.html,.htm,.eml,text/plain,text/html,message/rfc822"
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onAttachFile(file);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length) onAttachFiles(files);
               e.target.value = "";
             }}
           />
         </>
+      )}
+      {onOpenLibrary && (
+        <button
+          type="button"
+          onClick={onOpenLibrary}
+          aria-label="Add a photo from your saved images"
+          title="Add a photo from your saved images"
+          className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
+        >
+          <ImageIcon size={18} />
+        </button>
       )}
       <div className="relative min-w-0 flex-1 self-center">
         <textarea
@@ -1044,6 +1162,13 @@ function BriefCardView({
           />
         ))}
       </div>
+
+      {card.photoCount > 0 && (
+        <p className="mt-2 px-1 text-[12px] text-muted">
+          {card.photoCount} photo{card.photoCount === 1 ? "" : "s"} attached, each
+          will be placed in this email
+        </p>
+      )}
 
       {/* Batch apply: send every pending row edit through the agent at once
           instead of one field per round-trip. Hidden until something changes. */}

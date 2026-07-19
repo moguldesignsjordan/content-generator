@@ -14,7 +14,7 @@
 
 import type { ContentImage } from "@/lib/db/types";
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -39,7 +39,7 @@ function renderHeroImageRow(img: ContentImage): string {
 }
 
 /** Index of the '<' opening the first element carrying `attr`, or -1. */
-function elementStart(html: string, attr: string): number {
+export function elementStart(html: string, attr: string): number {
   const attrIdx = html.indexOf(attr);
   if (attrIdx === -1) return -1;
   return html.lastIndexOf("<", attrIdx);
@@ -55,7 +55,7 @@ function tagNameAt(html: string, start: number): string | null {
  * elements regions are put on; a wrong guess degrades to a placement
  * fallback, never a corrupt document).
  */
-function elementEnd(html: string, attr: string): number {
+export function elementEnd(html: string, attr: string): number {
   const start = elementStart(html, attr);
   if (start === -1) return -1;
   const tag = tagNameAt(html, start);
@@ -70,7 +70,7 @@ function elementEnd(html: string, attr: string): number {
  * sibling row. Returns the original bounds (and isRow: false) for anchors
  * that aren't table cells, e.g. untagged fallback <h1>/<div> documents.
  */
-function widenToRow(
+export function widenToRow(
   html: string,
   start: number,
   end: number,

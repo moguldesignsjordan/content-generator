@@ -12,6 +12,7 @@ type NonTextField =
   | "image_style"
   | "email_style"
   | "product_photo_url"
+  | "photo_urls"
   | "use_ai_image_instead"
   | "style_example"
   | "campaign_kind";

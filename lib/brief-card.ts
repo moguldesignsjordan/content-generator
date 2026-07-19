@@ -37,6 +37,8 @@ export interface CreateBriefCard {
   ctaLabel: string | null;
   visualVibe: VisualVibe | null;
   hasProductPhoto: boolean;
+  /** How many attached photos (brief.photo_urls) will be placed in the email. */
+  photoCount: number;
 }
 
 /**
@@ -92,6 +94,7 @@ export function buildBriefCard(args: {
     ctaLabel: resolveCtaLabel(brand, strategy, funnelStage),
     visualVibe: brief.visual_vibe ?? null,
     hasProductPhoto: Boolean(brief.product_photo_url),
+    photoCount: brief.photo_urls?.length ?? 0,
   };
 }
 

@@ -36,6 +36,7 @@ import {
 import { hasDarkModeSupport } from "@/lib/email/preview-mode";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
 import { ensureBrandLogo } from "@/lib/email/footer-logo";
+import { ensureBriefPhotos } from "@/lib/email/brief-photos";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
 import type {
   CampaignBrief,
@@ -140,6 +141,8 @@ export async function generateEmailForTopicStreamed(
       ctx,
       parsed,
       templateId,
+      undefined,
+      brief,
     );
 
     // Brand-level opt-in (asked during onboarding): auto-create the hero
@@ -156,7 +159,16 @@ export async function generateEmailForTopicStreamed(
     // be lifted here when the user opted in).
     const isSeriesEmail = Boolean(opts.briefOverride);
     const wantsImage = brief?.include_image === true;
-    const skipImage = brief?.include_image === false || (isSeriesEmail && !wantsImage);
+    // Attached photos (brief.photo_urls) ARE this email's imagery: they're
+    // placed by the prompt + ensureBriefPhotos, so no AI hero is conjured on
+    // top of them. A product_photo_url still takes the hero slot as before
+    // (photos then land inline alongside it). An AI image is always a tap
+    // away on the review screen if the user wants one anyway.
+    const hasAttachedPhotos = Boolean(brief?.photo_urls?.length);
+    const skipImage =
+      brief?.include_image === false ||
+      (isSeriesEmail && !wantsImage) ||
+      (hasAttachedPhotos && !brief?.product_photo_url);
 
     // A real product photo (the mapped product's own image, or one the user
     // uploaded in the interview) wins over AI generation: it's the actual
@@ -511,6 +523,7 @@ function renderEmailForContext(
   parsed: EmailDraftOutput,
   templateId: EmailTemplateId,
   heroImage?: ContentImage,
+  brief?: CampaignBrief | null,
 ): {
   content: EmailDraftContent;
   copy: EmailCopy;
@@ -570,6 +583,10 @@ function renderEmailForContext(
   // Region tagging runs BEFORE the unsubscribe guarantee so the fallback
   // unsubscribe <p> (appended bare, structural) never gets tagged editable.
   html = ensureUnsubscribeTag(ensureEditableRegions(stripEmDashes(html)));
+  // The user's attached photos: the prompt asked the model to place every
+  // one; this splices any it skipped (and covers the template fallback,
+  // which knows nothing about them).
+  html = ensureBriefPhotos(html, brief?.photo_urls);
 
   // A regeneration keeps the prior hero image: the prompt asks the model to
   // place it, but the code path guarantees it regardless of compliance (and
@@ -799,6 +816,7 @@ export async function regenerateEmailDraft(
     parsed,
     templateId,
     heroImage,
+    brief,
   );
 
   const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
