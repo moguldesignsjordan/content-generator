@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import {
   countRegion,
@@ -54,10 +54,9 @@ export async function POST(
     const regionIndex =
       typeof body.regionIndex === "number" ? body.regionIndex : 0;
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
 
     // Don't let the last body block go — an email needs some content.
     if (body.region === "body" && countRegion(draftCtx.content.html, "body") <= 1) {

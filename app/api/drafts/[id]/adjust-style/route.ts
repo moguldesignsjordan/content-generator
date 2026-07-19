@@ -5,6 +5,7 @@ import {
   undoLastStyleEdit,
 } from "@/lib/pipeline/adjust-style";
 import { guardDraftAiRoute } from "@/lib/ai-guard";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 // No thinking, no copy regeneration: comfortably faster than the full
@@ -22,6 +23,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const result = await getStyleEditHistory(id);
     if (!result) {
       return NextResponse.json({ error: "Draft not found." }, { status: 404 });
@@ -45,6 +48,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const { instruction, region, regionLabel, snippet } = (await req.json()) as {
       instruction?: string;
       region?: string;
@@ -101,6 +106,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const result = await undoLastStyleEdit(id);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });

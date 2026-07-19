@@ -1,6 +1,8 @@
+import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { listDrafts } from "@/lib/db/queries";
-import { Card } from "@/components/ui";
+import { getSingleBrand, listDrafts } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
+import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { DraftsList } from "../_components/drafts-list";
 
@@ -18,9 +20,27 @@ export default async function BlogsPage() {
     );
   }
 
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
+  const brand = await getSingleBrand(user.id);
+  if (!brand) {
+    return (
+      <Card className="p-7 text-center">
+        <h1 className="font-display text-xl font-semibold">No brand yet</h1>
+        <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
+          Build your brand profile first, then your blog posts will show up here.
+        </p>
+        <LinkButton href="/onboarding" variant="gradient" className="mt-5">
+          Start onboarding
+        </LinkButton>
+      </Card>
+    );
+  }
+
   let drafts: Awaited<ReturnType<typeof listDrafts>>;
   try {
-    drafts = await listDrafts({ jobType: "blog" });
+    drafts = await listDrafts(brand.id, { jobType: "blog" });
   } catch (err) {
     return (
       <Card className="p-7">

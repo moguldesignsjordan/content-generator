@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminClient, isSupabaseConfigured } from "@/lib/db/client";
-import { deleteStyleReference, getStyleReference } from "@/lib/db/queries";
+import { deleteStyleReference, getSingleBrand, getStyleReference } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 const BUCKET = "style-references";
@@ -21,8 +22,17 @@ export async function DELETE(
 
   const { id } = await params;
   try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand) {
+      return NextResponse.json({ error: "No brand found." }, { status: 404 });
+    }
+
     const style = await getStyleReference(id);
-    if (!style) {
+    if (!style || style.brand_id !== brand.id) {
       return NextResponse.json({ error: "Style not found." }, { status: 404 });
     }
 

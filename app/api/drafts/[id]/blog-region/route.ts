@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getDraftWithJobContext,
-  getTopicContext,
-  updateDraftContent,
-} from "@/lib/db/queries";
+import { getTopicContext, updateDraftContent } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { htmlToMarkdown } from "@/lib/blog/from-html";
 import { sanitizeEditedFragment } from "@/lib/editor/sanitize-fragment";
@@ -52,10 +49,9 @@ export async function POST(
       );
     }
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
     if (draftCtx.jobType !== "blog") {
       return NextResponse.json(
         { error: "Only blog drafts have article copy to edit." },

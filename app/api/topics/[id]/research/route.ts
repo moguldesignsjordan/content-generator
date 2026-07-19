@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDataForSeoConfigured } from "@/lib/clients/dataforseo";
 import { researchKeyword } from "@/lib/keyword/research";
-import { getTopicContext, updateTopicKeywordData } from "@/lib/db/queries";
+import { getSingleBrand, getTopicContext, updateTopicKeywordData } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 export const maxDuration = 60;
@@ -23,8 +24,16 @@ export async function POST(
   }
   try {
     const { id } = await params;
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand) {
+      return NextResponse.json({ error: "No brand found." }, { status: 404 });
+    }
     const ctx = await getTopicContext(id);
-    if (!ctx) {
+    if (!ctx || ctx.brand.id !== brand.id) {
       return NextResponse.json({ error: "Topic not found." }, { status: 404 });
     }
     if (!ctx.topic.target_keyword?.trim()) {

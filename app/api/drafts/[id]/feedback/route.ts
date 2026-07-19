@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext, setDraftFeedback } from "@/lib/db/queries";
+import { setDraftFeedback } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
-import { getSessionUser } from "@/lib/supabase/server";
 
 // Thumbs up/down on a draft. Unlike approve/reject this is judgment-only: it
 // never changes the draft's state, it teaches the generator what the user
@@ -14,10 +14,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const user = await getSessionUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
 
     const body = (await req.json().catch(() => ({}))) as {
       feedback?: unknown;
@@ -35,11 +33,6 @@ export async function POST(
       typeof body.note === "string" && body.note.trim()
         ? body.note.trim().slice(0, 300)
         : null;
-
-    const draft = await getDraftWithJobContext(id);
-    if (!draft) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
 
     await setDraftFeedback(id, feedback, note);
     return NextResponse.json({ ok: true, feedback, note: feedback ? note : null });

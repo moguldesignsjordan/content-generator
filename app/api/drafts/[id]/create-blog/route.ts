@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import {
-  createDraftShell,
-  getDraftWithJobContext,
-  getTopicContext,
-} from "@/lib/db/queries";
+import { createDraftShell, getTopicContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 
 /**
  * Spins a blog draft off an existing (email) draft, no re-briefing: resolves
@@ -33,8 +30,10 @@ export async function POST(
 
   const { id: sourceDraftId } = await params;
 
-  const source = await getDraftWithJobContext(sourceDraftId);
-  if (!source || !source.topicId) {
+  const access = await requireDraftInBrand(sourceDraftId);
+  if (!access.ok) return access.response;
+  const source = access.draft;
+  if (!source.topicId) {
     return NextResponse.json(
       { error: "This draft has no topic to build a blog post from." },
       { status: 404 },

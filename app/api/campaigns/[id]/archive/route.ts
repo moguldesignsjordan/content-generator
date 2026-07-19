@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { archiveCampaign } from "@/lib/db/queries";
+import { requireCampaignInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 /**
@@ -12,6 +13,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireCampaignInBrand(id);
+    if (!access.ok) return access.response;
     await archiveCampaign(id, true);
     return NextResponse.json({ archived: true });
   } catch (err) {
@@ -27,6 +30,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const access = await requireCampaignInBrand(id);
+    if (!access.ok) return access.response;
     await archiveCampaign(id, false);
     return NextResponse.json({ archived: false });
   } catch (err) {

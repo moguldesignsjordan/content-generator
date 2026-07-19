@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getDraftWithJobContext,
-  getMediaAsset,
-  getTopicContext,
-  updateDraftContent,
-} from "@/lib/db/queries";
+import { getMediaAsset, getTopicContext, updateDraftContent } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { resolveBrandTokens } from "@/lib/email/templates";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import { accumulateUsage } from "@/lib/pipeline/cost";
@@ -125,10 +121,9 @@ export async function POST(
     }
     const mode = (form.get("mode") ?? "generate") as string;
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
     const topicCtx = await getTopicContext(draftCtx.topicId);
     if (!topicCtx) {
       return NextResponse.json({ error: "Topic not found." }, { status: 404 });
@@ -334,10 +329,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
 
     if (draftCtx.jobType === "blog") {
       if (!draftCtx.meta.hero_image) {

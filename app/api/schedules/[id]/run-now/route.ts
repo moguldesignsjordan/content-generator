@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getContentSchedule } from "@/lib/db/queries";
+import { getContentSchedule, getSingleBrand } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { runDueSchedule } from "@/lib/pipeline/run-schedule";
 
 // Manual trigger for testing without waiting on the daily cron tick. Same
@@ -12,8 +13,16 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const brand = await getSingleBrand(user.id);
+  if (!brand) {
+    return NextResponse.json({ error: "No brand found" }, { status: 404 });
+  }
   const schedule = await getContentSchedule(id);
-  if (!schedule) {
+  if (!schedule || schedule.brand_id !== brand.id) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   }
   const result = await runDueSchedule(schedule);

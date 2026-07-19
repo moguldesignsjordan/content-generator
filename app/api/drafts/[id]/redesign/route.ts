@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { redesignEmail } from "@/lib/pipeline/redesign";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 // No thinking, no copywriting: cheap despite regenerating the whole
@@ -23,6 +24,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const { direction } = (await req.json().catch(() => ({}))) as {
       direction?: string;
     };

@@ -565,25 +565,36 @@ export async function getDraftGenerationState(
 /** Loads the minimal context the regeneration pipeline needs for a draft. */
 export async function getDraftWithJobContext(
   draftId: string,
+  brandId?: string,
 ): Promise<DraftJobContext | null> {
   const db = getAdminClient();
 
   // Falls back to a campaign-less select before migration 002 adds the column.
-  let { data, error } = await db
+  // Pass brandId at any entry point that resolves a draft id from an
+  // untrusted caller (an API route acting on a session user's request): it
+  // scopes the lookup to content_jobs.brand_id so one brand's session can
+  // never read or act on another brand's draft, and a mismatch returns null,
+  // same as a nonexistent id, so callers can't distinguish "not yours" from
+  // "doesn't exist." (See lib/draft-access.ts, the shared route-layer guard.)
+  // Internal pipeline code that receives a draftId already authorized by its
+  // caller's route omits brandId and gets the unscoped lookup.
+  let primary = db
     .from("drafts")
     .select(
-      `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type, email_type, blog_type)`,
+      `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type, email_type, blog_type, brand_id)`,
     )
-    .eq("id", draftId)
-    .maybeSingle();
+    .eq("id", draftId);
+  if (brandId) primary = primary.eq("content_jobs.brand_id", brandId);
+  let { data, error } = await primary.maybeSingle();
   if (error) {
-    ({ data, error } = await db
+    let fallback = db
       .from("drafts")
       .select(
-        `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type, email_type, blog_type)`,
+        `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type, email_type, blog_type, brand_id)`,
       )
-      .eq("id", draftId)
-      .maybeSingle());
+      .eq("id", draftId);
+    if (brandId) fallback = fallback.eq("content_jobs.brand_id", brandId);
+    ({ data, error } = await fallback.maybeSingle());
   }
   if (error) throw error;
   if (!data) return null;
@@ -1010,28 +1021,32 @@ export async function persistRegeneratedDraft(args: {
 /** Loads a draft with its topic title for the review screen. */
 export async function getDraftForReview(
   draftId: string,
+  brandId: string,
 ): Promise<DraftForReview | null> {
   const db = getAdminClient();
 
   // Falls back to progressively slimmer selects before migrations 003
   // (archived), 020 (feedback), and 023 (feedback_note) add their columns, so
-  // this doesn't hard-break every draft page in the meantime.
+  // this doesn't hard-break every draft page in the meantime. Always scoped
+  // to content_jobs.brand_id (see getDraftWithJobContext for why).
   let { data, error } = await db
     .from("drafts")
     .select(
       `id, version, state, content, meta, seo_data, archived, feedback, feedback_note, created_at,
-       content_jobs!inner ( type, topics ( title ) )`,
+       content_jobs!inner ( type, brand_id, topics ( title ) )`,
     )
     .eq("id", draftId)
+    .eq("content_jobs.brand_id", brandId)
     .maybeSingle();
   if (error) {
     ({ data, error } = await db
       .from("drafts")
       .select(
         `id, version, state, content, meta, seo_data, archived, feedback, created_at,
-         content_jobs!inner ( type, topics ( title ) )`,
+         content_jobs!inner ( type, brand_id, topics ( title ) )`,
       )
       .eq("id", draftId)
+      .eq("content_jobs.brand_id", brandId)
       .maybeSingle());
   }
   if (error) {
@@ -1039,9 +1054,10 @@ export async function getDraftForReview(
       .from("drafts")
       .select(
         `id, version, state, content, meta, seo_data, created_at,
-         content_jobs!inner ( type, topics ( title ) )`,
+         content_jobs!inner ( type, brand_id, topics ( title ) )`,
       )
       .eq("id", draftId)
+      .eq("content_jobs.brand_id", brandId)
       .maybeSingle());
   }
   if (error) throw error;
@@ -1539,6 +1555,20 @@ export async function ensureStrategyAndPrimaryIcp(
   return { strategy, primaryIcp };
 }
 
+/** The brand an ICP belongs to (icp -> strategy -> brand_id), or null if the
+ * ICP doesn't exist. Used to confirm ownership before an edit. */
+export async function getIcpBrandId(icpId: string): Promise<string | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("icps")
+    .select("strategies!inner ( brand_id )")
+    .eq("id", icpId)
+    .maybeSingle();
+  if (error) throw error;
+  const strategy = (data as { strategies?: { brand_id?: string } | null } | null)?.strategies;
+  return strategy?.brand_id ?? null;
+}
+
 /** Updates an ICP's label and profile. */
 export async function updateIcp(
   icpId: string,
@@ -1876,6 +1906,7 @@ export async function updateCampaign(
  * list can show "From {email}" without an N+1 per row.
  */
 export async function listDrafts(
+  brandId: string,
   options?: { jobType?: ContentJobType },
 ): Promise<DraftListRow[]> {
   const db = getAdminClient();
@@ -1885,11 +1916,16 @@ export async function listDrafts(
   let error: { message: string } | null;
 
   // Primary select (post-migration-003, includes archived). Scoped to one kind
-  // when jobType is given (the Emails/Blogs tabs each pass theirs).
-  let primary = db.from("drafts").select(
-    `id, version, state, archived, created_at, content, meta,
-     content_jobs!inner ( type, topics ( title ) )`,
-  );
+  // when jobType is given (the Emails/Blogs tabs each pass theirs), and
+  // always scoped to the caller's brand via content_jobs.brand_id so one
+  // account never sees another brand's drafts.
+  let primary = db
+    .from("drafts")
+    .select(
+      `id, version, state, archived, created_at, content, meta,
+     content_jobs!inner ( type, brand_id, topics ( title ) )`,
+    )
+    .eq("content_jobs.brand_id", brandId);
   if (jobType) primary = primary.eq("content_jobs.type", jobType);
   ({ data, error } = await primary
     .order("created_at", { ascending: false })
@@ -1897,10 +1933,13 @@ export async function listDrafts(
 
   if (error) {
     // Fallback: archived-less select for DBs predating migration 003.
-    let fallback = db.from("drafts").select(
-      `id, version, state, created_at, content, meta,
-       content_jobs!inner ( type, topics ( title ) )`,
-    );
+    let fallback = db
+      .from("drafts")
+      .select(
+        `id, version, state, created_at, content, meta,
+       content_jobs!inner ( type, brand_id, topics ( title ) )`,
+      )
+      .eq("content_jobs.brand_id", brandId);
     if (jobType) fallback = fallback.eq("content_jobs.type", jobType);
     ({ data, error } = await fallback
       .order("created_at", { ascending: false })
@@ -1976,30 +2015,35 @@ export async function getDraftSubject(draftId: string): Promise<string | null> {
  */
 export async function getBlogDraftFromEmail(
   emailDraftId: string,
+  brandId: string,
 ): Promise<{ draftId: string; subject: string } | null> {
-  return getSpinoffDraft(emailDraftId, "blog");
+  return getSpinoffDraft(emailDraftId, "blog", brandId);
 }
 
 /** The flyer spun off the given email draft (if any), same idea as
  * getBlogDraftFromEmail: turns "Create flyer" into a link once one exists. */
 export async function getFlyerDraftFromEmail(
   emailDraftId: string,
+  brandId: string,
 ): Promise<{ draftId: string; subject: string } | null> {
-  return getSpinoffDraft(emailDraftId, "social");
+  return getSpinoffDraft(emailDraftId, "social", brandId);
 }
 
 /** A draft of the given kind whose meta.source_draft_id points at the email.
- * Kind-scoped because blogs AND flyers both spin off emails now. */
+ * Kind-scoped because blogs AND flyers both spin off emails now, and
+ * brand-scoped so this can't be used to probe another brand's drafts. */
 async function getSpinoffDraft(
   emailDraftId: string,
   jobType: ContentJobType,
+  brandId: string,
 ): Promise<{ draftId: string; subject: string } | null> {
   const db = getAdminClient();
   const { data, error } = await db
     .from("drafts")
-    .select("id, content, content_jobs!inner ( type )")
+    .select("id, content, content_jobs!inner ( type, brand_id )")
     .eq("meta->>source_draft_id", emailDraftId)
     .eq("content_jobs.type", jobType)
+    .eq("content_jobs.brand_id", brandId)
     .limit(1)
     .maybeSingle();
   if (error) throw error;
@@ -2236,6 +2280,20 @@ export async function listReferenceEmails(
   return (data ?? []) as ReferenceEmail[];
 }
 
+export async function getReferenceEmail(id: string): Promise<ReferenceEmail | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("reference_emails")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as ReferenceEmail) ?? null;
+}
+
 export async function createReferenceEmail(args: {
   brandId: string;
   name: string;
@@ -2363,7 +2421,7 @@ export async function deleteDraft(draftId: string): Promise<void> {
 }
 
 /** Every topic with its pillar, for the assistant's context and Home stats. */
-export async function listTopics(): Promise<
+export async function listTopics(brandId: string): Promise<
   Array<{
     id: string;
     title: string;
@@ -2373,9 +2431,39 @@ export async function listTopics(): Promise<
   }>
 > {
   const db = getAdminClient();
+
+  // Walked in steps (strategy -> pillars -> clusters -> topics) rather than a
+  // nested-filter select so this stays scoped to the caller's brand: topics
+  // has no brand_id of its own, and without this a query for "all topics"
+  // would hand back every brand's topics, not just this one's.
+  const { data: strategy, error: stratErr } = await db
+    .from("strategies")
+    .select("id")
+    .eq("brand_id", brandId)
+    .maybeSingle();
+  if (stratErr) throw stratErr;
+  if (!strategy) return [];
+
+  const { data: pillars, error: pillarErr } = await db
+    .from("pillars")
+    .select("id")
+    .eq("strategy_id", strategy.id);
+  if (pillarErr) throw pillarErr;
+  const pillarIds = (pillars ?? []).map((p) => p.id as string);
+  if (pillarIds.length === 0) return [];
+
+  const { data: clusters, error: clusterErr } = await db
+    .from("clusters")
+    .select("id")
+    .in("pillar_id", pillarIds);
+  if (clusterErr) throw clusterErr;
+  const clusterIds = (clusters ?? []).map((c) => c.id as string);
+  if (clusterIds.length === 0) return [];
+
   const { data, error } = await db
     .from("topics")
     .select(`id, title, funnel_stage, status, clusters ( pillars ( name ) )`)
+    .in("cluster_id", clusterIds)
     .order("created_at", { ascending: false });
   if (error) throw error;
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { applyCtaHref } from "@/lib/email/inline-style";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
 import { logError } from "@/lib/log";
@@ -28,10 +28,9 @@ export async function POST(
     const body = (await req.json().catch(() => ({}))) as { url?: string };
     const url = typeof body.url === "string" ? body.url : "";
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
 
     const html = applyCtaHref(draftCtx.content.html, url);
     const extraMeta = draftCtx.meta.email_copy

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAdminClient, isSupabaseConfigured } from "@/lib/db/client";
-import { deleteCompetitorReference, getCompetitorReference } from "@/lib/db/queries";
+import {
+  deleteCompetitorReference,
+  getCompetitorReference,
+  getSingleBrand,
+} from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 const BUCKET = "content-images";
@@ -22,8 +27,17 @@ export async function DELETE(
 
   const { id } = await params;
   try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand) {
+      return NextResponse.json({ error: "No brand found." }, { status: 404 });
+    }
+
     const reference = await getCompetitorReference(id);
-    if (!reference) {
+    if (!reference || reference.brand_id !== brand.id) {
       return NextResponse.json({ error: "Competitor ad not found." }, { status: 404 });
     }
 

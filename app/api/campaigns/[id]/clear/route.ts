@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateCampaign } from "@/lib/db/queries";
+import { requireCampaignInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 /**
@@ -14,6 +15,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireCampaignInBrand(id);
+    if (!access.ok) return access.response;
     await updateCampaign(id, { status: "done" });
     return NextResponse.json({ cleared: true });
   } catch (err) {

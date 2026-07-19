@@ -1,5 +1,6 @@
 import { guardDraftAiRoute } from "@/lib/ai-guard";
-import { getDraftWithJobContext, getTopicContext } from "@/lib/db/queries";
+import { getTopicContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { isRunActive, joinRun } from "@/lib/pipeline/generation-runs";
 import type { GenerationEvent } from "@/lib/pipeline/generate";
 
@@ -17,10 +18,9 @@ export async function GET(
 ) {
   const { id: draftId } = await params;
 
-  const draftCtx = await getDraftWithJobContext(draftId);
-  if (!draftCtx) {
-    return new Response("Draft not found", { status: 404 });
-  }
+  const access = await requireDraftInBrand(draftId);
+  if (!access.ok) return access.response;
+  const draftCtx = access.draft;
 
   const generation = draftCtx.meta.generation;
   const alreadyReady = generation ? generation.status === "ready" : Boolean(draftCtx.content.html);

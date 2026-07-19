@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
     const [products, topics] = await Promise.all([
       listProducts(brand.id),
-      listTopics(),
+      listTopics(brand.id),
     ]);
 
     // Only keep an offer slug that resolves to a real product.

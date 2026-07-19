@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPerformanceForDraft, refreshPerformance } from "@/lib/pipeline/performance";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 // Plan 2 analytics loop. POST re-fetches from the destination (MailerLite
@@ -14,6 +15,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const metrics = await refreshPerformance(id);
     return NextResponse.json({ metrics });
   } catch (err) {
@@ -29,6 +32,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const metrics = await getPerformanceForDraft(id);
     return NextResponse.json({ metrics });
   } catch (err) {

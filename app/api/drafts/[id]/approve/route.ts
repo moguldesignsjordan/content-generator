@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { approveDraft, getDraftWithJobContext, getSingleBrand } from "@/lib/db/queries";
+import { approveDraft, getSingleBrand } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { findBannedTerms } from "@/lib/email/quality";
 import type { DraftMeta, EmailDraftContent } from "@/lib/db/types";
 import { logError } from "@/lib/log";
@@ -21,10 +22,9 @@ export async function POST(
     // or superseded by a newer version) isn't a valid approve target, even if
     // a stale client re-submits. Checked here, not just via the client's
     // disabled button, since that can be bypassed or out of sync.
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
     if (draftCtx.state !== "in_review") {
       return NextResponse.json(
         {

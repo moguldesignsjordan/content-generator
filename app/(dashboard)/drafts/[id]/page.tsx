@@ -33,7 +33,9 @@ export default async function DraftReviewPage({
   const { id } = await params;
   const user = await getSessionUser();
   if (!user) redirect("/login");
-  const draft = await getDraftForReview(id);
+  const brand = await getSingleBrand(user.id);
+  if (!brand) notFound();
+  const draft = await getDraftForReview(id, brand.id);
   if (!draft) notFound();
 
   const generation = draft.meta.generation;
@@ -71,10 +73,10 @@ export default async function DraftReviewPage({
   }
 
   const existingBlog = isEmail
-    ? await getBlogDraftFromEmail(id).catch(() => null)
+    ? await getBlogDraftFromEmail(id, brand.id).catch(() => null)
     : null;
   const existingFlyer = isEmail
-    ? await getFlyerDraftFromEmail(id).catch(() => null)
+    ? await getFlyerDraftFromEmail(id, brand.id).catch(() => null)
     : null;
 
   // The blog publish card shows when Sanity is reachable through the brand's

@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createContentSchedule, listContentSchedules } from "@/lib/db/queries";
+import { createContentSchedule, getSingleBrand, listContentSchedules } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import type { BlogType, Cadence, ContentJobType, EmailType } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 
 export async function GET(req: NextRequest) {
-  const brandId = req.nextUrl.searchParams.get("brandId");
-  if (!brandId) {
+  const requestedBrandId = req.nextUrl.searchParams.get("brandId");
+  if (!requestedBrandId) {
     return NextResponse.json({ error: "brandId is required" }, { status: 400 });
   }
-  const schedules = await listContentSchedules(brandId);
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const brand = await getSingleBrand(user.id);
+  if (!brand || brand.id !== requestedBrandId) {
+    return NextResponse.json({ error: "No brand found" }, { status: 404 });
+  }
+  const schedules = await listContentSchedules(brand.id);
   return NextResponse.json({ schedules });
 }
 
@@ -27,8 +36,16 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand || brand.id !== body.brandId) {
+      return NextResponse.json({ error: "No brand found" }, { status: 404 });
+    }
     const schedule = await createContentSchedule({
-      brandId: body.brandId,
+      brandId: brand.id,
       channel: body.channel,
       cadence: body.cadence,
       emailType: body.emailType,

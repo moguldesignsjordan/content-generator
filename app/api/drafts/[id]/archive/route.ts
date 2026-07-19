@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { archiveDraft } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 /**
@@ -12,6 +13,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     await archiveDraft(id, true);
     return NextResponse.json({ archived: true });
   } catch (err) {
@@ -27,6 +30,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     await archiveDraft(id, false);
     return NextResponse.json({ archived: false });
   } catch (err) {

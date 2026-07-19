@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDraftWithJobContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { locateRegion, replaceRegionInner } from "@/lib/email/inline-style";
 import { sanitizeEditedFragment } from "@/lib/editor/sanitize-fragment";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
@@ -58,10 +58,9 @@ export async function POST(
       );
     }
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
 
     const currentHtml = draftCtx.content.html;
     const located = locateRegion(currentHtml, region, regionIndex);

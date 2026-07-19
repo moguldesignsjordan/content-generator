@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateIcp } from "@/lib/db/queries";
+import { getIcpBrandId, getSingleBrand, updateIcp } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import type { IcpProfile } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 
@@ -9,6 +10,19 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand) {
+      return NextResponse.json({ error: "No brand found." }, { status: 404 });
+    }
+    const icpBrandId = await getIcpBrandId(id);
+    if (!icpBrandId || icpBrandId !== brand.id) {
+      return NextResponse.json({ error: "ICP not found." }, { status: 404 });
+    }
+
     const { label, profile } = (await req.json()) as {
       label: string;
       profile: IcpProfile;

@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isGeminiConfigured } from "@/lib/clients/gemini-image";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import {
-  createDraftShell,
-  getDraftWithJobContext,
-  getTopicContext,
-} from "@/lib/db/queries";
+import { createDraftShell, getTopicContext } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { guardAiRoute } from "@/lib/ai-guard";
 
 /**
@@ -38,8 +35,10 @@ export async function POST(
 
   const { id: sourceDraftId } = await params;
 
-  const source = await getDraftWithJobContext(sourceDraftId);
-  if (!source || !source.topicId) {
+  const access = await requireDraftInBrand(sourceDraftId);
+  if (!access.ok) return access.response;
+  const source = access.draft;
+  if (!source.topicId) {
     return NextResponse.json(
       { error: "This draft has no topic to build a flyer from." },
       { status: 404 },

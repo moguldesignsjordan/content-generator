@@ -25,10 +25,12 @@ export default async function NewFlyerPage() {
   let topics: Awaited<ReturnType<typeof listTopics>> = [];
   let styles: Awaited<ReturnType<typeof listStyleReferences>> = [];
   try {
-    topics = await listTopics();
     const user = await getSessionUser();
     const brand = user ? await getSingleBrand(user.id) : null;
-    if (brand) styles = await listStyleReferences(brand.id);
+    if (brand) {
+      topics = await listTopics(brand.id);
+      styles = await listStyleReferences(brand.id);
+    }
   } catch {
     // Non-fatal: the form still works with an empty topic list (freeform path).
   }

@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createMediaAsset,
   getBrandByDraftId,
-  getDraftWithJobContext,
   getTopicContext,
   updateDraftContent,
 } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
 import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
@@ -50,10 +50,9 @@ export async function POST(
     }
     const mode = (form.get("mode") ?? "generate") as string;
 
-    const draftCtx = await getDraftWithJobContext(id);
-    if (!draftCtx) {
-      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    }
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
     if (draftCtx.jobType !== "social") {
       return NextResponse.json({ error: "Not a flyer draft." }, { status: 400 });
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { deleteReferenceEmail } from "@/lib/db/queries";
+import { deleteReferenceEmail, getReferenceEmail, getSingleBrand } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 export async function DELETE(
@@ -12,6 +13,18 @@ export async function DELETE(
   }
   try {
     const { id } = await params;
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    const brand = await getSingleBrand(user.id);
+    if (!brand) {
+      return NextResponse.json({ error: "No brand found." }, { status: 404 });
+    }
+    const reference = await getReferenceEmail(id);
+    if (!reference || reference.brand_id !== brand.id) {
+      return NextResponse.json({ error: "Reference email not found." }, { status: 404 });
+    }
     await deleteReferenceEmail(id);
     return NextResponse.json({ deleted: true });
   } catch (err) {

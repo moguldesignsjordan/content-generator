@@ -50,7 +50,7 @@ export async function POST() {
     const { brand, strategy, icps } = data;
     const [products, existing] = await Promise.all([
       listProducts(brand.id),
-      listTopics(),
+      listTopics(brand.id),
     ]);
 
     const { system, user } = buildSuggestTopicsMessages({

@@ -40,7 +40,7 @@ export default async function NewCampaignPage() {
 
   const [products, topics] = await Promise.all([
     listProducts(data.brand.id).catch(() => []),
-    listTopics().catch(() => []),
+    listTopics(data.brand.id).catch(() => []),
   ]);
 
   return (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDraftForReview } from "@/lib/db/queries";
+import { getDraftForReview, getSingleBrand } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import { logError } from "@/lib/log";
 
 // Streams the approved flyer back as an attachment. A route (not a plain
@@ -13,7 +14,16 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const draft = await getDraftForReview(id);
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const brand = await getSingleBrand(user.id);
+  if (!brand) {
+    return NextResponse.json({ error: "No brand found." }, { status: 404 });
+  }
+
+  const draft = await getDraftForReview(id, brand.id);
   if (!draft || draft.job_type !== "social") {
     return NextResponse.json({ error: "Flyer not found." }, { status: 404 });
   }

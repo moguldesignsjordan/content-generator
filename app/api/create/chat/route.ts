@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
 
     const [products, topics, memories] = await Promise.all([
       listProducts(brand.id),
-      listTopics(),
+      listTopics(brand.id),
       listBrandMemory(brand.id),
     ]);
 
@@ -775,7 +775,7 @@ async function dispatchTool(
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;
-      const rows = await listDrafts({ jobType: input.job_type });
+      const rows = await listDrafts(ctx.brand.id, { jobType: input.job_type });
       return JSON.stringify(
         rows.slice(0, 15).map((r) => ({
           id: r.id,
@@ -788,7 +788,7 @@ async function dispatchTool(
     }
     case "get_content": {
       const input = block.input as GetContentInput;
-      const draft = await getDraftForReview(input.draft_id);
+      const draft = await getDraftForReview(input.draft_id, ctx.brand.id);
       if (!draft) return `No draft found with id ${input.draft_id}.`;
       return JSON.stringify({
         id: draft.id,
@@ -803,13 +803,13 @@ async function dispatchTool(
     case "create_blog_from_email": {
       const input = block.input as CreateBlogFromEmailInput;
       // Never duplicate: reuse the existing spin-off if this email already has one.
-      const existing = await getBlogDraftFromEmail(input.source_draft_id);
+      const existing = await getBlogDraftFromEmail(input.source_draft_id, ctx.brand.id);
       if (existing) {
         state.draftId = existing.draftId;
         state.channel = "blog";
         return JSON.stringify({ draftId: existing.draftId, channel: "blog", reused: true });
       }
-      const source = await getDraftWithJobContext(input.source_draft_id);
+      const source = await getDraftWithJobContext(input.source_draft_id, ctx.brand.id);
       if (!source || !source.topicId) {
         return "That draft has no topic to build a blog post from.";
       }
@@ -828,13 +828,13 @@ async function dispatchTool(
     case "create_flyer_from_email": {
       const input = block.input as CreateFlyerFromEmailInput;
       // Same reuse-don't-duplicate contract as create_blog_from_email.
-      const existing = await getFlyerDraftFromEmail(input.source_draft_id);
+      const existing = await getFlyerDraftFromEmail(input.source_draft_id, ctx.brand.id);
       if (existing) {
         state.draftId = existing.draftId;
         state.channel = "social";
         return JSON.stringify({ draftId: existing.draftId, channel: "social", reused: true });
       }
-      const source = await getDraftWithJobContext(input.source_draft_id);
+      const source = await getDraftWithJobContext(input.source_draft_id, ctx.brand.id);
       if (!source || !source.topicId) {
         return "That draft has no topic to build a flyer from.";
       }

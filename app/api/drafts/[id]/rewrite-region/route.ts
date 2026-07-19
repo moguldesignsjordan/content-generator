@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { rewriteRegion } from "@/lib/pipeline/rewrite-region";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import { logError } from "@/lib/log";
 
 // Propose-only, so a single cheap model turn. No commit, no undo entry.
@@ -21,6 +22,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const body = (await req.json().catch(() => ({}))) as {
       label?: string;
       currentText?: string;

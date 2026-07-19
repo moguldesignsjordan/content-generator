@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { deleteDraft, getDraftWithJobContext, isJobPublished } from "@/lib/db/queries";
+import { deleteDraft, isJobPublished } from "@/lib/db/queries";
+import { requireDraftInBrand } from "@/lib/draft-access";
 
 /**
  * Hard-deletes a draft. Published drafts are blocked (409): once a piece of
@@ -13,10 +14,9 @@ export async function DELETE(
 ) {
   const { id } = await params;
 
-  const ctx = await getDraftWithJobContext(id);
-  if (!ctx) {
-    return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-  }
+  const access = await requireDraftInBrand(id);
+  if (!access.ok) return access.response;
+  const ctx = access.draft;
 
   if (ctx.jobId && (await isJobPublished(ctx.jobId))) {
     return NextResponse.json(

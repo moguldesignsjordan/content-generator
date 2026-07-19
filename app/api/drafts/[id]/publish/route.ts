@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publishDraft } from "@/lib/pipeline/publish";
+import { requireDraftInBrand } from "@/lib/draft-access";
 import type { PublishSchedule } from "@/lib/publishing/provider";
 import { logError } from "@/lib/log";
 
@@ -24,6 +25,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
     const body = (await req.json().catch(() => ({}))) as { target?: string };
     const outcome = await publishDraft(id, body.target, parseSchedule(body));
     return NextResponse.json(outcome);
