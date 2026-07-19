@@ -486,6 +486,29 @@ export function replaceCtaText(elementHtml: string, text: string): string {
   return elementHtml.slice(0, innerStart) + escaped + elementHtml.slice(innerEnd);
 }
 
+/**
+ * Swaps the href on the CTA button (the <a> inside the data-region="cta"
+ * wrapper every template and model-designed email tags) so editing the CTA
+ * link field updates the rendered button, no model call needed.
+ *
+ * Scoped to the CTA region's own markup: locating the region first and
+ * replacing only within its outerHTML means the replacement physically cannot
+ * leave it, and an anchorless CTA (unusual, but model designs vary) leaves the
+ * document alone instead of rewriting the first `<a href>` found elsewhere in
+ * the document (in practice, the unsubscribe link).
+ */
+export function applyCtaHref(html: string, url: string): string {
+  const href = url.trim() || "#";
+  const located = locateRegion(html, "cta", 0);
+  if (!located) return html;
+
+  const anchorHref = /(<a\s[^>]*\bhref=")[^"]*(")/i;
+  if (!anchorHref.test(located.outerHTML)) return html;
+
+  const next = located.outerHTML.replace(anchorHref, `$1${href}$2`);
+  return html.slice(0, located.start) + next + html.slice(located.end);
+}
+
 /** Best-effort readers for pre-filling native controls from an element's current inline style. Not authoritative. */
 export function guessStyleValue(elementHtml: string, prop: keyof StyleChanges): string | undefined {
   const cssProp = PROP_NAMES[prop];

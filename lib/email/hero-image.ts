@@ -19,10 +19,11 @@ export function esc(s: string): string {
 }
 
 function imageMarkup(img: ContentImage): string {
-  return (
+  const tag =
     `<img src="${esc(img.url)}" alt="${esc(img.alt)}" width="552" ` +
-    `style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:12px;" />`
-  );
+    `style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:12px;" />`;
+  const href = img.link_url?.trim();
+  return href ? `<a href="${esc(href)}" style="display:block;">${tag}</a>` : tag;
 }
 
 /** A standalone hero block, for non-table (untagged/fallback) documents. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Badge,
@@ -33,7 +33,7 @@ import {
   hasDarkModeSupport,
   type EmailPreviewMode,
 } from "@/lib/email/preview-mode";
-import { locateRegion } from "@/lib/email/inline-style";
+import { applyCtaHref } from "@/lib/email/inline-style";
 import { ThumbsDownIcon, ThumbsUpIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { DesignChat } from "./design-chat";
@@ -89,31 +89,6 @@ interface ReviewActionsProps {
   initialFeedback?: DraftFeedback | null;
 }
 
-/**
- * Swaps the href on the CTA button (the <a> inside the data-region="cta"
- * wrapper every template and model-designed email tags) so editing the CTA
- * link field updates the rendered button, no model call needed.
- *
- * Scoped to the CTA region's own markup. The previous version matched
- * `data-region="cta"[\s\S]*?<a ... href="` across the whole document, and that
- * `[\s\S]*?` was unbounded: when the CTA region contained no anchor, the match
- * ran straight past it and rewrote the first <a href> further down the
- * email — in practice the unsubscribe link in the footer. Locating the region
- * first means the replacement physically cannot leave it, and an anchorless CTA
- * now leaves the document alone instead of corrupting it.
- */
-function applyCtaHref(html: string, url: string): string {
-  const href = url.trim() || "#";
-  const located = locateRegion(html, "cta", 0);
-  if (!located) return html;
-
-  const anchorHref = /(<a\s[^>]*\bhref=")[^"]*(")/i;
-  if (!anchorHref.test(located.outerHTML)) return html;
-
-  const next = located.outerHTML.replace(anchorHref, `$1${href}$2`);
-  return html.slice(0, located.start) + next + html.slice(located.end);
-}
-
 export function ReviewActions({
   draftId,
   version,
@@ -146,6 +121,8 @@ export function ReviewActions({
   const [html, setHtml] = useState(initialContent.html);
   const initialCtaUrl = initialMeta.email_copy?.cta_url ?? "";
   const [ctaUrl, setCtaUrl] = useState(initialCtaUrl);
+  const [ctaSaving, setCtaSaving] = useState(false);
+  const lastCommittedCta = useRef(initialCtaUrl);
   // Open locked to LIGHT, not "auto": most subscribers read email in light
   // mode, and reviewers on a dark system kept seeing (and judging) the dark
   // variant first. Falls back to "auto" for drafts with no dark CSS to force.
@@ -159,12 +136,41 @@ export function ReviewActions({
 
   /**
    * Rewrites the button's href once the field is done being typed in, rather
-   * than on every keystroke: each keystroke used to run a document-wide regex
-   * over the email and mutate the html state, so a half-typed URL was being
-   * spliced in dozens of times per edit.
+   * than on every keystroke, and persists it to the draft right away (not
+   * just local state). Persisting matters: a redesign or Design Chat edit
+   * done before Approve rebuilds the email from the DB's stored
+   * meta.email_copy.cta_url, not from unsaved browser state, so a link that
+   * only lived in local state was getting silently dropped back to "#" the
+   * moment you tweaked the design afterward. Optimistic locally, so the field
+   * never feels laggy; the server response is still what actually lands in
+   * html so it can never drift from what's stored.
    */
   function commitCtaHref() {
+    const trimmed = ctaUrl.trim();
+    if (trimmed === lastCommittedCta.current.trim()) return;
+    lastCommittedCta.current = ctaUrl;
     setHtml((h) => applyCtaHref(h, ctaUrl));
+    setCtaSaving(true);
+    fetch(`/api/drafts/${draftId}/cta-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: ctaUrl }),
+    })
+      .then(async (res) => {
+        const data = (await res.json().catch(() => ({}))) as {
+          html?: string;
+          error?: string;
+        };
+        if (!res.ok || !data.html) {
+          throw new Error(data.error ?? "Couldn't save that link.");
+        }
+        setHtml(data.html);
+        setHistoryRefreshKey((k) => k + 1);
+      })
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : "Couldn't save that link.");
+      })
+      .finally(() => setCtaSaving(false));
   }
 
   function handleDownload() {
@@ -650,6 +656,15 @@ export function ReviewActions({
             onBlur={() => commitCtaHref()}
             placeholder="https://…"
           />
+          {ctaSaving ? (
+            <p className="mt-1.5 text-[11px] text-muted">Saving…</p>
+          ) : (
+            !ctaUrl.trim() && (
+              <p className="mt-1.5 text-[11px] text-warning">
+                No link set yet, the button won't go anywhere until you add one.
+              </p>
+            )
+          )}
         </Field>
       </Card>
 

@@ -7,10 +7,40 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-19 (multiple photos in an email + chat library picker —
+Last updated: 2026-07-19 (CTA link persistence fix + clickable hero image —
 see session below; also still open: **migrations 020 AND 021 need applying in
 the Supabase SQL editor** — until 021 is applied, prompt capture silently
 no-ops and /prompts stays empty; until 020, rating an email 500s).
+
+## Session 2026-07-19 (later): CTA link persistence fix + clickable hero image
+
+Jordan's ask: "my button didn't work" + "add links to images." Verified with
+`npm run typecheck` + `npm test` (430, up from 421) + `npm run build`, all
+green. **Not yet committed.** Browser click-through open (needs a real
+login; Playwright MCP off by default).
+
+- **Root cause of the dead button:** the CTA link field in the review
+  screen (`ReviewActions`) only lived in local React state until Approve —
+  Redesign and Design Chat edits rebuild the email from the DB's stored
+  `meta.email_copy.cta_url`, so setting a link and then tweaking the design
+  before approving silently reverted the button to whatever it pointed to
+  before (in practice "#"). Same class of bug `region-html`'s
+  `syncEmailCopy` already fixed for inline text edits, just never applied to
+  the CTA link field.
+- **Fix:** new `POST /api/drafts/[id]/cta-link` persists the href + synced
+  `email_copy.cta_url` immediately on blur (mirrors `region-html`), via
+  `commitHtmlEdit`. Moved `applyCtaHref` out of the client component into
+  `lib/email/inline-style.ts` (shared, testable, used by both the route and
+  the client's optimistic update). Also added a visible "no link set" warning
+  under the field so an intentionally-blank CTA isn't mistaken for a bug.
+- **Clickable images:** `ContentImage` gained `link_url?: string`;
+  `hero-image.ts`'s `imageMarkup` wraps the `<img>` in `<a href>` when set.
+  New "link" mode on `POST /api/drafts/[id]/image` (email drafts only, not
+  blog) sets/clears it and re-splices via the existing `spliceHeroImage`.
+  Image sheet gained a "Link (optional)" field + Save button, shown whenever
+  a hero image exists, wired through `EmailPreview` → `ImageSheet`.
+  Attached/brief photos (`brief-photos.ts`) were left out of scope: they have
+  no per-photo edit UI at all yet, unlike the hero image.
 
 ## Session 2026-07-19: multiple photos in an email + chat library picker
 

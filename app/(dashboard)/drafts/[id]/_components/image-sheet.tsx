@@ -163,6 +163,8 @@ export interface ImageSheetProps {
   promptUsed?: string;
   /** Whether the current image leaned on brand colors, if it was generated. */
   paletteUsed?: BrandPaletteMode;
+  /** The image's current click-through URL, if it has one (emails only). */
+  linkUrl?: string;
   /** Fresh HTML after any successful change; image is null after a remove. */
   onApplied: (html: string, image: ContentImage | null) => void;
   /** Fires alongside onApplied so sibling UI (the undo history) can refresh. */
@@ -178,6 +180,7 @@ export function ImageSheet({
   placement: currentPlacement,
   promptUsed,
   paletteUsed,
+  linkUrl: currentLinkUrl,
   onApplied,
   onEdited,
 }: ImageSheetProps) {
@@ -197,6 +200,7 @@ export function ImageSheet({
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadAlt, setUploadAlt] = useState("");
   const [placement, setPlacement] = useState<HeroPlacement>(currentPlacement ?? "top");
+  const [linkUrl, setLinkUrl] = useState(currentLinkUrl ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [upgradeUrl, setUpgradeUrl] = useState<string | null>(null);
@@ -217,8 +221,9 @@ export function ImageSheet({
     setUploadAlt("");
     setError(null);
     setPlacement(currentPlacement ?? "top");
+    setLinkUrl(currentLinkUrl ?? "");
     setLibraryAssets(null);
-  }, [open, currentPlacement, promptUsed, paletteUsed]);
+  }, [open, currentPlacement, promptUsed, paletteUsed, currentLinkUrl]);
 
   // Lazy-loaded on first visit to the Library tab, then cached for the sheet's
   // lifetime (a fresh sheet reset above clears it back to null).
@@ -244,9 +249,9 @@ export function ImageSheet({
     brandColors ?? (style === "photo" ? "none" : "accents");
 
   async function run(
-    action: "generate" | "upload" | "remove" | "move" | "reuse",
+    action: "generate" | "upload" | "remove" | "move" | "reuse" | "link",
     moveTo?: HeroPlacement,
-    opts?: { exactPrompt?: string; mediaAssetId?: string },
+    opts?: { exactPrompt?: string; mediaAssetId?: string; linkUrl?: string },
   ) {
     if (busy) return;
     if (action === "upload" && !uploadFile) {
@@ -269,6 +274,8 @@ export function ImageSheet({
           if (uploadAlt.trim()) form.set("alt", uploadAlt.trim());
         } else if (action === "reuse") {
           form.set("mediaAssetId", opts!.mediaAssetId!);
+        } else if (action === "link") {
+          form.set("linkUrl", opts?.linkUrl ?? "");
         } else if (action === "generate") {
           form.set("style", style);
           // Only an explicit tap overrides the brand-level preference; the
@@ -340,6 +347,32 @@ export function ImageSheet({
           Tap a position to move the image right away.
         </p>
       )}
+    </div>
+  );
+
+  const linkRow = kind === "email" && hasImage && (
+    <div className="mt-4">
+      <p className="text-xs font-medium text-muted">Link (optional)</p>
+      <div className="mt-2 flex items-center gap-2">
+        <Input
+          type="url"
+          value={linkUrl}
+          onChange={(e) => setLinkUrl(e.target.value)}
+          placeholder="https://…"
+          disabled={busy}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => run("link", undefined, { linkUrl: linkUrl.trim() })}
+        >
+          Save
+        </Button>
+      </div>
+      <p className="mt-1.5 text-[11px] text-muted">
+        Makes the image itself clickable; leave blank to remove the link.
+      </p>
     </div>
   );
 
@@ -503,6 +536,7 @@ export function ImageSheet({
             )}
           </div>
           {placementRow}
+          {linkRow}
           {hasImage && promptUsed && (
             <div className="mt-4 rounded-xl border border-border bg-surface-2 p-3">
               <button
@@ -582,6 +616,7 @@ export function ImageSheet({
             />
           </div>
           {placementRow}
+          {linkRow}
           <div className="mt-4 flex items-center gap-2">
             <Button
               variant="gradient"
@@ -625,6 +660,7 @@ export function ImageSheet({
             </div>
           )}
           {placementRow}
+          {linkRow}
           {removeButton && <div className="mt-4">{removeButton}</div>}
           <p className="mt-2 text-[11px] text-muted">
             Tap an image to use it here. Reusing a saved image is free.

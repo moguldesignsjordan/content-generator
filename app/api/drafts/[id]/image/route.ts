@@ -104,6 +104,8 @@ async function commitBlogHero(
  *    library asset as-is. No AI involved, no new storage object.
  *  - mode "move": { placement } re-places the existing hero instantly, no
  *    model call and no new image.
+ *  - mode "link": { linkUrl? } (email only) wraps the existing hero image in
+ *    an <a href>, or removes the wrap when linkUrl is blank. No model call.
  * Emails splice the image into the draft's HTML at the chosen placement;
  * blogs attach it as the post's hero (rendered under the title, published to
  * Sanity as the main image).
@@ -147,6 +149,23 @@ export async function POST(
       }
       image = { ...current, placement: readPlacement(form) };
       label = "Moved the image";
+    } else if (mode === "link") {
+      if (isBlog) {
+        return NextResponse.json(
+          { error: "A blog's hero image doesn't support a click-through link." },
+          { status: 400 },
+        );
+      }
+      const current = draftCtx.meta.hero_image;
+      if (!current) {
+        return NextResponse.json(
+          { error: "This email has no image to link yet." },
+          { status: 400 },
+        );
+      }
+      const linkUrl = (form.get("linkUrl") as string | null)?.trim() || undefined;
+      image = { ...current, link_url: linkUrl };
+      label = linkUrl ? "Added a link to the image" : "Removed the image's link";
     } else if (mode === "upload") {
       const read = readImageFile(form, "file");
       if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });

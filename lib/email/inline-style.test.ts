@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCtaHref,
   applyCtaStyleChanges,
   applyHeaderStyleChanges,
   applyStyleChanges,
@@ -403,5 +404,41 @@ describe("applyHeaderStyleChanges", () => {
     const out = applyHeaderStyleChanges(HEADER, { margin: "8px 0", textAlign: "left" });
     const tableTag = out.slice(0, out.indexOf(">") + 1);
     expect(tableTag).toContain("margin:8px 0");
+  });
+});
+
+describe("applyCtaHref", () => {
+  it("sets the href on the anchor inside the cta region", () => {
+    const out = applyCtaHref(TAGGED, "https://example.com/pricing");
+    expect(out).toContain(
+      `<div data-region="cta" style="text-align:center;"><a href="https://example.com/pricing" style="color:#fff;">Go</a></div>`,
+    );
+  });
+
+  it("falls back to '#' for a blank url", () => {
+    const withReal = applyCtaHref(TAGGED, "https://example.com");
+    const out = applyCtaHref(withReal, "   ");
+    expect(out).toContain(`<a href="#" style="color:#fff;">Go</a>`);
+  });
+
+  it("touches only the cta region, never the footer's unsubscribe link", () => {
+    const html =
+      `<html><body>` +
+      `<div data-region="cta"><a href="#">Go</a></div>` +
+      `<table data-region="footer"><tr><td><a href="{$unsubscribe}">Unsubscribe</a></td></tr></table>` +
+      `</body></html>`;
+    const out = applyCtaHref(html, "https://example.com/buy");
+    expect(out).toContain(`<a href="https://example.com/buy">Go</a>`);
+    expect(out).toContain(`<a href="{$unsubscribe}">Unsubscribe</a>`);
+  });
+
+  it("leaves the document untouched when the cta region has no anchor", () => {
+    const html = `<html><body><div data-region="cta">Call us</div></body></html>`;
+    expect(applyCtaHref(html, "https://example.com")).toBe(html);
+  });
+
+  it("leaves the document untouched when there is no cta region at all", () => {
+    const html = `<html><body><p>No button here.</p></body></html>`;
+    expect(applyCtaHref(html, "https://example.com")).toBe(html);
   });
 });

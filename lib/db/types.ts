@@ -621,6 +621,10 @@ export interface ContentImage {
   // neutral ("none"). Absent on uploads, exact-prompt renders, and images
   // generated before this existed. Initializes the image sheet's toggle.
   brand_palette?: BrandPaletteMode;
+  // Optional click-through URL. When set, the rendered <img> is wrapped in an
+  // <a href>, so the hero image itself becomes a link (not just the CTA
+  // button below it). Absent means the image isn't clickable.
+  link_url?: string;
 }
 
 /** How the user's typed subject is treated when generating an image. */

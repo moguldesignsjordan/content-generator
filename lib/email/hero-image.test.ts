@@ -6,7 +6,7 @@ import {
 } from "./hero-image";
 import type { ContentImage, HeroPlacement } from "@/lib/db/types";
 
-function img(placement?: HeroPlacement): ContentImage {
+function img(placement?: HeroPlacement, linkUrl?: string): ContentImage {
   return {
     url: "https://cdn.example.com/hero.jpg",
     alt: 'A desk with a laptop & "coffee"',
@@ -14,6 +14,7 @@ function img(placement?: HeroPlacement): ContentImage {
     height: 675,
     style: "illustration",
     ...(placement ? { placement } : {}),
+    ...(linkUrl ? { link_url: linkUrl } : {}),
   };
 }
 
@@ -55,6 +56,24 @@ describe("renderHeroImageBlock", () => {
     const block = renderHeroImageBlock(img());
     expect(block).toContain("alt=\"A desk with a laptop &amp; &quot;coffee&quot;\"");
     expect(block).toContain('src="https://cdn.example.com/hero.jpg"');
+  });
+
+  it("does not wrap the image in a link when link_url is absent", () => {
+    const block = renderHeroImageBlock(img());
+    expect(block).not.toContain("<a href=");
+  });
+
+  it("wraps the image in a link when link_url is set", () => {
+    const block = renderHeroImageBlock(img(undefined, "https://example.com/shop"));
+    expect(block).toContain('<a href="https://example.com/shop"');
+    // The <img> itself is unchanged; only wrapped.
+    expect(block).toContain('src="https://cdn.example.com/hero.jpg"');
+    expect(block.indexOf("<a href=")).toBeLessThan(block.indexOf("<img"));
+  });
+
+  it("escapes the link url", () => {
+    const block = renderHeroImageBlock(img(undefined, 'https://example.com/?a=1&b="x"'));
+    expect(block).toContain("https://example.com/?a=1&amp;b=&quot;x&quot;");
   });
 });
 
@@ -140,6 +159,17 @@ describe("spliceHeroImage on table-based templates (real email shape)", () => {
       expect(isRowWrapped(out)).toBe(true);
       expect(out).not.toContain("<div data-region=\"image\"");
     }
+  });
+
+  it("wraps the image in a link inside its region, without disturbing row placement", () => {
+    const out = spliceHeroImage(TAGGED_TABLE, img("top", "https://example.com/shop"))!;
+    expect(isRowWrapped(out)).toBe(true);
+    expect(out).toContain('data-region="image"');
+    expect(out).toContain('<a href="https://example.com/shop"');
+    // The link sits inside the region cell, between its td and the image.
+    const regionAt = out.indexOf('data-region="image"');
+    expect(out.indexOf("<a href=", regionAt)).toBeGreaterThan(regionAt);
+    expect(out.indexOf("<a href=", regionAt)).toBeLessThan(out.indexOf("<img", regionAt));
   });
 
   it("below_headline lands after the headline row, before the body row", () => {
