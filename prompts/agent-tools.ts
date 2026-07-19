@@ -1,12 +1,13 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 
 // Tools exclusive to the dashboard create agent (app/api/create/chat/route.ts):
-// auto-generate, recall of past content, and durable brand memory. Kept apart
-// from prompts/campaign.ts, whose tool set (update_brief, select_topic,
-// create_topic, suggest_options, start_generation, propose_voice_updates) is
-// still imported by create-agent.ts even though the older standalone
-// campaign-interview route has been removed — none of these six generate/
-// recall/memory tools are relevant there, so they don't belong in that file.
+// auto-generate, recall of past content, competitor-ad capture, and durable
+// brand memory. Kept apart from prompts/campaign.ts, whose tool set
+// (update_brief, select_topic, create_topic, suggest_options,
+// start_generation, propose_voice_updates) is still imported by
+// create-agent.ts even though the older standalone campaign-interview route
+// has been removed — none of these tools are relevant there, so they don't
+// belong in that file.
 
 export interface GenerateContentInput {
   channel: "email" | "blog" | "social";
@@ -280,6 +281,63 @@ export const CREATE_FLYER_FROM_EMAIL_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface SaveCompetitorReferenceInput {
+  name: string;
+  input_kind: "text" | "image";
+  content?: string;
+  image_url?: string;
+  source_url?: string;
+}
+
+/**
+ * Saves a competitor ad to the swipe file (competitor_references, migration
+ * 025) and distills its marketing STRATEGY once, so it can be picked for
+ * future emails via update_brief.competitor_reference_id. The DB write and
+ * Claude distillation both happen here (like remember), unlike update_brief's
+ * pure state merge.
+ */
+export const SAVE_COMPETITOR_REFERENCE_TOOL: Anthropic.Tool = {
+  name: "save_competitor_reference",
+  description:
+    "Save a competitor ad the user wants to learn the STRATEGY from (never " +
+    "copy). Call this the moment they paste ad copy, attach a screenshot of " +
+    "an ad, or share a URL to one, framed as an example, inspiration, or " +
+    "something they want to learn from (not a link about their own brand). " +
+    "Distills the hook/angle/structure/CTA once; follow up with update_brief " +
+    "setting competitor_reference_id to the id this returns.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: "A short name for this ad, e.g. the competitor's name or the ad's hook.",
+      },
+      input_kind: {
+        type: "string",
+        enum: ["text", "image"],
+        description: "\"text\" for pasted or scraped ad copy, \"image\" for an attached screenshot.",
+      },
+      content: {
+        type: "string",
+        description:
+          "The ad's copy VERBATIM, when input_kind is \"text\": exactly as pasted, " +
+          "or exactly as it appeared in a system note after a URL was scraped.",
+      },
+      image_url: {
+        type: "string",
+        description:
+          "The EXACT URL of the attached screenshot, when input_kind is \"image\", " +
+          "verbatim from the attached-image list on the user's message. NEVER invent one.",
+      },
+      source_url: {
+        type: "string",
+        description: "Where this ad was seen, if the user gave a URL.",
+      },
+    },
+    required: ["name", "input_kind"],
+  },
+};
+
 export interface RememberInput {
   content: string;
   kind?: string;
@@ -334,6 +392,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,
   CREATE_FLYER_FROM_EMAIL_TOOL,
+  SAVE_COMPETITOR_REFERENCE_TOOL,
   REMEMBER_TOOL,
   FORGET_TOOL,
 ];

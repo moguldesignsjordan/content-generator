@@ -7,10 +7,56 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-19 (CTA link persistence fix + clickable hero image —
-see session below; also still open: **migrations 020 AND 021 need applying in
-the Supabase SQL editor** — until 021 is applied, prompt capture silently
+Last updated: 2026-07-19 (competitor ad swipe-file library built — see session
+below; also still open: **migration 025 needs applying in the Supabase SQL
+editor** for the competitor library to work, plus the older-standing
+**migrations 020 AND 021** — until 021 is applied, prompt capture silently
 no-ops and /prompts stays empty; until 020, rating an email 500s).
+
+## Session 2026-07-19 (latest): competitor ad swipe-file library
+
+Ran the plan at `~/.claude/plans/nifty-crafting-patterson.md`: a "Competitor
+Ads" library so Jordan can save a competitor ad (pasted copy, a screenshot,
+or a URL) and have email generation adapt its STRATEGY, hook, angle,
+structure, persuasion levers, CTA style, never its wording. Mirrors the
+existing `reference_emails` (015) and `style_references` kind=email (016)
+patterns: distill once at save time, inject the distilled profile at
+generation, hard anti-copy framing. Verified with `npm run typecheck` +
+`npm test` (452, up from 421) + `npm run build`, all green. **Not yet
+committed.** Browser click-through not done this session (needs a real
+login; Playwright MCP off by default) — the /media "Competitor Ads" tab and
+the create-chat capture flow (paste/attach/URL) are untested live.
+
+- **New table** `competitor_references` (migration 025, NOT yet applied):
+  `input_kind` discriminator (`text`/`image`), `content`/`image_url`/
+  `storage_path`/`source_url`, `competitor_profile` jsonb.
+- **Distillation**: `prompts/extract-competitor.ts` + `lib/pipeline/extract-
+  competitor.ts`, vision-capable (Anthropic image-by-URL block, same pattern
+  the create chat already uses), non-fatal null on failure.
+- **Generation**: `TopicContext.competitorRef` resolved from
+  `brief.competitor_reference_id` inside `generate.ts` (NOT inside
+  `getTopicContext`, which has no brief) right before `buildEmailMessages`;
+  `buildCompetitorReferenceBlock` in `brand-voice.ts` injects it with the
+  anti-copy framing; a RULES bullet backs it up. QA's `competitor_copy_lifted`
+  audit was explicitly deferred (stretch, per the plan).
+- **Capture surfaces**: `POST /api/competitor-references` (text/image/URL,
+  one endpoint) + `[id]` DELETE; a new `save_competitor_reference` tool in
+  `prompts/agent-tools.ts` wired into the create chat's `dispatchTool`, with
+  server-side URL pre-scraping (`lib/scrape/scrapeCompetitorAdUrl`) so a
+  bare link in a chat message gets read (or gets an honest "couldn't read
+  it, paste the copy or a screenshot" note) before the model ever sees it.
+  Facebook Ad Library specifically always falls into the "couldn't read it"
+  path, by design (login-walled JS app, not worth fighting).
+- **Media UI**: new "Competitor Ads" tab on `/media`
+  (`competitor-reference-panel.tsx`), three input modes in one form.
+- **mergeBrief extracted** from `app/api/create/chat/route.ts` into a new
+  sibling `app/api/create/chat/brief-merge.ts`: Next.js route files may only
+  export GET/POST/config, so `mergeBrief` (needed as a unit-testable export)
+  had to move out; `isHttpUrl` went with it since both files use it.
+- **Next**: apply migration 025 in Supabase, then a real browser
+  click-through (save an ad each of the 3 ways, pick it in create chat,
+  generate, confirm no verbatim competitor wording/numbers/brand leaks in
+  and the hook/structure was influenced), then commit + push.
 
 ## Session 2026-07-19 (later): CTA link persistence fix + clickable hero image
 

@@ -1,7 +1,12 @@
 import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getSessionUser } from "@/lib/supabase/server";
-import { getSingleBrand, listMediaAssets, listStyleReferences } from "@/lib/db/queries";
+import {
+  getSingleBrand,
+  listCompetitorReferences,
+  listMediaAssets,
+  listStyleReferences,
+} from "@/lib/db/queries";
 import { Card, LinkButton } from "@/components/ui";
 import { ScreenHeader } from "../_components/screen-header";
 import { MediaLibraryClient } from "./_components/media-library-client";
@@ -38,12 +43,13 @@ export default async function MediaPage() {
     );
   }
 
-  let media, flyerStyles, emailDesigns;
+  let media, flyerStyles, emailDesigns, competitorRefs;
   try {
-    [media, flyerStyles, emailDesigns] = await Promise.all([
+    [media, flyerStyles, emailDesigns, competitorRefs] = await Promise.all([
       listMediaAssets(brand.id),
       listStyleReferences(brand.id, "flyer"),
       listStyleReferences(brand.id, "email"),
+      listCompetitorReferences(brand.id),
     ]);
   } catch (err) {
     return (
@@ -68,6 +74,7 @@ export default async function MediaPage() {
         initialMedia={media}
         initialFlyerStyles={flyerStyles}
         initialEmailDesigns={emailDesigns}
+        initialCompetitorRefs={competitorRefs}
       />
     </>
   );

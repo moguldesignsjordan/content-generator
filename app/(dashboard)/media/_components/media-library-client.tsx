@@ -10,8 +10,14 @@ import {
   useToast,
 } from "@/components/ui";
 import { PlusIcon } from "@/components/ui/icons";
-import type { MediaAsset, MediaAssetKind, StyleReference } from "@/lib/db/types";
+import type {
+  CompetitorReference,
+  MediaAsset,
+  MediaAssetKind,
+  StyleReference,
+} from "@/lib/db/types";
 import { StyleReferencePanel } from "./style-reference-panel";
+import { CompetitorReferencePanel } from "./competitor-reference-panel";
 
 const KIND_LABELS: Record<MediaAssetKind, string> = {
   hero: "Hero",
@@ -239,12 +245,14 @@ export function MediaLibraryClient({
   initialMedia,
   initialFlyerStyles,
   initialEmailDesigns,
+  initialCompetitorRefs,
 }: {
   initialMedia: MediaAsset[];
   initialFlyerStyles: StyleReference[];
   initialEmailDesigns: StyleReference[];
+  initialCompetitorRefs: CompetitorReference[];
 }) {
-  const [tab, setTab] = useState<"media" | "flyer" | "email">("media");
+  const [tab, setTab] = useState<"media" | "flyer" | "email" | "competitor">("media");
 
   return (
     <div>
@@ -255,6 +263,7 @@ export function MediaLibraryClient({
           { value: "media", label: "My Media" },
           { value: "flyer", label: "Flyer Styles" },
           { value: "email", label: "Email Designs" },
+          { value: "competitor", label: "Competitor Ads" },
         ]}
       />
       <div className="mt-5">
@@ -264,6 +273,9 @@ export function MediaLibraryClient({
         )}
         {tab === "email" && (
           <StyleReferencePanel kind="email" initialItems={initialEmailDesigns} />
+        )}
+        {tab === "competitor" && (
+          <CompetitorReferencePanel initialItems={initialCompetitorRefs} />
         )}
       </div>
     </div>

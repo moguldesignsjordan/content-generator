@@ -406,6 +406,13 @@ export interface CampaignBrief {
   /** Interview state: how many emails the campaign should have, in the
    * user's words (e.g. "2 per product, 6 total" or "5"). */
   email_count?: string;
+  /** Id of a saved competitor_references row (migration 025) to adapt this
+   * piece's hook/angle/structure/CTA from, strategy only, never its words.
+   * Single (mirrors email_style's design-ref [0]-only pattern). Non-text
+   * field (an id, not free text a chat turn would author): does NOT go in
+   * CAMPAIGN_BRIEF_TEXT_FIELDS, needs its own mergeBrief branch like
+   * product_photo_url. */
+  competitor_reference_id?: string;
 }
 
 /** The kinds of multi-email campaign the create-agent interview can run;
@@ -492,6 +499,11 @@ export interface TopicContext {
    * user liked the look of, whose layout generation recreates. Optional for the
    * same reason as referenceEmails. */
   emailDesignRefs?: StyleReference[];
+  /** The competitor ad (migration 025) the brief points at via
+   * competitor_reference_id, when one was picked. Single, not a list (mirrors
+   * emailDesignRefs' [0]-only usage): null when unset or the id no longer
+   * resolves. */
+  competitorRef?: CompetitorReference | null;
 }
 
 // What we store in drafts.content for an email draft.
@@ -815,6 +827,44 @@ export interface ReferenceEmail {
   name: string;
   content: string;
   style_profile: ReferenceEmailStyleProfile | null;
+  created_at: string;
+}
+
+// ── Competitor ad references (migration 025) ────────────────────────────────
+
+/** What an uploaded/pasted/scraped competitor ad is a reference FOR. */
+export type CompetitorReferenceInputKind = "text" | "image";
+
+/** The marketing STRATEGY Claude distills once from one competitor ad
+ * (prompts/extract-competitor.ts), never the ad's actual words. Injected into
+ * generation with anti-copy framing (buildCompetitorReferenceBlock). */
+export interface CompetitorProfile {
+  /** 2-3 sentences on HOW this ad persuades. */
+  summary: string;
+  /** The opening hook's type, e.g. "bold claim", "question", "social proof". */
+  hook_type: string;
+  /** The persuasion/editorial angle, e.g. "urgency", "problem/solution". */
+  angle: string;
+  /** The ad's beats/sections in order, top to bottom. */
+  structure: string[];
+  persuasion_levers?: string[];
+  /** How the ad asks for the click/action, its tone and framing. */
+  cta_style: string;
+  register?: string;
+}
+
+/** One row of competitor_references: a competitor ad saved as "learn from
+ * this strategy", either pasted/scraped text or an uploaded screenshot. */
+export interface CompetitorReference {
+  id: string;
+  brand_id: string;
+  name: string;
+  input_kind: CompetitorReferenceInputKind;
+  content: string | null;
+  image_url: string | null;
+  storage_path: string | null;
+  source_url: string | null;
+  competitor_profile: CompetitorProfile | null;
   created_at: string;
 }
 

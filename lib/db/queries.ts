@@ -15,6 +15,8 @@ import type {
   CampaignChatState,
   CampaignPublishProgress,
   CampaignStatus,
+  CompetitorProfile,
+  CompetitorReference,
   ContentJobType,
   ContentSchedule,
   DraftFeedback,
@@ -2258,6 +2260,80 @@ export async function createReferenceEmail(args: {
 export async function deleteReferenceEmail(id: string): Promise<void> {
   const db = getAdminClient();
   const { error } = await db.from("reference_emails").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Competitor ad references (migration 025) ────────────────────────────────
+
+export async function listCompetitorReferences(
+  brandId: string,
+): Promise<CompetitorReference[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("competitor_references")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    // Pre-migration-025 DBs have no table yet; the library is just empty.
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as CompetitorReference[];
+}
+
+/** Used both to browse a single saved ad and, at generation time, to resolve
+ * a brief's competitor_reference_id. Null on a stale id or a pre-025 DB. */
+export async function getCompetitorReference(
+  id: string,
+): Promise<CompetitorReference | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("competitor_references")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as CompetitorReference) ?? null;
+}
+
+export async function createCompetitorReference(args: {
+  brandId: string;
+  name: string;
+  inputKind: "text" | "image";
+  content?: string | null;
+  imageUrl?: string | null;
+  storagePath?: string | null;
+  sourceUrl?: string | null;
+  competitorProfile: CompetitorProfile | null;
+}): Promise<CompetitorReference> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("competitor_references")
+    .insert({
+      brand_id: args.brandId,
+      name: args.name.trim(),
+      input_kind: args.inputKind,
+      content: args.content ?? null,
+      image_url: args.imageUrl ?? null,
+      storage_path: args.storagePath ?? null,
+      source_url: args.sourceUrl?.trim() || null,
+      competitor_profile: args.competitorProfile,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as CompetitorReference;
+}
+
+/** Deletes the row only; the caller removes the storage object first (it has
+ * the storage_path from getCompetitorReference), when input_kind='image'. */
+export async function deleteCompetitorReference(id: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("competitor_references").delete().eq("id", id);
   if (error) throw error;
 }
 

@@ -2,6 +2,7 @@ import type {
   Brand,
   BrandMemory,
   CampaignBrief,
+  CompetitorReference,
   Icp,
   Product,
   ReferenceEmail,
@@ -176,6 +177,38 @@ export function buildReferenceEmailsBlock(
   return lines.join("\n");
 }
 
+/**
+ * Builds the competitor-reference block (migration 025): the distilled
+ * marketing STRATEGY of one competitor ad the user picked to learn from,
+ * with anti-copy framing. Empty string when no ref is attached, so callers'
+ * .filter(Boolean) drops it cleanly.
+ */
+export function buildCompetitorReferenceBlock(
+  ref: CompetitorReference | null | undefined,
+): string {
+  const p = ref?.competitor_profile;
+  if (!p) return "";
+
+  const lines: string[] = [
+    "COMPETITOR REFERENCE (strategy only, DO NOT COPY). Adapt its HOOK TYPE,",
+    "angle, structure, persuasion levers, and CTA STYLE. NEVER reproduce the",
+    "competitor's words, claims, offer, numbers, or brand. Brand voice wins on",
+    "wording; the reference wins on structure and rhythm.):",
+    "",
+    `  "${ref.name}": ${p.summary}`,
+    `    Hook type: ${p.hook_type}`,
+    `    Angle: ${p.angle}`,
+    `    Structure: ${p.structure.join(" -> ")}`,
+    `    CTA style: ${p.cta_style}`,
+  ];
+  if (p.persuasion_levers?.length) {
+    lines.push(`    Persuasion levers: ${p.persuasion_levers.join(", ")}`);
+  }
+  if (p.register) lines.push(`    Register: ${p.register}`);
+
+  return lines.join("\n");
+}
+
 // Builds the learned-facts block from brand_memory (migration 007): durable
 // preferences/decisions/constraints the agent picked up in past sessions.
 // Empty string when nothing's been learned yet, so buildCreateAgentSystem's
@@ -331,6 +364,9 @@ export function buildBriefStateBlock(
       brief.photo_urls?.length
         ? `${brief.photo_urls.length} attached, each will be placed in the email`
         : "(none)"
+    }`,
+    `  Competitor reference: ${
+      brief.competitor_reference_id ? "attached, its strategy will be adapted" : "(none)"
     }`,
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");

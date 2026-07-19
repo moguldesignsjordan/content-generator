@@ -57,6 +57,10 @@ export interface UpdateBriefInput {
   campaign_kind?: "product" | "promotion" | "newsletter" | "launch" | "single";
   campaign_products?: string;
   email_count?: string;
+  /** Id of a saved competitor ad (from save_competitor_reference's result) to
+   * adapt this email's strategy from. NEVER invent an id; only echo one just
+   * returned by save_competitor_reference. */
+  competitor_reference_id?: string;
 }
 
 export interface SelectTopicInput {
@@ -260,6 +264,13 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         description:
           "How many emails the campaign should have, exactly as the user " +
           "chose (e.g. '2 per product, 6 total' or '5').",
+      },
+      competitor_reference_id: {
+        type: "string",
+        description:
+          "The id of a saved competitor ad to adapt this email's strategy " +
+          "from, from save_competitor_reference's result. NEVER invent or " +
+          "guess an id.",
       },
     },
   },

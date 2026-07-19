@@ -16,6 +16,7 @@ import type { BrandTokens } from "@/lib/email/templates/types";
 import {
   buildBrandVoiceBlock,
   buildCampaignBriefBlock,
+  buildCompetitorReferenceBlock,
   buildGuidelinesBlock,
   buildKeywordLines,
   buildPositioningBlock,
@@ -535,6 +536,7 @@ export function buildEmailMessages(
   const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "email");
   const positioningBlock = buildPositioningBlock(brand);
   const referenceBlock = buildReferenceEmailsBlock(ctx.referenceEmails);
+  const competitorBlock = buildCompetitorReferenceBlock(ctx.competitorRef);
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const { ctaText } = resolveCta(ctx);
   const emailType = resolveEmailType(topic, {
@@ -587,6 +589,7 @@ export function buildEmailMessages(
     voiceBlock,
     positioningBlock,
     referenceBlock,
+    competitorBlock,
     buildFeedbackBlock(opts.feedbackExamples),
     "",
     designBrief,
@@ -633,6 +636,9 @@ export function buildEmailMessages(
     "  facts above give you. With no real number available, get concrete WITHOUT",
     "  one: name the specific situation, object, or step instead. An invented",
     "  specific is worse than an honest general.",
+    "- If a COMPETITOR REFERENCE is attached, never reproduce its copy verbatim",
+    "  or near-verbatim. Lift its strategy and register only; every word must",
+    "  be your own.",
     "- Use the target keyword and the audience's own vocabulary naturally; never keyword-stuff.",
     "- Match the email's call-to-action to the funnel stage (provided below).",
     "- Fill the plain-text copy fields (no markup in them) AND the html field with the",

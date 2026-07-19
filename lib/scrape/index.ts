@@ -5,6 +5,7 @@ import { renderHtml } from "./render";
 import { extractSignals } from "./signals";
 import { ScrapeError, assertPublicHost, normalizeSiteUrl } from "./url";
 import type { ScrapeResult, ScrapedPage } from "./types";
+import { emailHtmlToText } from "@/lib/text";
 
 // Orchestrates a site scan: homepage first, then a handful of high-signal
 // internal pages (about, services, pricing, contact, work). The output feeds
@@ -192,3 +193,54 @@ export async function scrapeSite(inputUrl: string): Promise<ScrapeResult> {
 
 export { ScrapeError } from "./url";
 export type { ScrapeResult, ScrapedPage, SiteSignals, ColorCandidate } from "./types";
+
+// ── Competitor ad URL scraping (migration 025) ──────────────────────────────
+// A single-page fetch, not the multi-page brand scan above: a competitor ad
+// (or an ad's landing page) is one URL, not a site to crawl. Facebook Ad
+// Library and similar login-walled/JS-app pages are a dead end for a plain
+// fetch, so those (and any other page a plain fetch can't read) get a guidance
+// message the create-chat agent relays, instead of silently distilling junk.
+
+const MIN_AD_TEXT_CHARS = 200;
+const MAX_AD_TEXT_CHARS = 12000;
+
+const SCRAPE_GUIDANCE =
+  "This site blocks scraping. Paste the ad copy or upload a screenshot instead.";
+
+export type CompetitorUrlScrapeResult =
+  | { ok: true; content: string }
+  | { ok: false; guidance: string };
+
+function isFacebookAdsLibrary(url: URL): boolean {
+  return /(^|\.)facebook\.com$/i.test(url.hostname) && /\/ads\/library/i.test(url.pathname);
+}
+
+/**
+ * Fetches one URL and extracts its readable text as candidate competitor-ad
+ * copy. Never throws: every failure mode (bad URL, blocked host, no HTML,
+ * too little text, a known login-walled host like FB Ad Library) resolves to
+ * a guidance message instead of an error, since the caller relays it straight
+ * to the user as a normal chat reply.
+ */
+export async function scrapeCompetitorAdUrl(
+  inputUrl: string,
+): Promise<CompetitorUrlScrapeResult> {
+  let url: URL;
+  try {
+    url = normalizeSiteUrl(inputUrl);
+  } catch {
+    return { ok: false, guidance: SCRAPE_GUIDANCE };
+  }
+  if (isFacebookAdsLibrary(url)) {
+    return { ok: false, guidance: SCRAPE_GUIDANCE };
+  }
+
+  const page = await fetchHtml(url).catch(() => null);
+  if (!page) return { ok: false, guidance: SCRAPE_GUIDANCE };
+
+  const content = emailHtmlToText(page.html).trim();
+  if (content.length < MIN_AD_TEXT_CHARS) {
+    return { ok: false, guidance: SCRAPE_GUIDANCE };
+  }
+  return { ok: true, content: content.slice(0, MAX_AD_TEXT_CHARS) };
+}

@@ -15,7 +15,8 @@ type NonTextField =
   | "photo_urls"
   | "use_ai_image_instead"
   | "style_example"
-  | "campaign_kind";
+  | "campaign_kind"
+  | "competitor_reference_id";
 
 type ExpectedTextField = Exclude<keyof CampaignBrief, NonTextField>;
 type ListedField = (typeof CAMPAIGN_BRIEF_TEXT_FIELDS)[number];

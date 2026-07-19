@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { CampaignBrief, Product, ReferenceEmail } from "@/lib/db/types";
+import type {
+  CampaignBrief,
+  CompetitorReference,
+  Product,
+  ReferenceEmail,
+} from "@/lib/db/types";
 import {
   buildBriefStateBlock,
   buildCampaignBriefBlock,
+  buildCompetitorReferenceBlock,
   buildKeywordLines,
   buildProductLines,
   buildReferenceEmailsBlock,
@@ -300,6 +306,89 @@ describe("buildReferenceEmailsBlock", () => {
     ]);
     expect(block).toContain("[truncated]");
     expect(block.length).toBeLessThan(5000);
+  });
+});
+
+function makeCompetitorReference(
+  overrides: Partial<CompetitorReference> = {},
+): CompetitorReference {
+  return {
+    id: "c1",
+    brand_id: "b1",
+    name: "Acme Black Friday ad",
+    input_kind: "text",
+    content: "50% off everything, today only!",
+    image_url: null,
+    storage_path: null,
+    source_url: null,
+    competitor_profile: {
+      summary: "Leads with a bold discount claim, then stacks urgency.",
+      hook_type: "bold claim",
+      angle: "urgency",
+      structure: ["headline discount", "countdown timer", "single CTA button"],
+      persuasion_levers: ["scarcity", "social proof"],
+      cta_style: "direct and urgent",
+      register: "casual",
+    },
+    created_at: "2026-07-19T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("buildCompetitorReferenceBlock", () => {
+  it("returns an empty string when there's no reference or no distilled profile", () => {
+    expect(buildCompetitorReferenceBlock(null)).toBe("");
+    expect(buildCompetitorReferenceBlock(undefined)).toBe("");
+    expect(
+      buildCompetitorReferenceBlock(makeCompetitorReference({ competitor_profile: null })),
+    ).toBe("");
+  });
+
+  it("includes the anti-copy framing and the distilled strategy fields", () => {
+    const block = buildCompetitorReferenceBlock(makeCompetitorReference());
+    expect(block).toContain("DO NOT COPY");
+    expect(block).toContain("NEVER reproduce the");
+    expect(block).toContain("Hook type: bold claim");
+    expect(block).toContain("Angle: urgency");
+    expect(block).toContain("headline discount -> countdown timer -> single CTA button");
+    expect(block).toContain("CTA style: direct and urgent");
+    expect(block).toContain("Persuasion levers: scarcity, social proof");
+    expect(block).toContain("Register: casual");
+  });
+
+  it("never includes the raw ad copy itself", () => {
+    const block = buildCompetitorReferenceBlock(makeCompetitorReference());
+    expect(block).not.toContain("50% off everything, today only!");
+  });
+
+  it("omits optional persuasion_levers/register lines when unset", () => {
+    const block = buildCompetitorReferenceBlock(
+      makeCompetitorReference({
+        competitor_profile: {
+          summary: "A quick summary.",
+          hook_type: "question",
+          angle: "curiosity",
+          structure: ["headline", "body", "CTA"],
+          cta_style: "soft invite",
+        },
+      }),
+    );
+    expect(block).not.toContain("Persuasion levers");
+    expect(block).not.toContain("Register:");
+  });
+});
+
+describe("buildBriefStateBlock competitor reference", () => {
+  it("reports the competitor reference state", () => {
+    expect(
+      buildBriefStateBlock(
+        { competitor_reference_id: "c1" } as CampaignBrief,
+        null,
+      ),
+    ).toContain("Competitor reference: attached, its strategy will be adapted");
+    expect(buildBriefStateBlock({} as CampaignBrief, null)).toContain(
+      "Competitor reference: (none)",
+    );
   });
 });
 

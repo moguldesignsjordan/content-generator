@@ -9,6 +9,7 @@ import {
 } from "@/lib/clients/anthropic";
 import {
   getCampaign,
+  getCompetitorReference,
   getDraftWithJobContext,
   getLatestDraftVersion,
   getRecentEmailStyleVariants,
@@ -109,6 +110,7 @@ export async function generateEmailForTopicStreamed(
     onEvent({ type: "phase", ...writing });
 
     const brief = opts.briefOverride ?? (await loadCampaignBrief(opts.campaignId));
+    ctx.competitorRef = await resolveCompetitorRef(brief);
     const tokens = resolveBrandTokens(ctx.brand);
     // A campaign series assigns style/layout deterministically by index
     // instead of reading recent history (see seedIndex above); a single
@@ -364,6 +366,27 @@ export async function loadCampaignBrief(
   if (!campaignId) return null;
   const campaign = await getCampaign(campaignId);
   return campaign?.brief ?? null;
+}
+
+/**
+ * Resolves a brief's competitor_reference_id (migration 025) to the actual
+ * saved ad, right before prompt assembly (buildEmailMessages reads
+ * ctx.competitorRef the same way it reads ctx.emailDesignRefs). Non-fatal: a
+ * stale id, a pre-025 DB, or a read failure all just mean no reference for
+ * this draft, never a broken generation.
+ */
+async function resolveCompetitorRef(
+  brief: CampaignBrief | null,
+): Promise<TopicContext["competitorRef"]> {
+  if (!brief?.competitor_reference_id) return null;
+  try {
+    return await getCompetitorReference(brief.competitor_reference_id);
+  } catch (err) {
+    logWarn("pipeline:generate:competitor-ref", String(err), {
+      id: brief.competitor_reference_id,
+    });
+    return null;
+  }
 }
 
 /**
@@ -781,6 +804,7 @@ export async function regenerateEmailDraft(
 
   const brief =
     draftCtx.meta.series_brief ?? (await loadCampaignBrief(draftCtx.campaignId));
+  ctx.competitorRef = await resolveCompetitorRef(brief);
   const tokens = resolveBrandTokens(ctx.brand);
   const heroImage = draftCtx.meta.hero_image;
   // Reject & regenerate keeps this draft's look: reuse its stored layout and

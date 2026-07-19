@@ -13,6 +13,7 @@ import { isSupabaseConfigured } from "@/lib/db/client";
 import {
   addBrandMemory,
   createCampaign,
+  createCompetitorReference,
   createDraftShell,
   createTopic,
   deleteBrandMemory,
@@ -34,12 +35,10 @@ import {
 import type {
   Brand,
   CampaignBrief,
-  CampaignKind,
   FunnelStage,
   Product,
   SeriesDraftRef,
   Strategy,
-  VisualVibe,
 } from "@/lib/db/types";
 import { CAMPAIGN_BRIEF_TEXT_FIELDS } from "@/lib/db/types";
 import {
@@ -55,6 +54,7 @@ import {
   type ListRecentContentInput,
   type PlanSeriesInput,
   type RememberInput,
+  type SaveCompetitorReferenceInput,
   type SelectTopicInput,
   type SuggestedOption,
   type SuggestOptionsInput,
@@ -63,17 +63,12 @@ import {
 import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
-import { MAX_BRIEF_PHOTOS } from "@/lib/email/brief-photos";
-import {
-  emailHtmlToText,
-  joinReplySegments,
-  stripEmDashes,
-  stripMarkdown,
-} from "@/lib/text";
+import { extractCompetitorProfile } from "@/lib/pipeline/extract-competitor";
+import { scrapeCompetitorAdUrl } from "@/lib/scrape";
+import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
-import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
-import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
+import { isHttpUrl, mergeBrief } from "./brief-merge";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -136,6 +131,38 @@ function withImageBlocks(
       source: { type: "url" as const, url },
     })),
   ];
+}
+
+const BARE_URL_RE = /https?:\/\/[^\s<>"')\]]+/i;
+
+/**
+ * When the message contains a bare URL and no image is attached, scrapes it
+ * server-side (SSRF-guarded, see lib/scrape) and appends a system note with
+ * either the extracted text or an honest "couldn't read it" guidance message
+ * (Facebook Ad Library and similar login-walled pages always fall into the
+ * latter). The model decides what to do with it (competitor ad vs. unrelated
+ * link) per the COMPETITOR ADS CAN ARRIVE AT ANY STAGE rule in
+ * buildCreateAgentSystem; this only makes sure it never has to guess at a
+ * naked link's contents.
+ */
+async function withScrapedCompetitorUrl(
+  message: string,
+  hasImages: boolean,
+): Promise<string> {
+  if (hasImages) return message;
+  const match = message.match(BARE_URL_RE);
+  if (!match) return message;
+  const url = match[0];
+  const scraped = await scrapeCompetitorAdUrl(url).catch(() => null);
+  if (!scraped) return message;
+  const note = scraped.ok
+    ? `SYSTEM NOTE: scraped ${url}. If this is a competitor ad the user wants ` +
+      `saved, call save_competitor_reference with input_kind "text", this ` +
+      `content, and source_url "${url}":\n--- SCRAPED TEXT START ---\n${scraped.content}\n--- SCRAPED TEXT END ---`
+    : `SYSTEM NOTE: couldn't read ${url} (${scraped.guidance}). If the user ` +
+      `wanted to save it as a competitor ad, tell them and ask for pasted ` +
+      `copy or a screenshot instead.`;
+  return `${message}\n\n${note}`;
 }
 
 export type { CreateBriefCard };
@@ -249,12 +276,20 @@ export async function POST(req: NextRequest) {
       campaign.topic_id,
     );
     const sanitizedImages = sanitizeImageUrls(images);
+    // A bare URL in the message (and no attached image, which already has
+    // its own handling) might be a competitor ad the user wants saved: scrape
+    // it server-side now so the model sees real extracted text or an honest
+    // "couldn't read it" note, never a naked link it would have to guess about.
+    const messageForModel = await withScrapedCompetitorUrl(
+      message.trim(),
+      !!sanitizedImages?.length,
+    );
     const messages: Anthropic.MessageParam[] = [
       ...priorTurns,
       {
         role: "user",
         content: withImageBlocks(
-          `${briefState}\n\nUSER MESSAGE:\n${message.trim()}`,
+          `${briefState}\n\nUSER MESSAGE:\n${messageForModel}`,
           sanitizedImages,
         ),
       },
@@ -492,6 +527,9 @@ async function dispatchTool(
       }
       if (input.use_ai_image_instead === true) {
         saved.push("product_photo_url and photo_urls cleared, an AI image will be generated instead");
+      }
+      if (state.brief.competitor_reference_id) {
+        saved.push("competitor_reference_id=(attached, its strategy will be adapted, never copied)");
       }
       if (input.campaign_kind === "single") {
         saved.push("campaign_kind cleared, back to a single email");
@@ -815,6 +853,47 @@ async function dispatchTool(
       state.channel = "social";
       return JSON.stringify({ draftId, channel: "social", reused: false });
     }
+    case "save_competitor_reference": {
+      const input = block.input as SaveCompetitorReferenceInput;
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      if (!name) return "Give the competitor ad a name.";
+      const inputKind = input.input_kind === "image" ? "image" : "text";
+
+      let content: string | undefined;
+      let imageUrl: string | undefined;
+      if (inputKind === "image") {
+        if (typeof input.image_url !== "string" || !isHttpUrl(input.image_url.trim())) {
+          return "No valid image_url given. Pass the exact attached image's URL.";
+        }
+        imageUrl = input.image_url.trim();
+      } else {
+        if (typeof input.content !== "string" || !input.content.trim()) {
+          return "No content given. Pass the ad's copy verbatim.";
+        }
+        content = stripEmDashes(input.content.trim()).slice(0, 12000);
+      }
+      const sourceUrl =
+        typeof input.source_url === "string" && isHttpUrl(input.source_url.trim())
+          ? input.source_url.trim()
+          : undefined;
+
+      // Distill once, now; null (extraction hiccup) still saves the raw
+      // ad, which is a usable reference on its own.
+      const competitorProfile = await extractCompetitorProfile({ content, imageUrl });
+      const reference = await createCompetitorReference({
+        brandId: ctx.brand.id,
+        name,
+        inputKind,
+        content: content ?? null,
+        imageUrl: imageUrl ?? null,
+        sourceUrl: sourceUrl ?? null,
+        competitorProfile,
+      });
+      return JSON.stringify({
+        id: reference.id,
+        profile: reference.competitor_profile,
+      });
+    }
     case "remember": {
       const input = block.input as RememberInput;
       const memory = await addBrandMemory(ctx.brand.id, {
@@ -832,95 +911,6 @@ async function dispatchTool(
     default:
       return "Unknown tool.";
   }
-}
-
-const VISUAL_VIBES: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
-
-const CAMPAIGN_KINDS: CampaignKind[] = ["product", "promotion", "newsletter", "launch"];
-
-/** True for a well-formed http(s) URL; guards against the model inventing one. */
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-/** Merges only the fields the model actually passed onto the stored brief. */
-function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBrief {
-  const next = { ...current };
-  for (const key of CAMPAIGN_BRIEF_TEXT_FIELDS) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim()) {
-      next[key] = stripEmDashes(value.trim());
-    }
-  }
-  // Kept verbatim (no em-dash stripping): it's the user's own reference
-  // email, not copy this engine produced. Flattened and capped so a pasted
-  // HTML export or thread can't balloon the stored brief.
-  if (typeof input.style_example === "string" && input.style_example.trim()) {
-    next.style_example = emailHtmlToText(input.style_example).slice(0, 8000);
-  }
-  if (input.length === "short" || input.length === "standard" || input.length === "long") {
-    next.length = input.length;
-  }
-  if (typeof input.include_image === "boolean") {
-    next.include_image = input.include_image;
-  }
-  if (input.visual_vibe && VISUAL_VIBES.includes(input.visual_vibe)) {
-    next.visual_vibe = input.visual_vibe;
-  }
-  if (
-    input.image_style &&
-    IMAGE_STYLE_CATALOG.some((s) => s.id === input.image_style)
-  ) {
-    next.image_style = input.image_style;
-  }
-  if (
-    input.email_style &&
-    EMAIL_DESIGN_CATALOG.some((s) => s.id === input.email_style)
-  ) {
-    next.email_style = input.email_style;
-  }
-  // A directly-typed URL still has to pass isHttpUrl; the model is told to
-  // only ever echo one back from an upload notice, but this is the real
-  // guard against an invented or malformed value landing in the brief.
-  if (typeof input.product_photo_url === "string" && isHttpUrl(input.product_photo_url.trim())) {
-    next.product_photo_url = input.product_photo_url.trim();
-    next.include_image = true;
-  }
-  // Replace semantics (the model resends the whole list), same URL guard as
-  // product_photo_url, deduped and capped so a runaway call can't balloon
-  // the brief. An explicit empty array clears the list.
-  if (Array.isArray(input.photo_urls)) {
-    const urls = Array.from(
-      new Set(
-        input.photo_urls
-          .filter((u): u is string => typeof u === "string")
-          .map((u) => u.trim())
-          .filter(isHttpUrl),
-      ),
-    ).slice(0, MAX_BRIEF_PHOTOS);
-    if (urls.length) next.photo_urls = urls;
-    else delete next.photo_urls;
-  }
-  if (input.use_ai_image_instead === true) {
-    delete next.product_photo_url;
-    delete next.photo_urls;
-  }
-  // Campaign mode is an explicit enum, entered and left deliberately:
-  // "single" drops the whole campaign interview state (kind, products,
-  // count) so the generate_content guard stops refusing.
-  if (input.campaign_kind === "single") {
-    delete next.campaign_kind;
-    delete next.campaign_products;
-    delete next.email_count;
-  } else if (input.campaign_kind && CAMPAIGN_KINDS.includes(input.campaign_kind)) {
-    next.campaign_kind = input.campaign_kind;
-  }
-  return next;
 }
 
 /** Resolves the product a fresh offer_slug points at, when this exact update_brief
