@@ -17,8 +17,8 @@ no-ops and /prompts stays empty; until 020, rating an email 500s).
 Jordan's ask: attach several photos in the create chat (upload or pull from
 the media library) and have ALL of them placed in the generated email, not
 just one hero. Verified with `npm run typecheck` + `npm test` (421) +
-`npm run build`, all green. UNCOMMITTED; browser click-through open (needs a
-real login; Playwright MCP off by default).
+`npm run build`, all green. Committed & pushed (a93414e); browser
+click-through open (needs a real login; Playwright MCP off by default).
 
 - **Brief:** new `CampaignBrief.photo_urls` (string[], max 6, validated
   isHttpUrl, replace semantics, deduped; `use_ai_image_instead` clears it).
