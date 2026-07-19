@@ -50,6 +50,12 @@ export interface UpdateBriefInput {
   offer_price?: string;
   offer_exclusions?: string;
   reader_belief?: string;
+  subject_line?: string;
+  preheader?: string;
+  /** "single" clears campaign mode (and the other campaign_* fields). */
+  campaign_kind?: "product" | "promotion" | "newsletter" | "launch" | "single";
+  campaign_products?: string;
+  email_count?: string;
 }
 
 export interface SelectTopicInput {
@@ -208,6 +214,39 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
       reader_belief: {
         type: "string",
         description: "What the reader should believe or feel after reading, in the user's own words.",
+      },
+      subject_line: {
+        type: "string",
+        description:
+          "The email's name (subject line) once the user picks or approves " +
+          "one. Generation will use it verbatim as the subject.",
+      },
+      preheader: {
+        type: "string",
+        description:
+          "The subheader (inbox preview text under the subject) once the " +
+          "user picks or approves one. Generation uses it near-verbatim.",
+      },
+      campaign_kind: {
+        type: "string",
+        enum: ["product", "promotion", "newsletter", "launch", "single"],
+        description:
+          "Set the MOMENT you know the user is building a multi-email " +
+          "campaign, to its kind. While set, generate_content is refused: a " +
+          "campaign always ends in one plan_series call. Pass \"single\" when " +
+          "the user switches back to wanting just one email.",
+      },
+      campaign_products: {
+        type: "string",
+        description:
+          "Which products a product campaign covers, in the user's words " +
+          "(e.g. 'business cards, door hangers, retractable banners').",
+      },
+      email_count: {
+        type: "string",
+        description:
+          "How many emails the campaign should have, exactly as the user " +
+          "chose (e.g. '2 per product, 6 total' or '5').",
       },
     },
   },

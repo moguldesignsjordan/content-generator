@@ -16,6 +16,10 @@ import type {
  */
 export interface CreateBriefCard {
   topicTitle: string | null;
+  /** User-approved email name (subject line); generation uses it verbatim. */
+  subjectLine: string | null;
+  /** User-approved subheader (inbox preview text under the subject). */
+  preheader: string | null;
   audience: string | null;
   goal: string | null;
   keyMessage: string | null;
@@ -71,6 +75,8 @@ export function buildBriefCard(args: {
 
   return {
     topicTitle,
+    subjectLine: brief.subject_line ?? null,
+    preheader: brief.preheader ?? null,
     audience: brief.audience_notes ?? primaryIcp?.label ?? null,
     goal: brief.goal ?? null,
     keyMessage: brief.key_message ?? null,

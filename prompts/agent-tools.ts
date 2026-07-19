@@ -65,6 +65,12 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
 export interface PlanSeriesItem {
   title: string;
   topic_id?: string;
+  /** The user-approved email name (subject line) from the confirmed plan;
+   * generation uses it verbatim as the subject. */
+  subject?: string;
+  /** The user-approved subheader (inbox preview text) from the confirmed
+   * plan; generation uses it near-verbatim as the preheader. */
+  preheader?: string;
   angle?: string;
   key_message?: string;
   offer_slug?: string;
@@ -93,11 +99,12 @@ export interface PlanSeriesInput {
 export const PLAN_SERIES_TOOL: Anthropic.Tool = {
   name: "plan_series",
   description:
-    "Create a whole multi-email campaign series at once (2 to 10 emails), e.g. " +
-    "one email per product, or a run of newsletters on different topics. Call " +
-    "it ONCE with every email in the series, and only after the user has agreed " +
-    "to the plan you proposed in a reply. Each item becomes its own draft that " +
-    "the user reviews, approves, and schedules individually; drafts appear " +
+    "Create a whole multi-email campaign series at once (2 to 12 emails), e.g. " +
+    "one or more emails per product, or a run of newsletters on different " +
+    "topics. Call it ONCE with every email in the series, and only after the " +
+    "user has agreed to the plan you proposed in a reply (including each " +
+    "email's name and subheader). Each item becomes its own draft that the " +
+    "user reviews, approves, and schedules individually; drafts appear " +
     "instantly and each one writes itself when opened.",
   input_schema: {
     type: "object",
@@ -105,13 +112,25 @@ export const PLAN_SERIES_TOOL: Anthropic.Tool = {
       items: {
         type: "array",
         minItems: 2,
-        maxItems: 10,
+        maxItems: 12,
         items: {
           type: "object",
           properties: {
             title: {
               type: "string",
               description: "Working title / subject direction for this email.",
+            },
+            subject: {
+              type: "string",
+              description:
+                "The exact email name (subject line) the user approved in the " +
+                "plan. Generation uses it VERBATIM, so pass it exactly as agreed.",
+            },
+            preheader: {
+              type: "string",
+              description:
+                "The subheader (inbox preview text) the user approved for this " +
+                "email in the plan. Generation uses it near-verbatim.",
             },
             topic_id: {
               type: "string",

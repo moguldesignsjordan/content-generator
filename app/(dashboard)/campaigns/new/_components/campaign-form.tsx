@@ -345,7 +345,10 @@ export function CampaignForm({
         </Section>
 
         {/* Goal */}
-        <Section label="What should it make happen?">
+        <Section
+          label="What should it make happen?"
+          hint="Sets the call-to-action and how direct the email feels."
+        >
           <ChipRow>
             {GOALS.map((g) => (
               <Chip
@@ -407,7 +410,10 @@ export function CampaignForm({
 
         {/* Product */}
         {products.length > 0 && (
-          <Section label="Is this about one of your products?">
+          <Section
+            label="Is this about one of your products?"
+            hint="Pick one and we'll pull in its price, photo, and details automatically."
+          >
             <ChipRow>
               <Chip
                 active={offerSlug === ""}
@@ -477,7 +483,10 @@ export function CampaignForm({
         )}
 
         {/* Tone */}
-        <Section label="How should the words sound?">
+        <Section
+          label="How should the words sound?"
+          hint="Overrides your usual brand voice for just this one."
+        >
           <ChipRow>
             {TONES.map((t) => (
               <Chip
@@ -510,7 +519,10 @@ export function CampaignForm({
         </Section>
 
         {/* Vibe */}
-        <Section label="What's the look and feel?">
+        <Section
+          label="What's the look and feel?"
+          hint="The visual style, separate from tone, shapes the images and design, not the words."
+        >
           <ChipRow>
             {VIBES.map((v) => (
               <Chip
@@ -615,7 +627,10 @@ export function CampaignForm({
           </button>
           {moreOpen && (
             <div className="mt-4 flex flex-col gap-4">
-              <Field label="Who is it for?">
+              <Field
+                label="Who is it for?"
+                hint="Who's receiving this, in plain words. Leave blank to use your whole list."
+              >
                 <Input
                   value={audience}
                   onChange={(e) => setAudience(e.target.value)}
@@ -624,7 +639,10 @@ export function CampaignForm({
                   maxLength={200}
                 />
               </Field>
-              <Field label="Got an angle in mind?">
+              <Field
+                label="Got an angle in mind?"
+                hint="A specific spin or story for this one, different from the main message above. Optional, skip if nothing comes to mind."
+              >
                 <Input
                   value={angle}
                   onChange={(e) => setAngle(e.target.value)}
@@ -633,7 +651,10 @@ export function CampaignForm({
                   maxLength={200}
                 />
               </Field>
-              <Field label="How should it open?">
+              <Field
+                label="How should it open?"
+                hint="The first line or opening moment, how you want it to grab attention. Optional."
+              >
                 <Input
                   value={hook}
                   onChange={(e) => setHook(e.target.value)}
@@ -642,7 +663,10 @@ export function CampaignForm({
                   maxLength={200}
                 />
               </Field>
-              <Field label="After reading, they should…">
+              <Field
+                label="After reading, they should…"
+                hint="What you want them thinking or feeling by the end, not what you want them to do (that's the goal above)."
+              >
                 <Input
                   value={readerBelief}
                   onChange={(e) => setReaderBelief(e.target.value)}
@@ -651,7 +675,10 @@ export function CampaignForm({
                   maxLength={200}
                 />
               </Field>
-              <Field label="Anything to avoid or must-include?">
+              <Field
+                label="Anything to avoid or must-include?"
+                hint="Specific details to mention, or words and topics to steer clear of."
+              >
                 <Textarea
                   value={constraints}
                   onChange={(e) => setConstraints(e.target.value)}
@@ -722,14 +749,17 @@ export function CampaignForm({
 
 function Section({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <p className="mb-2 text-[13px] font-medium text-foreground/90">{label}</p>
+      {hint && <p className="mb-2 text-xs text-muted">{hint}</p>}
       {children}
     </div>
   );

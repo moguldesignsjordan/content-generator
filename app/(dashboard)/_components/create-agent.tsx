@@ -77,6 +77,8 @@ export interface CreateAgentSuggestion {
 /** The brief as resolved by the route, rendered as editable rows. */
 interface BriefCard {
   topicTitle: string | null;
+  subjectLine: string | null;
+  preheader: string | null;
   audience: string | null;
   goal: string | null;
   keyMessage: string | null;
@@ -512,6 +514,8 @@ export function CreateAgent({
                 onApply={(pending) => {
                   const parts: string[] = [];
                   if (pending.Topic) parts.push(`the topic to "${pending.Topic}"`);
+                  if (pending.Name) parts.push(`the email's name (subject line) to "${pending.Name}"`);
+                  if (pending.Subheader) parts.push(`the subheader to "${pending.Subheader}"`);
                   if (pending.For) parts.push(`the audience to "${pending.For}"`);
                   if (pending.Goal) parts.push(`the goal to "${pending.Goal}"`);
                   if (pending.Message) parts.push(`the key message to "${pending.Message}"`);
@@ -940,6 +944,16 @@ function BriefCardView({
 
   const rows: BriefRow[] = [
     { label: "Topic", value: card.topicTitle },
+    {
+      label: "Name",
+      value: card.subjectLine,
+      hint: card.subjectLine ? undefined : "the subject line readers see",
+    },
+    {
+      label: "Subheader",
+      value: card.preheader,
+      hint: card.preheader ? undefined : "the preview line under the subject",
+    },
     { label: "For", value: card.audience },
     {
       label: "Goal",
@@ -949,9 +963,21 @@ function BriefCardView({
         : undefined,
     },
     { label: "Message", value: card.keyMessage },
-    { label: "Proof", value: card.proof },
-    { label: "Hook", value: card.hook },
-    { label: "Angle", value: card.angle },
+    {
+      label: "Proof",
+      value: card.proof,
+      hint: card.proof ? undefined : "e.g. a stat, before/after, or client win",
+    },
+    {
+      label: "Hook",
+      value: card.hook,
+      hint: card.hook ? undefined : "how it should open",
+    },
+    {
+      label: "Angle",
+      value: card.angle,
+      hint: card.angle ? undefined : "the unique spin, if any",
+    },
     {
       label: "Offer",
       value: card.offerName,
@@ -959,13 +985,21 @@ function BriefCardView({
         .filter(Boolean)
         .join(" · ") || undefined,
     },
-    { label: "Reader belief", value: card.readerBelief },
+    {
+      label: "Reader belief",
+      value: card.readerBelief,
+      hint: card.readerBelief ? undefined : "how they should feel after",
+    },
     {
       label: "Tone",
       value: card.tone,
       hint: card.tone ? undefined : "brand voice",
     },
-    { label: "Vibe", value: card.visualVibe },
+    {
+      label: "Vibe",
+      value: card.visualVibe,
+      hint: card.visualVibe ? undefined : "visual style, e.g. punchy, sleek",
+    },
   ];
 
   // Number of rows with a pending (uncommitted) edit, in label order.

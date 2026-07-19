@@ -34,6 +34,7 @@ import {
 import type {
   Brand,
   CampaignBrief,
+  CampaignKind,
   FunnelStage,
   Product,
   SeriesDraftRef,
@@ -483,6 +484,11 @@ async function dispatchTool(
       if (input.use_ai_image_instead === true) {
         saved.push("product_photo_url cleared, an AI image will be generated instead");
       }
+      if (input.campaign_kind === "single") {
+        saved.push("campaign_kind cleared, back to a single email");
+      } else if (input.campaign_kind && state.brief.campaign_kind === input.campaign_kind) {
+        saved.push(`campaign_kind=${input.campaign_kind} (campaign mode: end with plan_series, never generate_content)`);
+      }
       return saved.length ? `Saved: ${saved.join("; ")}` : "No new fields to save.";
     }
     case "select_topic": {
@@ -526,6 +532,19 @@ async function dispatchTool(
     }
     case "generate_content": {
       const input = block.input as GenerateContentInput;
+      // The mechanical backstop for the "campaign collapsed into one email"
+      // failure: while the interview is in campaign mode, a single-draft
+      // generate is refused outright, whatever the model's plan was.
+      if (state.brief.campaign_kind && input.channel !== "social") {
+        return (
+          `Refused: this brief is a ${state.brief.campaign_kind} campaign, and a ` +
+          "campaign always ends in ONE plan_series call covering EVERY email " +
+          "(with each item's subject and preheader from the plan the user " +
+          "approved), never generate_content. Propose the numbered plan if you " +
+          "haven't, then call plan_series. If the user now wants just one " +
+          "email, call update_brief with campaign_kind \"single\" first."
+        );
+      }
       if (!state.topicId) {
         return "Cannot generate yet: no topic is attached to the brief.";
       }
@@ -573,17 +592,19 @@ async function dispatchTool(
       // em-dash ban has to be enforced here too, not just on reply text.
       const items = (input.items ?? [])
         .filter((i) => typeof i.title === "string" && i.title.trim())
-        .slice(0, 10)
+        .slice(0, 12)
         .map((i) => ({
           ...i,
           title: stripEmDashes(i.title.trim()),
+          subject: i.subject ? stripEmDashes(i.subject) : undefined,
+          preheader: i.preheader ? stripEmDashes(i.preheader) : undefined,
           angle: i.angle ? stripEmDashes(i.angle) : undefined,
           key_message: i.key_message ? stripEmDashes(i.key_message) : undefined,
           proof: i.proof ? stripEmDashes(i.proof) : undefined,
           offer_deadline: i.offer_deadline ? stripEmDashes(i.offer_deadline) : undefined,
         }));
       if (items.length < 2) {
-        return "plan_series needs 2 to 10 emails, each with a title.";
+        return "plan_series needs 2 to 12 emails, each with a title.";
       }
       const strategyId =
         ctx.strategy?.id ??
@@ -661,6 +682,10 @@ async function dispatchTool(
             ...(item.key_message ? { key_message: item.key_message } : {}),
             ...(item.angle ? { angle: item.angle } : {}),
             ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
+            // The name and subheader the user approved in the plan; generation
+            // uses them (near-)verbatim instead of writing its own.
+            ...(item.subject ? { subject_line: item.subject } : {}),
+            ...(item.preheader ? { preheader: item.preheader } : {}),
             // Per-item proof/deadline win over the campaign-wide default (set
             // above from state.brief) so a 5-email series doesn't recite the
             // same one number five times.
@@ -687,6 +712,11 @@ async function dispatchTool(
       }
       if (created.length === 0) return "No drafts could be created.";
       state.series = created;
+      // The campaign is built: drop the interview state so a follow-up "one
+      // more email" in this same chat isn't refused by the campaign guard.
+      delete state.brief.campaign_kind;
+      delete state.brief.campaign_products;
+      delete state.brief.email_count;
       return JSON.stringify({
         created: created.map((c) => ({ draftId: c.draft_id, title: c.title })),
       });
@@ -792,6 +822,8 @@ async function dispatchTool(
 
 const VISUAL_VIBES: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
 
+const CAMPAIGN_KINDS: CampaignKind[] = ["product", "promotion", "newsletter", "launch"];
+
 /** True for a well-formed http(s) URL; guards against the model inventing one. */
 function isHttpUrl(value: string): boolean {
   try {
@@ -847,6 +879,16 @@ function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): CampaignBr
   }
   if (input.use_ai_image_instead === true) {
     delete next.product_photo_url;
+  }
+  // Campaign mode is an explicit enum, entered and left deliberately:
+  // "single" drops the whole campaign interview state (kind, products,
+  // count) so the generate_content guard stops refusing.
+  if (input.campaign_kind === "single") {
+    delete next.campaign_kind;
+    delete next.campaign_products;
+    delete next.email_count;
+  } else if (input.campaign_kind && CAMPAIGN_KINDS.includes(input.campaign_kind)) {
+    next.campaign_kind = input.campaign_kind;
   }
   return next;
 }

@@ -382,7 +382,28 @@ export interface CampaignBrief {
   offer_exclusions?: string;
   /** What the reader should believe/feel after reading, in their own words. */
   reader_belief?: string;
+  /** The user-approved email name (subject line). Generation uses it
+   * verbatim as the subject instead of writing its own. */
+  subject_line?: string;
+  /** The user-approved subheader (inbox preview text under the subject).
+   * Generation uses it near-verbatim as the preheader. */
+  preheader?: string;
+  /** Interview state, not content guidance: set the moment the chat knows
+   * it's building a multi-email campaign. While set, generate_content is
+   * refused (a campaign must end in one plan_series call); cleared after
+   * plan_series succeeds or when the user drops back to a single email. */
+  campaign_kind?: CampaignKind;
+  /** Interview state: which products a product campaign covers, as the
+   * user's own words/slugs (e.g. "business cards, door hangers"). */
+  campaign_products?: string;
+  /** Interview state: how many emails the campaign should have, in the
+   * user's words (e.g. "2 per product, 6 total" or "5"). */
+  email_count?: string;
 }
+
+/** The kinds of multi-email campaign the create-agent interview can run;
+ * each gets its own tailored question stages (see prompts/create-agent.ts). */
+export type CampaignKind = "product" | "promotion" | "newsletter" | "launch";
 
 /** Every string-valued CampaignBrief field that a UI or chat surface can save
  * directly (excludes non-string fields like length/include_image/visual_vibe/
@@ -405,6 +426,10 @@ export const CAMPAIGN_BRIEF_TEXT_FIELDS = [
   "offer_price",
   "offer_exclusions",
   "reader_belief",
+  "subject_line",
+  "preheader",
+  "campaign_products",
+  "email_count",
 ] as const satisfies readonly (keyof CampaignBrief)[];
 
 /** One draft created as part of a multi-email series (plan_series), kept in

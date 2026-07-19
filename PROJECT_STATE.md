@@ -7,10 +7,37 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-18 (intake grounding — see session below; also still
-open: **migrations 020 AND 021 need applying in the Supabase SQL editor** —
-until 021 is applied, prompt capture silently no-ops and /prompts stays empty;
-until 020, rating an email 500s).
+Last updated: 2026-07-18 (campaign per-product plans + email names — see
+session below; also still open: **migrations 020 AND 021 need applying in the
+Supabase SQL editor** — until 021 is applied, prompt capture silently no-ops
+and /prompts stays empty; until 020, rating an email 500s).
+
+## Session 2026-07-18 (later): campaign per-product plans + email names
+
+Fix for a real failure: a chat-built product campaign ended in ONE
+`generate_content` email instead of `plan_series` drafts. Verified with
+`npm run typecheck` + `npm test` (407) + `npm run build`, all green.
+**Not yet committed.**
+
+- **Mechanical guard:** brief gained interview-state fields `campaign_kind` /
+  `campaign_products` / `email_count`; while `campaign_kind` is set the chat
+  route REFUSES `generate_content` (tool result tells the model to use
+  `plan_series`, or clear with campaign_kind "single"). State is shown as a
+  leading CAMPAIGN MODE line in BRIEF SO FAR and cleared after `plan_series`
+  succeeds.
+- **Kind-tailored campaign interview** (prompts/create-agent.ts): product
+  campaigns ask which products + emails per product + the deal; promos ask
+  deal/deadline/count with an urgency arc; newsletter runs ask themes;
+  launches ask what/when. Plan proposal must list every email's name
+  (subject), subheader, and angle, product campaigns exactly per-product
+  count; user approves/edits names before `plan_series`.
+- **User-picked name + subheader end to end:** new brief fields
+  `subject_line`/`preheader` (update_brief + brief card "Name"/"Subheader"
+  rows + single-email stage 13 THE NAME); `plan_series` items carry
+  `subject`/`preheader` into each draft's `series_brief`;
+  `buildCampaignBriefBlock` pins them (VERBATIM subject, near-verbatim
+  preheader) so generation honors them. `plan_series` cap raised 10 → 12
+  (3 per product x 4 products).
 
 ## Session 2026-07-18: intake grounding (fix "sounds like AI" copy)
 

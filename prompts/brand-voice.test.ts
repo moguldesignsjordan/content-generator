@@ -147,9 +147,56 @@ describe("buildBriefStateBlock", () => {
     expect(block).toContain("Reader belief: feel ready to book");
     expect(block).toContain("Offer terms: 25% off; ends Friday; $499");
   });
+
+  it("reports the chosen name and subheader, with not-set defaults otherwise", () => {
+    const set = buildBriefStateBlock(
+      { subject_line: "The Card They Won't Throw Away", preheader: "1K cards, $60, shipped" } as CampaignBrief,
+      null,
+    );
+    expect(set).toContain("Name (subject line): The Card They Won't Throw Away");
+    expect(set).toContain("Subheader: 1K cards, $60, shipped");
+    const unset = buildBriefStateBlock({} as CampaignBrief, null);
+    expect(unset).toContain("Name (subject line): (not set)");
+    expect(unset).toContain("Subheader: (not set)");
+  });
+
+  it("leads with campaign mode when a campaign is being built, and omits it otherwise", () => {
+    const block = buildBriefStateBlock(
+      {
+        campaign_kind: "product",
+        campaign_products: "business cards, door hangers",
+        email_count: "2 per product, 4 total",
+      } as CampaignBrief,
+      null,
+    );
+    expect(block).toContain(
+      "CAMPAIGN MODE: product campaign; products: business cards, door hangers; emails: 2 per product, 4 total (must end in plan_series)",
+    );
+    // Campaign mode must sit above the field rows so it can't be missed.
+    expect(block.indexOf("CAMPAIGN MODE")).toBeLessThan(block.indexOf("Goal:"));
+    expect(buildBriefStateBlock({} as CampaignBrief, null)).not.toContain("CAMPAIGN MODE");
+  });
 });
 
 describe("buildCampaignBriefBlock", () => {
+  it("pins the user-approved subject line and preheader for generation", () => {
+    const block = buildCampaignBriefBlock({
+      goal: "Sell the thing",
+      subject_line: "Go Big. Get Noticed.",
+      preheader: "Retractable banners built for your brand",
+    } as CampaignBrief);
+    expect(block).toContain(
+      "SUBJECT LINE (user-approved; use it VERBATIM as the subject, do not rewrite it): Go Big. Get Noticed.",
+    );
+    expect(block).toContain(
+      "PREHEADER (user-approved; use it near-verbatim as the preview text): Retractable banners built for your brand",
+    );
+    // Unset means no line at all, not an empty directive.
+    const bare = buildCampaignBriefBlock({ goal: "Sell the thing" } as CampaignBrief);
+    expect(bare).not.toContain("SUBJECT LINE");
+    expect(bare).not.toContain("PREHEADER");
+  });
+
   it("includes the visual vibe when set", () => {
     const block = buildCampaignBriefBlock({
       goal: "Sell the thing",

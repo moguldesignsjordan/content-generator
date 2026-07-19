@@ -289,11 +289,23 @@ export function buildBriefStateBlock(
   const offerParts = [brief.offer_deal, brief.offer_deadline, brief.offer_price].filter(
     Boolean,
   );
+  const campaignParts = [
+    brief.campaign_kind ? `${brief.campaign_kind} campaign` : null,
+    brief.campaign_products ? `products: ${brief.campaign_products}` : null,
+    brief.email_count ? `emails: ${brief.email_count}` : null,
+  ].filter(Boolean);
   return [
     "BRIEF SO FAR (current saved state, refreshed automatically each turn):",
+    // Campaign mode leads the block: it changes which flow applies and which
+    // generate tool is allowed, so it must never be scannable-past.
+    ...(campaignParts.length
+      ? [`  CAMPAIGN MODE: ${campaignParts.join("; ")} (must end in plan_series)`]
+      : []),
     `  Goal: ${brief.goal ?? "(not set)"}`,
     `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
     `  Key message: ${brief.key_message ?? "(not set)"}`,
+    `  Name (subject line): ${brief.subject_line ?? "(not set)"}`,
+    `  Subheader: ${brief.preheader ?? "(not set)"}`,
     `  Proof: ${brief.proof ?? "(not set)"}`,
     `  Hook: ${brief.hook ?? "(not set)"}`,
     `  Reader belief: ${brief.reader_belief ?? "(not set)"}`,
@@ -327,6 +339,16 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
   const lines: string[] = [];
   if (brief.goal) lines.push(`  Goal: ${brief.goal}`);
   if (brief.key_message) lines.push(`  Key message: ${brief.key_message}`);
+  if (brief.subject_line) {
+    lines.push(
+      `  SUBJECT LINE (user-approved; use it VERBATIM as the subject, do not rewrite it): ${brief.subject_line}`,
+    );
+  }
+  if (brief.preheader) {
+    lines.push(
+      `  PREHEADER (user-approved; use it near-verbatim as the preview text): ${brief.preheader}`,
+    );
+  }
   if (brief.proof) {
     lines.push(
       `  PROOF (real, from the user, use it near-verbatim; do not paraphrase into vagueness): ${brief.proof}`,

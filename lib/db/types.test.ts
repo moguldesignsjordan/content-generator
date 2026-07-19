@@ -13,7 +13,8 @@ type NonTextField =
   | "email_style"
   | "product_photo_url"
   | "use_ai_image_instead"
-  | "style_example";
+  | "style_example"
+  | "campaign_kind";
 
 type ExpectedTextField = Exclude<keyof CampaignBrief, NonTextField>;
 type ListedField = (typeof CAMPAIGN_BRIEF_TEXT_FIELDS)[number];
