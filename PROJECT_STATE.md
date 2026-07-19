@@ -17,7 +17,8 @@ and /prompts stays empty; until 020, rating an email 500s).
 Fix for a real failure: a chat-built product campaign ended in ONE
 `generate_content` email instead of `plan_series` drafts. Verified with
 `npm run typecheck` + `npm test` (407) + `npm run build`, all green.
-**Not yet committed.**
+Committed & pushed (313907b, which also carried a prior session's small
+form-hint copy tweaks).
 
 - **Mechanical guard:** brief gained interview-state fields `campaign_kind` /
   `campaign_products` / `email_count`; while `campaign_kind` is set the chat
