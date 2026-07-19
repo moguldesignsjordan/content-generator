@@ -7,9 +7,8 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-19 (competitor ad swipe-file library built — see session
-below; also still open: **migration 025 needs applying in the Supabase SQL
-editor** for the competitor library to work, plus the older-standing
+Last updated: 2026-07-19 (competitor ad swipe-file library built AND
+live-verified — see session below; still open: the older-standing
 **migrations 020 AND 021** — until 021 is applied, prompt capture silently
 no-ops and /prompts stays empty; until 020, rating an email 500s).
 
@@ -22,10 +21,28 @@ structure, persuasion levers, CTA style, never its wording. Mirrors the
 existing `reference_emails` (015) and `style_references` kind=email (016)
 patterns: distill once at save time, inject the distilled profile at
 generation, hard anti-copy framing. Verified with `npm run typecheck` +
-`npm test` (452, up from 421) + `npm run build`, all green. **Not yet
-committed.** Browser click-through not done this session (needs a real
-login; Playwright MCP off by default) — the /media "Competitor Ads" tab and
-the create-chat capture flow (paste/attach/URL) are untested live.
+`npm test` (452, up from 421) + `npm run build`, all green. **COMMITTED &
+PUSHED (f75b77f).** Migration 025 **applied** by Jordan. Browser
+click-through: the /media "Competitor Ads" tab renders and the "paste copy"
+save path was live-verified end to end (form → API → Claude distillation →
+DB → UI) — saved a fake competitor ad's full copy and got back a strategy
+summary ("pattern-interrupt command targeting a pain point... time-based
+scarcity... frictionless discount mechanic...") with zero verbatim words,
+numbers, or the brand name from the source copy, confirming the anti-copy
+distillation works as designed. Screenshot upload, URL-scrape, and the
+create-chat pick-it/generate/confirm-no-leak loop are still unverified
+(session ended mid-check on `/create`).
+
+**Debugging note, not an app bug:** the /media page briefly looked totally
+broken in the browser (webpack "Cannot read properties of undefined
+(reading 'call')", full white/crash render) after restarting the dev
+server. Root cause: a stale Service Worker from the **StackBot** project
+(also dev-served on localhost:3000) was still registered for this origin
+and intercepting requests with StackBot's own cached chunks. Fixed by
+`navigator.serviceWorker.getRegistrations()` + `unregister()` + clearing
+`caches` in the browser console. Worth remembering if any Mogul
+localhost:3000 project ever renders garbled/stale in dev: check for a
+leftover SW registration before assuming the code is broken.
 
 - **New table** `competitor_references` (migration 025, NOT yet applied):
   `input_kind` discriminator (`text`/`image`), `content`/`image_url`/
@@ -53,10 +70,11 @@ the create-chat capture flow (paste/attach/URL) are untested live.
   sibling `app/api/create/chat/brief-merge.ts`: Next.js route files may only
   export GET/POST/config, so `mergeBrief` (needed as a unit-testable export)
   had to move out; `isHttpUrl` went with it since both files use it.
-- **Next**: apply migration 025 in Supabase, then a real browser
-  click-through (save an ad each of the 3 ways, pick it in create chat,
-  generate, confirm no verbatim competitor wording/numbers/brand leaks in
-  and the hook/structure was influenced), then commit + push.
+- **Next**: finish the browser click-through — screenshot upload, URL
+  scrape (including the Facebook Ad Library fallback message), then pick a
+  saved ad in the create chat, generate an email, and confirm the
+  hook/structure/CTA were influenced with no competitor wording, numbers, or
+  brand leaking in. Check both light and dark.
 
 ## Session 2026-07-19 (later): CTA link persistence fix + clickable hero image
 
