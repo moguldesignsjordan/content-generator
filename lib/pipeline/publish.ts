@@ -104,20 +104,39 @@ export async function publishDraft(
         brand,
         integration,
       });
+      // "gone" means the stored external id no longer exists at the
+      // destination (deleted/expired after creation) — retrying it would
+      // fail forever. Recreate the resource fresh instead, the same call
+      // used when there's no existing row at all, and point the row at the
+      // new id so it stops being permanently stuck.
+      const recreated = retry.gone
+        ? await provider.publish({
+            jobId: draft.jobId,
+            draftId: draft.draftId,
+            content: draft.content,
+            meta: draft.meta,
+            brand,
+            integration,
+            schedule,
+          })
+        : null;
+      const effective = recreated ?? retry;
       const updated = await updatePublicationDelivery({
         jobId: draft.jobId,
         target: provider.id,
-        status: retry.status ?? "sent",
-        scheduledFor: retry.scheduledFor,
+        status: effective.status ?? "sent",
+        scheduledFor: effective.scheduledFor,
+        externalId: recreated ? recreated.externalId : undefined,
+        url: recreated ? recreated.url : undefined,
       });
       return {
         target: provider.id,
-        externalId: existing.external_id,
-        url: updated.url ?? retry.url ?? undefined,
+        externalId: updated.external_id ?? effective.externalId,
+        url: updated.url ?? effective.url ?? undefined,
         alreadyPublished: false,
         status: updated.status,
         scheduledFor: updated.scheduled_for ?? undefined,
-        scheduleError: retry.scheduleError,
+        scheduleError: effective.scheduleError,
       };
     }
     return {

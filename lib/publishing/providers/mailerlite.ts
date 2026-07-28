@@ -145,6 +145,9 @@ async function deliverCampaign(
       url,
       status: "draft",
       scheduleError: `MailerLite schedule failed (${res.status}): ${responseBody.slice(0, 400)}`,
+      // 410/404 means the campaign no longer exists at MailerLite (deleted or
+      // expired after creation) — retrying the same id will fail forever.
+      gone: res.status === 410 || res.status === 404,
     };
   }
 
@@ -244,6 +247,13 @@ export const mailerliteProvider: PublishProvider = {
     if (!ml.apiKey) {
       throw new Error(
         "MailerLite is not connected. Add an API key in Settings → Connections.",
+      );
+    }
+    if (!ml.groupIds?.length) {
+      // Same guard as publish(): without it this fails with an opaque
+      // provider error indistinguishable from a genuinely gone campaign.
+      throw new Error(
+        "MailerLite has no audience group selected. Add a group ID in Settings → Connections.",
       );
     }
     return deliverCampaign(

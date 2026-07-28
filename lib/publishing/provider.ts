@@ -83,6 +83,13 @@ export interface PublishResult {
   scheduledFor?: string;
   /** Set when status is 'draft' because the schedule/send call failed. */
   scheduleError?: string;
+  /**
+   * True when the delivery call failed because the resource no longer exists
+   * at the destination (410/404) — the campaign was deleted/expired after
+   * creation. Distinguishes "dead, recreate it" from an ordinary transient
+   * delivery failure, which must never trigger a re-create (would duplicate).
+   */
+  gone?: boolean;
 }
 
 /**

@@ -736,6 +736,9 @@ export async function updatePublicationDelivery(args: {
   target: string;
   status: string;
   scheduledFor?: string;
+  /** Set when a dead campaign was recreated: replaces the stale external id/url. */
+  externalId?: string;
+  url?: string;
 }): Promise<PublicationRecord> {
   const db = getAdminClient();
   const { data, error } = await db
@@ -743,6 +746,8 @@ export async function updatePublicationDelivery(args: {
     .update({
       status: args.status,
       scheduled_for: args.scheduledFor ?? null,
+      ...(args.externalId ? { external_id: args.externalId } : {}),
+      ...(args.url ? { url: args.url } : {}),
     })
     .eq("job_id", args.jobId)
     .eq("target", args.target)
