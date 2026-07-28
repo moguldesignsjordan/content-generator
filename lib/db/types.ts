@@ -492,6 +492,18 @@ export interface TopicContext {
   strategy: Strategy;
   primaryIcp: Icp | null;
   product: Product | null;
+  /** The pillar and cluster this topic hangs off. getTopicContext always
+   * walked these rows to reach the strategy, but only ever read their foreign
+   * keys, so the pillar's business_goal and the cluster's hub intent, the two
+   * facts that say what this piece is FOR, never reached a prompt. Optional so
+   * older call sites and hand-built contexts (tests, chat surfaces) still
+   * typecheck. */
+  pillar?: Pillar | null;
+  cluster?: Cluster | null;
+  /** Every ICP on the strategy, primary first. `primaryIcp` stays the one the
+   * voice block speaks to; this is here so an angle can be checked against the
+   * secondary audiences it might alienate. */
+  icps?: Icp[];
   /** The brand's reference email library (migration 015), newest first.
    * Optional so pre-migration DBs and older call sites degrade to "none". */
   referenceEmails?: ReferenceEmail[];
@@ -871,6 +883,26 @@ export interface CompetitorReference {
 export interface DraftMeta {
   meta_title?: string;
   meta_description?: string;
+  /** The strategy pass's output (lib/pipeline/pick-angle): all three angles it
+   * proposed, which one it chose, and why. Stored whole so the alternatives
+   * survive, not just the winner. Absent on drafts generated before the angle
+   * step existed, and whenever that step failed (it's non-fatal). jsonb, no
+   * migration needed. */
+  angles?: {
+    angles: {
+      hook: string;
+      reader_belief: string;
+      why_it_works: string;
+      cta_rationale: string;
+    }[];
+    chosen_index: number;
+    choice_reason: string;
+  };
+  /** The design critique pass (lib/pipeline/critique-design): its one-line
+   * verdict and the fixes it actually applied. An empty `applied` with a
+   * verdict means the design was checked and left alone, which is a different
+   * (and better) thing than the critique never running. */
+  design_critique?: { verdict: string; applied: string[] };
   email_template_id?: EmailTemplateId;
   // The visual design direction chosen for this draft (rotation, no
   // consecutive repeats). Set at fresh-generation time from pickEmailStyle;
@@ -978,6 +1010,21 @@ export interface DraftSeoData {
   /** Whether the offer terms in the copy match the brief/product exactly,
    * with nothing invented. */
   offer_terms_accurate?: boolean;
+  /** Phrases the QA reviewer matched against the shared AI-tell list
+   * (prompts/ai-tells.ts). A non-empty list fails QA and triggers the one
+   * revision pass, same as an unsupported specific. */
+  ai_tells_found?: string[];
+  /** Set when the QA revise pass ran: what the FIRST draft failed on, kept so
+   * the review screen can show the work QA did instead of hiding it. The
+   * surrounding seo_data fields always describe the draft that was actually
+   * saved (the revision, when one happened). */
+  qa_revision?: {
+    /** Why the first draft failed: issues, unsupported specifics, AI tells. */
+    fixed: string[];
+    /** False when the revision still failed QA; the reviewer should look
+     * harder at this one. */
+    resolved: boolean;
+  };
 }
 
 // Shape returned by getDraftForReview: a draft plus the topic it belongs to.
@@ -998,6 +1045,34 @@ export interface DraftForReview {
   /** Optional reason alongside the rating (migration 023), a canned chip or
    * free text; fed back into generation as WHY a disliked draft missed. */
   feedback_note: string | null;
+}
+
+/**
+ * A published email that actually performed, distilled for the angle-selection
+ * prompt: what the subject said, how it opened, and the rates it earned.
+ */
+export interface TopPerformingEmail {
+  subject: string;
+  /** First body section, truncated: the hook that followed the subject. */
+  opening: string;
+  /** Percentages as the provider reports them (MailerLite sends floats). */
+  open_rate: number;
+  click_rate: number;
+}
+
+/**
+ * How a reviewer changed a draft (migration 026). See the migration for why
+ * each shape carries different fields.
+ */
+export type DraftEditKind = "inline" | "style";
+
+export interface DraftEdit {
+  kind: DraftEditKind;
+  region: string | null;
+  before_text: string | null;
+  after_text: string | null;
+  instruction: string | null;
+  created_at: string;
 }
 
 /** Thumbs rating a reviewer can put on a draft. */

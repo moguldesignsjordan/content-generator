@@ -7,6 +7,8 @@ import {
 } from "@/lib/clients/anthropic";
 import {
   getBrandWithIcps,
+  listDraftEdits,
+  listFeedbackEmailExamples,
   listProducts,
   updateBrandGuidelines,
 } from "@/lib/db/queries";
@@ -44,7 +46,24 @@ export async function POST() {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
     const products = await listProducts(data.brand.id);
-    const { system, user } = buildGuidelinesMessages({ ...data, products });
+
+    // The user's own corrections, so a re-synthesis learns from how they've
+    // actually been editing drafts instead of only re-reading onboarding.
+    // Both are non-fatal and empty on a new account.
+    const [edits, disliked] = await Promise.all([
+      listDraftEdits(data.brand.id),
+      listFeedbackEmailExamples(data.brand.id, 8),
+    ]);
+    const dislikeNotes = disliked
+      .filter((e) => e.feedback === "down" && e.note)
+      .map((e) => e.note!);
+
+    const { system, user } = buildGuidelinesMessages({
+      ...data,
+      products,
+      edits,
+      dislikeNotes,
+    });
 
     const response = await getAnthropic().messages.create({
       model: DRAFT_MODEL,

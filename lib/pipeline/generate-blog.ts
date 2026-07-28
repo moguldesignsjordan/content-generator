@@ -1,6 +1,7 @@
 import "server-only";
 import {
   DRAFT_MODEL,
+  FAST_MODEL,
   cacheableSystem,
   getAnthropic,
   logUsage,
@@ -10,6 +11,7 @@ import {
   getDraftWithJobContext,
   getLatestDraftVersion,
   getTopicContext,
+  listFeedbackEmailExamples,
   patchDraftGeneration,
   persistRegeneratedDraft,
   populateDraft,
@@ -25,6 +27,12 @@ import {
   type BlogDraftOutput,
   type BlogLengthTarget,
 } from "@/prompts/generate-blog";
+import {
+  GROUNDING_QA_TOOL,
+  GroundingQaSchema,
+  buildGroundingQaMessages,
+} from "@/prompts/qa-grounding";
+import { buildQaRevisionNudge } from "@/prompts/generate-email";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { findBannedTerms, visibleEmailText } from "@/lib/email/quality";
 import { stripEmDashes } from "@/lib/text";
@@ -40,6 +48,7 @@ import type {
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
+import { chosenAngle, pickAngle } from "./pick-angle";
 import { logError, logWarn } from "@/lib/log";
 
 /**
@@ -62,9 +71,26 @@ export async function generateBlogForTopicStreamed(
     onEvent({ type: "phase", ...writing });
 
     const brief = await loadBrief(opts.campaignId);
+
+    // Decide what the post should argue before writing it. Non-fatal: a null
+    // angle leaves the prompt exactly as it was before this step existed.
+    const strategizing = { phase: "strategizing", label: "Choosing the angle" };
+    await patchDraftGeneration(draftId, strategizing);
+    onEvent({ type: "phase", ...strategizing });
+    const angleResult = await pickAngle(ctx, { brief, channel: "blog" });
+    const angle = chosenAngle(angleResult?.angle);
+
+    await patchDraftGeneration(draftId, writing);
+    onEvent({ type: "phase", ...writing });
+
+    // Thumbs the reviewer gave past POSTS (not emails): blogs were generating
+    // with no taste history at all before this.
+    const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id, 3, "blog");
     const { system, user, blogType } = buildBlogMessages(ctx, {
       brief,
       blogTypeOverride: opts.blogTypeOverride,
+      angle,
+      feedbackExamples,
     });
     const lengthTarget = BLOG_LENGTH_TARGETS[blogType];
     const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
@@ -73,7 +99,7 @@ export async function generateBlogForTopicStreamed(
       brandId: ctx.brand.id,
     });
 
-    const copy = cleanBlogCopy(parsed);
+    let copy = cleanBlogCopy(parsed);
 
     // Brand-level opt-in: auto-create the post's hero image (first
     // generation only; non-fatal, the draft ships without one on failure).
@@ -82,13 +108,33 @@ export async function generateBlogForTopicStreamed(
       draftId,
       onEvent,
     });
-    const html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
+    const render = (output: BlogDraftOutput) => {
+      const revised = cleanBlogCopy(output);
+      return { copy: revised, html: renderBlogPreviewHtml(revised, ctx.brand, heroImage) };
+    };
+    let html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
 
     const checking = { phase: "checking", label: "Running quality checks" };
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const seoData = runBlogChecks(ctx, copy, html, lengthTarget, blogType);
+    const checked = await qaBlogWithRevision({
+      ctx,
+      system,
+      user,
+      copyOpts: { lengthTarget, blogType, brandId: ctx.brand.id },
+      copy,
+      html,
+      render,
+      brief,
+      lengthTarget,
+      blogType,
+    });
+    ({ copy, html } = checked);
+    const seoData = checked.seoData;
+    usageDeltas.push(...checked.usageDeltas);
+
+    if (angleResult) usageDeltas.push(...angleResult.usageDeltas);
 
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -96,6 +142,7 @@ export async function generateBlogForTopicStreamed(
     const meta: DraftMeta = {
       meta_title: copy.meta_title,
       meta_description: copy.meta_description,
+      ...(angleResult ? { angles: angleResult.angle } : {}),
       blog_type: blogType,
       blog_copy: copy,
       ...(heroImage ? { hero_image: heroImage } : {}),
@@ -154,9 +201,14 @@ export async function regenerateBlogDraft(
   if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
 
   const brief = draftCtx.meta.series_brief ?? (await loadBrief(draftCtx.campaignId));
+  const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id, 3, "blog");
   const { system, user, blogType } = buildBlogMessages(ctx, {
     brief,
+    feedbackExamples,
     blogTypeOverride: draftCtx.blogType ?? undefined,
+    // Same reasoning as the email path: reuse the angle this post was built
+    // on, since the rejection feedback already outranks it.
+    angle: chosenAngle(draftCtx.meta.angles),
     rejection: {
       feedback,
       previousTitle: draftCtx.content.subject,
@@ -170,12 +222,30 @@ export async function regenerateBlogDraft(
     blogType,
     brandId: ctx.brand.id,
   });
-  const copy = cleanBlogCopy(parsed);
+  let copy = cleanBlogCopy(parsed);
 
   const heroImage = draftCtx.meta.hero_image;
-  const html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
+  const render = (output: BlogDraftOutput) => {
+    const revised = cleanBlogCopy(output);
+    return { copy: revised, html: renderBlogPreviewHtml(revised, ctx.brand, heroImage) };
+  };
+  let html = renderBlogPreviewHtml(copy, ctx.brand, heroImage);
 
-  const seoData = runBlogChecks(ctx, copy, html, lengthTarget, blogType);
+  const checked = await qaBlogWithRevision({
+    ctx,
+    system,
+    user,
+    copyOpts: { lengthTarget, blogType, brandId: ctx.brand.id },
+    copy,
+    html,
+    render,
+    brief,
+    lengthTarget,
+    blogType,
+  });
+  ({ copy, html } = checked);
+  const seoData = checked.seoData;
+  usageDeltas.push(...checked.usageDeltas);
 
   let usage: DraftUsage | undefined;
   for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -183,6 +253,9 @@ export async function regenerateBlogDraft(
   const meta: DraftMeta = {
     meta_title: copy.meta_title,
     meta_description: copy.meta_description,
+    // Carried forward like the hero image and the source link: the new version
+    // is a revision of the same strategy, so it keeps the same angle record.
+    ...(draftCtx.meta.angles ? { angles: draftCtx.meta.angles } : {}),
     blog_type: blogType,
     blog_copy: copy,
     ...(heroImage ? { hero_image: heroImage } : {}),
@@ -235,6 +308,8 @@ async function generateBlogCopy(
         model: DRAFT_MODEL,
         max_tokens: 32000,
         thinking: { type: "adaptive" },
+        // Same reasoning as the email path: set explicitly, not inherited.
+        output_config: { effort: "high" },
         system: cachedSystem,
         messages: [{ role: "user", content: u }],
         tools: [BLOG_TOOL],
@@ -336,6 +411,166 @@ function cleanBlogCopy(parsed: BlogDraftOutput): BlogCopy {
     conclusion: stripEmDashes(parsed.conclusion.trim()),
     cta_text: stripEmDashes(parsed.cta_text.trim()),
     cta_url: parsed.cta_url?.trim() || undefined,
+  };
+}
+
+/**
+ * Runs the full blog QA gate: code checks + model audit, then ONE targeted
+ * rewrite when the post failed, then re-checks the rewrite. The email path's
+ * reviseForQa in the same shape; see that function for why the cap is one.
+ */
+async function qaBlogWithRevision(args: {
+  ctx: TopicContext;
+  system: string;
+  user: string;
+  copyOpts: Parameters<typeof generateBlogCopy>[2];
+  copy: BlogCopy;
+  html: string;
+  /** Re-renders a revised post the way the caller rendered the first one, so
+   * the revision keeps the draft's hero image. */
+  render: (parsed: BlogDraftOutput) => { copy: BlogCopy; html: string };
+  brief?: CampaignBrief | null;
+  lengthTarget?: BlogLengthTarget;
+  blogType?: BlogType;
+}): Promise<{
+  copy: BlogCopy;
+  html: string;
+  seoData: DraftSeoData;
+  usageDeltas: UsageDelta[];
+}> {
+  const { ctx, copy, html, brief, lengthTarget, blogType } = args;
+
+  const audit = async (c: BlogCopy, h: string) => {
+    const model = await runBlogGroundingQa(ctx, c, brief);
+    const code = runBlogChecks(ctx, c, h, lengthTarget, blogType);
+    return { seoData: mergeBlogQa(code, model.seoData), usageDeltas: model.usageDeltas };
+  };
+
+  const first = await audit(copy, html);
+  const nudge = buildQaRevisionNudge(first.seoData, "blog post");
+  if (first.seoData.qa_pass !== false || !nudge) {
+    return { copy, html, seoData: first.seoData, usageDeltas: first.usageDeltas };
+  }
+
+  const fixed = [
+    ...(first.seoData.unsupported_specifics ?? []).map((s) => `Unsupported specific: "${s}"`),
+    ...(first.seoData.banned_terms_found ?? []).map((s) => `Banned term: "${s}"`),
+    ...(first.seoData.ai_tells_found ?? []).map((s) => `AI tell: "${s}"`),
+    ...(first.seoData.issues ?? []),
+  ];
+  logWarn(
+    "pipeline:generate-blog:qa-revise",
+    `blog draft failed QA (${fixed.length} issue${fixed.length === 1 ? "" : "s"}); revising once`,
+    { brandId: ctx.brand.id, topicId: ctx.topic.id },
+  );
+
+  try {
+    const revision = await generateBlogCopy(args.system, args.user + nudge, args.copyOpts);
+    const rendered = args.render(revision.parsed);
+    const second = await audit(rendered.copy, rendered.html);
+    return {
+      ...rendered,
+      seoData: {
+        ...second.seoData,
+        qa_revision: { fixed, resolved: second.seoData.qa_pass !== false },
+      },
+      usageDeltas: [
+        ...first.usageDeltas,
+        ...revision.usageDeltas,
+        ...second.usageDeltas,
+      ],
+    };
+  } catch (err) {
+    logError("pipeline:generate-blog:qa-revise", err, { topicId: ctx.topic.id });
+    return { copy, html, seoData: first.seoData, usageDeltas: first.usageDeltas };
+  }
+}
+
+/** The article as plain prose, for checks that audit claims rather than markup. */
+function blogPlainText(copy: BlogCopy): string {
+  return [
+    copy.title,
+    copy.intro,
+    ...copy.sections.map((s) => `${s.heading}\n${s.body}`),
+    copy.conclusion,
+    copy.cta_text,
+  ].join("\n\n");
+}
+
+/**
+ * The model half of blog QA: invented specifics and AI tells, the two things
+ * code cannot check. Blogs had no model QA at all before this, which meant a
+ * post could publish a made-up statistic to Sanity with a green Quality check
+ * next to it.
+ *
+ * Non-fatal: a failed call returns no findings and the code-level checks in
+ * runBlogChecks still stand on their own, exactly as they did before.
+ */
+async function runBlogGroundingQa(
+  ctx: TopicContext,
+  copy: BlogCopy,
+  brief?: CampaignBrief | null,
+): Promise<{ seoData: DraftSeoData; usageDeltas: UsageDelta[] }> {
+  const usageDeltas: UsageDelta[] = [];
+  try {
+    const { system, user } = buildGroundingQaMessages(ctx, blogPlainText(copy), brief);
+    const response = await getAnthropic().messages.create({
+      model: FAST_MODEL,
+      max_tokens: 1024,
+      system: cacheableSystem(system),
+      messages: [{ role: "user", content: user }],
+      tools: [GROUNDING_QA_TOOL],
+      tool_choice: { type: "tool", name: "grounding_review" },
+    });
+    logUsage("blog-qa", FAST_MODEL, response.usage, {
+      brandId: ctx.brand.id,
+      metered: true,
+      requestId: response.id,
+    });
+    usageDeltas.push({ model: FAST_MODEL, ...response.usage });
+
+    const tu = response.content.find(
+      (b) => b.type === "tool_use" && b.name === "grounding_review",
+    );
+    if (!tu || tu.type !== "tool_use") return { seoData: {}, usageDeltas };
+
+    const parsed = GroundingQaSchema.safeParse(tu.input);
+    if (!parsed.success) {
+      logError("pipeline:generate-blog:qa-invalid", parsed.error, {
+        issues: parsed.error.issues,
+      });
+      return { seoData: {}, usageDeltas };
+    }
+    const qa = parsed.data;
+    return {
+      seoData: {
+        unsupported_specifics: qa.unsupported_specifics,
+        ai_tells_found: qa.ai_tells_found,
+        issues: qa.issues,
+      },
+      usageDeltas,
+    };
+  } catch (err) {
+    logError("pipeline:generate-blog:qa-pass", err);
+    return { seoData: {}, usageDeltas };
+  }
+}
+
+/**
+ * Merges the code checks with the model audit into one verdict. The code
+ * findings stay authoritative (they're deterministic); the model findings can
+ * only ever ADD a reason to fail, never clear one.
+ */
+function mergeBlogQa(code: DraftSeoData, model: DraftSeoData): DraftSeoData {
+  const unsupported = model.unsupported_specifics ?? [];
+  const tells = model.ai_tells_found ?? [];
+  const issues = [...(code.issues ?? []), ...(model.issues ?? [])];
+  return {
+    ...code,
+    issues,
+    ...(unsupported.length ? { unsupported_specifics: unsupported } : {}),
+    ...(tells.length ? { ai_tells_found: tells } : {}),
+    qa_pass: code.qa_pass !== false && unsupported.length === 0 && tells.length === 0,
   };
 }
 

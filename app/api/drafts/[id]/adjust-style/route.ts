@@ -6,6 +6,7 @@ import {
 } from "@/lib/pipeline/adjust-style";
 import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { requireDraftInBrand } from "@/lib/draft-access";
+import { recordDraftEdit } from "@/lib/db/queries";
 import { logError } from "@/lib/log";
 
 // No thinking, no copy regeneration: comfortably faster than the full
@@ -82,6 +83,18 @@ export async function POST(
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 502 });
     }
+
+    // The instruction itself is the signal here: "make the button bigger",
+    // "too much space above the footer" is design feedback stated in the
+    // user's own words. Captured after the edit lands, non-fatally.
+    await recordDraftEdit({
+      brandId: access.brandId,
+      draftId: id,
+      kind: "style",
+      region: regionLabel ?? null,
+      instruction: instruction.trim(),
+    });
+
     return NextResponse.json({
       html: result.html,
       history: result.history,

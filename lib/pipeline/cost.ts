@@ -1,12 +1,17 @@
 import "server-only";
-import { DRAFT_MODEL, FAST_MODEL } from "@/lib/clients/model-ids";
+import { DRAFT_MODEL, FAST_MODEL, HARD_MODEL } from "@/lib/clients/model-ids";
 import type { DraftMeta, DraftUsage } from "@/lib/db/types";
 
 // Display-only spend estimates for the review screen's cost panel. Rates from
-// the Anthropic pricing table (2026-07): Sonnet 4.6 $3/$15 per MTok, Haiku 4.5
-// $1/$5; cache reads bill at 0.1x input, cache writes at 1.25x. Image cost is
-// a per-image estimate for the Gemini image model. Estimates, not billing
-// truth; keep them honest but don't build invoicing on them.
+// the Anthropic pricing table (2026-07): Sonnet 5 $3/$15 per MTok, Opus 5
+// $5/$25, Haiku 4.5 $1/$5; cache reads bill at 0.1x input, cache writes at
+// 1.25x. Image cost is a per-image estimate for the Gemini image model.
+// Estimates, not billing truth; keep them honest but don't build invoicing on
+// them.
+//
+// Sonnet 5 carries an introductory $2/$10 rate through 2026-08-31. The full
+// $3/$15 is listed here on purpose: an estimate that under-reports the price
+// Jordan will actually pay from September is the wrong way to be wrong.
 
 interface ModelRates {
   inputPerMTok: number;
@@ -15,6 +20,7 @@ interface ModelRates {
 
 const RATES: Record<string, ModelRates> = {
   [DRAFT_MODEL]: { inputPerMTok: 3, outputPerMTok: 15 },
+  [HARD_MODEL]: { inputPerMTok: 5, outputPerMTok: 25 },
   [FAST_MODEL]: { inputPerMTok: 1, outputPerMTok: 5 },
 };
 

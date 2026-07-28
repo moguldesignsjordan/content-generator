@@ -4,9 +4,12 @@ import { requireDraftInBrand } from "@/lib/draft-access";
 import { isRunActive, joinRun } from "@/lib/pipeline/generation-runs";
 import type { GenerationEvent } from "@/lib/pipeline/generate";
 
-// A full generation (Claude + adaptive thinking) can take 30 to 90s; this
+// A full generation is now four model calls, not one: choose the angle, write
+// and design the draft, QA it (plus one revision when QA fails), then critique
+// the design. That is 2 to 3 minutes in the normal case and longer when the
+// revision fires, so the old 300s ceiling no longer leaves headroom. This
 // connection stays open for the whole run.
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 function sseChunk(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;

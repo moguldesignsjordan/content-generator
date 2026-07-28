@@ -5,7 +5,7 @@ import { capturePrompt } from "./prompt-capture";
 
 export type { UsageOpts };
 
-export { DRAFT_MODEL, FAST_MODEL } from "./model-ids";
+export { DRAFT_MODEL, FAST_MODEL, HARD_MODEL } from "./model-ids";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server-only Anthropic client.

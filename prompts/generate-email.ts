@@ -20,9 +20,12 @@ import {
   buildGuidelinesBlock,
   buildKeywordLines,
   buildPositioningBlock,
+  buildStrategyBlock,
   buildReferenceEmailsBlock,
 } from "./brand-voice";
 import { buildDesignReferenceBlock, buildEmailDesignBrief } from "./email-design";
+import { AI_TELL_WRITER_RULES } from "./ai-tells";
+import { buildChosenAngleBlock, type Angle } from "./angle";
 import { EMAIL_STYLES, pickEmailStyle, pickRotation } from "./email-styles";
 
 // Zod schema for the model's tool input: structured COPY plus the complete
@@ -493,6 +496,69 @@ export function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined)
   ].join("\n");
 }
 
+/**
+ * The QA reviewer's findings, rendered as a fix-this nudge appended to the
+ * ORIGINAL user turn (the same shape the length retry uses, so the cached
+ * system prompt still lands and the draft keeps its brief, layout, and style).
+ *
+ * Returns "" when there's nothing to fix, which is the caller's signal to skip
+ * the revision entirely: this is the expensive path, so it must only run on a
+ * real failure. Unsupported specifics are quoted verbatim because "remove the
+ * invented statistic" is useless without saying WHICH one.
+ */
+export function buildQaRevisionNudge(
+  seo: {
+    issues?: string[];
+    unsupported_specifics?: string[];
+    banned_terms_found?: string[];
+    ai_tells_found?: string[];
+  },
+  /** What to call the piece in the instruction; the blog pipeline reuses this
+   * builder verbatim, and "write the email again" would be a confusing thing
+   * to tell a model that is writing a blog post. */
+  noun = "email",
+): string {
+  const lines: string[] = [];
+  if (seo.unsupported_specifics?.length) {
+    lines.push(
+      "- These specifics are NOT backed by the brief, the offer, or the brand facts.",
+      "  Cut each one or replace it with something the facts above actually support.",
+      "  Do not swap in a different invented number:",
+      ...seo.unsupported_specifics.map((s) => `    "${s}"`),
+    );
+  }
+  if (seo.banned_terms_found?.length) {
+    lines.push(
+      `- Banned terms appeared in the copy: ${seo.banned_terms_found.join(", ")}.`,
+      "  Rewrite those lines without them.",
+    );
+  }
+  if (seo.ai_tells_found?.length) {
+    lines.push(
+      "- These lines hit the AI-tell patterns from the COPY PRINCIPLES. Rewrite",
+      "  each one so it sounds like a person wrote it:",
+      ...seo.ai_tells_found.map((s) => `    "${s}"`),
+    );
+  }
+  if (seo.issues?.length) {
+    lines.push(
+      "- Other QA issues to fix:",
+      ...seo.issues.map((s) => `    ${s}`),
+    );
+  }
+  if (!lines.length) return "";
+
+  return [
+    "",
+    `QA REVIEW OF YOUR PREVIOUS DRAFT: it failed review. Write the ${noun} again,`,
+    "fixing exactly these problems:",
+    ...lines,
+    "Keep everything that was working: same angle, same structure, same layout,",
+    "same voice. This is a targeted fix, not a fresh start. Every other rule",
+    "above still applies, and the length requirement is unchanged.",
+  ].join("\n");
+}
+
 /** Builds the (system, user) message pair for email generation. */
 export function buildEmailMessages(
   ctx: TopicContext,
@@ -522,10 +588,18 @@ export function buildEmailMessages(
     /** Recent thumbs-rated past emails (listFeedbackEmailExamples), injected
      * as liked/disliked taste examples so ratings improve future drafts. */
     feedbackExamples?: FeedbackEmailExample[];
+    /** The angle chosen up front by the strategy pass (lib/pipeline/pick-angle).
+     * Absent when that step was skipped or failed, in which case the model
+     * chooses its own angle as it always did. */
+    angle?: Angle | null;
   } = {},
 ): {
   system: string;
   user: string;
+  /** The design spec this email was asked to hit, returned so the design
+   * critique can judge the result against the same text rather than a
+   * paraphrase of it. */
+  designBrief: string;
   emailType: EmailType;
   templateId: EmailTemplateId;
   styleId: EmailStyleId;
@@ -588,6 +662,7 @@ export function buildEmailMessages(
     guidelinesBlock,
     voiceBlock,
     positioningBlock,
+    buildStrategyBlock(ctx),
     referenceBlock,
     competitorBlock,
     buildFeedbackBlock(opts.feedbackExamples),
@@ -618,19 +693,7 @@ export function buildEmailMessages(
     "",
     "RULES:",
     "- Write in the brand voice above. Sound human, never like generic AI marketing copy.",
-    "- AVOID THE TELLS THAT MARK COPY AS AI-WRITTEN:",
-    "  - No 'It's not just X, it's Y' (or 'This isn't about X, it's about Y') constructions.",
-    "  - No stacking three short punchy sentences in a row as a rhythm crutch",
-    "    ('X. Y. Z.'); vary sentence length so short lines land because they're",
-    "    earned, not because they're a pattern.",
-    "  - No opening on a rhetorical question ('Ever wonder why...', 'What if I",
-    "    told you...') or a scene-setting 'Picture this' / 'Imagine' lead-in.",
-    "  - No throat-clearing openers ('In today's fast-paced world', 'Let's face",
-    "    it', 'We get it'); start on the actual point.",
-    "  - Use contractions naturally (it's, you're, don't); a sentence fragment",
-    "    here and there reads more human than a fully grammatical one.",
-    "  - One genuinely specific, concrete detail beats three vague superlatives;",
-    "    if a line could open literally any brand's email, cut or sharpen it.",
+    ...AI_TELL_WRITER_RULES,
     "- Never invent numbers, statistics, dates, prices, testimonials, or customer",
     "  names. Use only what the CAMPAIGN BRIEF, the offer block, or the brand",
     "  facts above give you. With no real number available, get concrete WITHOUT",
@@ -658,6 +721,9 @@ export function buildEmailMessages(
   const user = [
     "Write and design one email.",
     "",
+    // Before the brief and the topic: the angle is the frame everything else
+    // is read through, so it must not arrive as an afterthought at the bottom.
+    buildChosenAngleBlock(opts.angle),
     briefBlock,
     `EMAIL TYPE: ${emailType}`,
     `LENGTH FOR THIS EMAIL (required, not optional): ${length.words[0]} to ${length.words[1]} words of body copy across ${length.sections[0]} to ${length.sections[1]} body_sections. This is ${emailType === "promotional" || emailType === "announcement" ? `an ${emailType}` : `a ${emailType}`} email: ${length.directive} The body_sections array must hold ${length.sections[0]} to ${length.sections[1]} entries that together total ${length.words[0]} to ${length.words[1]} words.`,
@@ -688,5 +754,5 @@ export function buildEmailMessages(
     .filter(Boolean)
     .join("\n");
 
-  return { system, user, emailType, templateId, styleId, lengthTarget: length };
+  return { system, user, designBrief, emailType, templateId, styleId, lengthTarget: length };
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDraftInBrand } from "@/lib/draft-access";
+import { recordDraftEdit } from "@/lib/db/queries";
 import { locateRegion, replaceRegionInner } from "@/lib/email/inline-style";
 import { sanitizeEditedFragment } from "@/lib/editor/sanitize-fragment";
 import { commitHtmlEdit } from "@/lib/pipeline/html-edit";
@@ -98,6 +99,19 @@ export async function POST(
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 502 });
     }
+
+    // What the user typed by hand is the clearest statement of what they
+    // actually wanted; captured (non-fatally, after the save succeeded) so the
+    // "learn from my edits" pass in Settings has something to learn from.
+    await recordDraftEdit({
+      brandId: access.brandId,
+      draftId: id,
+      kind: "inline",
+      region: regionLabel,
+      before: stripTags(located.innerHTML),
+      after: stripTags(safeInner),
+    });
+
     return NextResponse.json({ html: result.html, history: result.history });
   } catch (err) {
     logError("api:/api/drafts/[id]/region-html", err);

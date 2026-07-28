@@ -62,7 +62,7 @@ export function GenerationProgress({
           <p className="mt-2 text-[13px] text-muted">{state.label}</p>
           <div className="mt-5 h-px w-full bg-border" />
           <p className="mt-3 text-[12px] text-muted-2">
-            This usually takes about a minute
+            This usually takes two to three minutes
           </p>
         </>
       )}

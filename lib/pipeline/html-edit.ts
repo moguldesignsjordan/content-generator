@@ -4,7 +4,10 @@ import { stripEmDashes } from "@/lib/text";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
 import { ensureBrandLogo } from "@/lib/email/footer-logo";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
-import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
+import { ensureUnsubscribeTag, validateModelEmailHtml } from "@/lib/email/validate";
+// applyEdits moved to a leaf module (lib/email/patch.ts) so callers that only
+// need patching don't pull in this module's DB and pipeline dependencies.
+export { applyEdits, type HtmlPatch } from "@/lib/email/patch";
 import type {
   DraftJobContext,
   DraftMeta,
@@ -20,54 +23,15 @@ import type { BrandTokens } from "@/lib/email/templates/types";
 // through the same safety gates (validateModelEmailHtml / stripEmDashes /
 // ensureUnsubscribeTag) without each pipeline re-implementing them.
 //
-// find/replace application lives here too, so the "find must match exactly
-// once" safety property is identical across pipelines.
+// find/replace application lives in lib/email/patch.ts (re-exported above), so
+// the "find must match exactly once" safety property is identical across
+// pipelines without every caller inheriting this module's dependencies.
 
 const MAX_HISTORY = 10;
-
-/** One find/replace patch a model returns. Structurally identical to the prompt-level StyleEdit. */
-export interface HtmlPatch {
-  find: string;
-  replace: string;
-  /** Set true only for a deliberate "change every instance" request. */
-  replace_all?: boolean;
-}
 
 export type HtmlEditResult =
   | { ok: true; html: string; history: StyleEditHistoryEntry[] }
   | { ok: false; error: string };
-
-/**
- * Applies find/replace patches to html in order. Fails closed: each find must
- * appear at least once, and if it appears more than once without replace_all,
- * that's ambiguous (which occurrence was meant?) so it's rejected rather than
- * guessed. This is a real safety property: the model is mechanically unable
- * to touch anything outside the exact span it names.
- */
-export function applyEdits(
-  html: string,
-  edits: HtmlPatch[],
-): { html: string } | { error: string } {
-  let patched = html;
-  for (const edit of edits) {
-    if (!edit.find) return { error: "An edit was missing its find text." };
-    const occurrences = patched.split(edit.find).length - 1;
-    if (occurrences === 0) {
-      return {
-        error: `Couldn't locate the exact text to change (starting "${edit.find.slice(0, 60)}"). Try rephrasing.`,
-      };
-    }
-    if (occurrences > 1 && !edit.replace_all) {
-      return {
-        error: `That change matches ${occurrences} places ambiguously. Be more specific.`,
-      };
-    }
-    patched = edit.replace_all
-      ? patched.split(edit.find).join(edit.replace)
-      : patched.replace(edit.find, edit.replace);
-  }
-  return { html: patched };
-}
 
 /**
  * Finalizes a model-produced HTML patch: validate, sanitize (strip em-dashes,

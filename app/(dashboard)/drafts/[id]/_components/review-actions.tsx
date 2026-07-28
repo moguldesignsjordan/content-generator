@@ -65,6 +65,16 @@ const LAYOUT_LABELS: Record<EmailTemplateId, string> = {
   digest: "Digest",
 };
 
+/**
+ * "YYYY-MM-DDTHH:mm" in LOCAL time, the format a datetime-local input uses.
+ * toISOString() would return UTC, which silently shifts the picker's min bound
+ * by the browser's offset.
+ */
+function localDateTimeValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 interface ReviewActionsProps {
   draftId: string;
   version: number;
@@ -546,6 +556,14 @@ export function ReviewActions({
     const [date, time] = scheduleDateTime.split("T");
     const [hours, minutes] = (time ?? "").split(":");
     if (!date || !hours || !minutes) return;
+    // MailerLite rejects a schedule that isn't in the future, and it judges
+    // that against the ACCOUNT's timezone, not this browser's. Catching the
+    // locally-past case here turns the most common version of that rejection
+    // into an instant message instead of a created-but-undeliverable campaign.
+    if (new Date(scheduleDateTime).getTime() <= Date.now()) {
+      toast.error("Pick a time in the future.");
+      return;
+    }
     void handlePublish({ type: "scheduled", date, hours, minutes });
   }
 
@@ -691,6 +709,32 @@ export function ReviewActions({
               {seoData.qa_pass ? "Pass" : "Issues found"}
             </Badge>
           </div>
+
+          {seoData.qa_revision && (
+            <div className="mt-3 rounded-lg border border-border bg-surface/50 p-3 text-[13px]">
+              <p className="font-medium text-foreground">
+                {seoData.qa_revision.resolved
+                  ? "Rewritten once before you saw it"
+                  : "Rewritten once, still not clean"}
+              </p>
+              <p className="mt-1 text-muted">
+                The first draft had {seoData.qa_revision.fixed.length}{" "}
+                {seoData.qa_revision.fixed.length === 1 ? "problem" : "problems"}, so
+                it was written again with those flagged.{" "}
+                {seoData.qa_revision.resolved
+                  ? "This version came back clean."
+                  : "Anything still listed below survived the rewrite, so look closely."}
+              </p>
+              <ul className="mt-2 space-y-1 text-muted">
+                {seoData.qa_revision.fixed.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span>·</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="mt-4 space-y-3 text-[13px]">
             {(seoData.issues?.length ?? 0) > 0 && (
@@ -902,10 +946,35 @@ export function ReviewActions({
                   {publication.external_id}
                 </span>
               </p>
+              {/* A "draft" publication is a campaign that exists in MailerLite
+                  but was never delivered. Retrying is safe and does NOT create
+                  a second campaign: the pipeline re-runs only the schedule
+                  step for this external_id. */}
               {publication.status === "draft" && (
-                <p className="text-[13px] text-danger">
-                  Scheduling failed. Open MailerLite to finish sending it.
-                </p>
+                <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                  <p className="text-[13px] text-danger">
+                    Delivery failed, so nothing has gone out. Fix the cause and
+                    retry, or finish it in MailerLite.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      loading={publishing && showSchedule}
+                      disabled={publishing}
+                      onClick={() => setShowSchedule(true)}
+                    >
+                      Schedule for later
+                    </Button>
+                    <Button
+                      variant="gradient"
+                      loading={publishing && !showSchedule}
+                      disabled={publishing}
+                      onClick={() => void handlePublish()}
+                    >
+                      Retry send
+                    </Button>
+                  </div>
+                </div>
               )}
               {publication.url && (
                 <a
@@ -1249,7 +1318,7 @@ export function ReviewActions({
           <Input
             type="datetime-local"
             value={scheduleDateTime}
-            min={new Date().toISOString().slice(0, 16)}
+            min={localDateTimeValue(new Date())}
             onChange={(e) => setScheduleDateTime(e.target.value)}
           />
         </Field>

@@ -25,6 +25,7 @@ import {
   EMAIL_TOOL,
   EmailDraftSchema,
   buildEmailMessages,
+  buildQaRevisionNudge,
   countEmailWords,
   type EmailDraftOutput,
   type EmailLengthTarget,
@@ -38,6 +39,7 @@ import { hasDarkModeSupport } from "@/lib/email/preview-mode";
 import { ensureDarkModeReadability } from "@/lib/email/dark-mode";
 import { ensureBrandLogo } from "@/lib/email/footer-logo";
 import { ensureBriefPhotos } from "@/lib/email/brief-photos";
+import { ensureUnsubscribeTag, validateModelEmailHtml } from "@/lib/email/validate";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
 import type {
   CampaignBrief,
@@ -67,6 +69,8 @@ import {
   pickVariedImageStyle,
   resolveBrandPalette,
 } from "@/prompts/generate-image";
+import { chosenAngle, pickAngle } from "./pick-angle";
+import { critiqueDesign } from "./critique-design";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { logError, logWarn } from "@/lib/log";
@@ -122,7 +126,18 @@ export async function generateEmailForTopicStreamed(
     // Thumbs the reviewer gave past emails, fed back as taste examples so
     // every rating makes the next draft better (non-fatal: [] on any error).
     const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
-    const { system, user, emailType, templateId, styleId, lengthTarget } =
+
+    // Decide WHAT to argue before writing it. Non-fatal: a null angle means
+    // the drafting prompt is exactly what it was before this step existed.
+    const strategizing = { phase: "strategizing", label: "Choosing the angle" };
+    await patchDraftGeneration(draftId, strategizing);
+    onEvent({ type: "phase", ...strategizing });
+    const angleResult = await pickAngle(ctx, { brief, channel: "email" });
+    const angle = chosenAngle(angleResult?.angle);
+
+    await patchDraftGeneration(draftId, writing);
+    onEvent({ type: "phase", ...writing });
+    const { system, user, designBrief, emailType, templateId, styleId, lengthTarget } =
       buildEmailMessages(ctx, tokens, {
         brief,
         emailTypeOverride: opts.emailTypeOverride,
@@ -130,6 +145,7 @@ export async function generateEmailForTopicStreamed(
         recentStyles: recent.styles,
         recentLayouts: recent.layouts,
         feedbackExamples,
+        angle,
       });
     const designReference = await loadEmailDesignReference(ctx, draftId);
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
@@ -139,13 +155,20 @@ export async function generateEmailForTopicStreamed(
       brandId: ctx.brand.id,
     });
 
-    const { content, copy, designSource } = renderEmailForContext(
-      ctx,
-      parsed,
-      templateId,
-      undefined,
-      brief,
-    );
+    // Hoisted into a reusable renderer so the QA revise pass below re-renders
+    // the fixed draft identically, hero image and all, instead of reimplementing
+    // this sequence and drifting from it.
+    let heroImage: ContentImage | undefined;
+    const renderWithHero = (output: EmailDraftOutput) => {
+      const rendered = renderEmailForContext(ctx, output, templateId, undefined, brief);
+      if (heroImage) {
+        rendered.content.html =
+          spliceHeroImage(rendered.content.html, heroImage) ?? rendered.content.html;
+      }
+      return rendered;
+    };
+
+    let { content, copy, designSource } = renderWithHero(parsed);
 
     // Brand-level opt-in (asked during onboarding): auto-create the hero
     // image on FIRST generation only. Regenerations keep whatever image the
@@ -176,7 +199,6 @@ export async function generateEmailForTopicStreamed(
     // uploaded in the interview) wins over AI generation: it's the actual
     // thing being sold, and it's free. Falls through to the normal AI path
     // on any fetch/optimize failure (useProductPhotoAsHero is non-fatal).
-    let heroImage: ContentImage | undefined;
     if (!skipImage && brief?.product_photo_url) {
       const imaging = { phase: "imaging", label: "Adding your product photo" };
       await patchDraftGeneration(draftId, imaging).catch(() => {});
@@ -210,8 +232,45 @@ export async function generateEmailForTopicStreamed(
     await patchDraftGeneration(draftId, checking);
     onEvent({ type: "phase", ...checking });
 
-    const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
+    let qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
+
+    // QA found something real: fix it once before the human ever sees it.
+    const revised = await reviseForQa({
+      ctx,
+      system,
+      user,
+      copyOpts: {
+        lengthTarget,
+        emailType,
+        designReference,
+        brandId: ctx.brand.id,
+      },
+      render: renderWithHero,
+      qa,
+      lengthTarget,
+      emailType,
+      brief,
+    });
+    if (revised) {
+      ({ content, copy, designSource, qa } = revised);
+    }
+
+    // Last look at the finished design, after QA has settled the copy so the
+    // critique judges the markup that will actually ship.
+    const polishing = { phase: "polishing", label: "Polishing the design" };
+    await patchDraftGeneration(draftId, polishing);
+    onEvent({ type: "phase", ...polishing });
+    const critique = await critiqueDesign({
+      html: content.html,
+      designBrief,
+      designSource,
+      brandId: ctx.brand.id,
+    });
+    if (critique) content.html = critique.html;
+
     usageDeltas.push(...qa.usageDeltas);
+    if (angleResult) usageDeltas.push(...angleResult.usageDeltas);
+    if (critique) usageDeltas.push(...critique.usageDeltas);
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
 
@@ -222,6 +281,12 @@ export async function generateEmailForTopicStreamed(
       email_type: emailType,
       email_copy: copy,
       email_design_source: designSource,
+      // All three angles, not just the chosen one: a reviewer who disagrees
+      // with the pick can see what else was on the table.
+      ...(angleResult ? { angles: angleResult.angle } : {}),
+      ...(critique
+        ? { design_critique: { verdict: critique.verdict, applied: critique.applied } }
+        : {}),
       ...(heroImage ? { hero_image: heroImage } : {}),
       usage,
     };
@@ -445,6 +510,11 @@ async function generateEmailCopy(
         model: DRAFT_MODEL,
         max_tokens: 32000,
         thinking: { type: "adaptive" },
+        // Explicit rather than defaulted: writing + designing a full HTML
+        // document in one call is the intelligence-sensitive work in this
+        // pipeline, so it gets "high" on purpose instead of inheriting
+        // whatever a future model default happens to be.
+        output_config: { effort: "high" },
         system: cachedSystem,
         messages: [{ role: "user", content: toUserContent(u) }],
         tools: [EMAIL_TOOL],
@@ -625,33 +695,10 @@ function renderEmailForContext(
   };
 }
 
-/**
- * Validates model-designed email HTML before it can be persisted: must be a
- * complete document and must not smuggle in script. Returns the trimmed HTML
- * or null (null → the caller falls back to the code template). Kept strict
- * and code-level, never trust the model for safety guarantees.
- *
- * Deliberately does NOT require dark-mode CSS here: this validator is shared
- * with html-edit.ts's commitHtmlEdit (every "Apply text/color/style" patch
- * re-validates the whole patched document), and a content edit isn't
- * responsible for authoring head-level dark-mode CSS. Requiring it here would
- * reject every edit on any draft that doesn't already have it. The dark-mode
- * requirement lives at the fresh-generation callsite instead (see
- * renderEmailForContext), where there's a safe template fallback.
- */
-export function validateModelEmailHtml(html: string | undefined): string | null {
-  if (!html) return null;
-  const h = html.trim();
-  if (h.length < 500) return null; // a real designed email is never this small
-  if (!/<html[\s>]/i.test(h)) return null;
-  if (!/<\/html>\s*$/i.test(h)) return null;
-  if (!/<body[\s>]/i.test(h)) return null;
-  if (/<script[\s>]/i.test(h) || /javascript:/i.test(h)) return null;
-  if (/<link[\s>]/i.test(h) || /<iframe[\s>]/i.test(h)) return null;
-  return h;
-}
-
 export { MAX_DRAFT_VERSIONS } from "./constants";
+// Re-exported from their new home in lib/email/validate.ts so the many call
+// sites that import them from here keep working.
+export { ensureUnsubscribeTag, validateModelEmailHtml };
 
 /**
  * Runs a QA pass on a generated email draft. The model half audits the
@@ -705,9 +752,14 @@ async function runQaPass(
           keyword_placement: qa.keyword_placement,
           banned_terms_found: qa.banned_terms_found,
           readability_note: qa.readability_note,
+          ai_tells_found: qa.ai_tells_found,
           // Authoritative regardless of what the model set qa_pass to: an
-          // unsupported specific always fails QA, same as a banned term.
-          qa_pass: qa.qa_pass && qa.unsupported_specifics.length === 0,
+          // unsupported specific or an AI tell always fails QA, same as a
+          // banned term. Failing here is what triggers the revise pass.
+          qa_pass:
+            qa.qa_pass &&
+            qa.unsupported_specifics.length === 0 &&
+            qa.ai_tells_found.length === 0,
           issues: qa.unsupported_specifics.length
             ? [
                 ...qa.issues,
@@ -773,6 +825,103 @@ async function runQaPass(
   return { meta, seoData, usageDeltas };
 }
 
+type QaResult = { meta: DraftMeta; seoData: DraftSeoData; usageDeltas: UsageDelta[] };
+
+/** Everything the QA reviewer flagged, flattened for the revision record. */
+function qaFailureReasons(seo: DraftSeoData): string[] {
+  return [
+    ...(seo.unsupported_specifics ?? []).map((s) => `Unsupported specific: "${s}"`),
+    ...(seo.banned_terms_found ?? []).map((s) => `Banned term: "${s}"`),
+    ...(seo.ai_tells_found ?? []).map((s) => `AI tell: "${s}"`),
+    ...(seo.issues ?? []),
+  ];
+}
+
+/**
+ * Closes the QA loop: when the first draft fails review, writes it ONCE more
+ * with the reviewer's specific findings in the prompt, then re-runs QA on the
+ * result.
+ *
+ * Before this existed, runQaPass caught invented statistics and banned terms
+ * and then did nothing with them, leaving a human to notice. The cap is one
+ * revision, unconditionally: a model that can't fix its own draft in one
+ * targeted pass won't fix it in three, and the reviewer still sees every
+ * remaining issue on the review screen.
+ *
+ * Non-fatal throughout. A failed revision keeps the ORIGINAL draft and its QA,
+ * because a draft that failed review still beats no draft at all.
+ */
+async function reviseForQa(args: {
+  ctx: TopicContext;
+  system: string;
+  user: string;
+  copyOpts: Parameters<typeof generateEmailCopy>[2];
+  /** Re-renders a revised model output exactly the way the caller rendered the
+   * first one (hero image splicing included), so the revision can't silently
+   * lose the draft's image or design source. */
+  render: (parsed: EmailDraftOutput) => {
+    content: EmailDraftContent;
+    copy: EmailCopy;
+    designSource: "model" | "template";
+  };
+  qa: QaResult;
+  lengthTarget?: EmailLengthTarget;
+  emailType?: EmailType;
+  brief?: CampaignBrief | null;
+}): Promise<{
+  content: EmailDraftContent;
+  copy: EmailCopy;
+  designSource: "model" | "template";
+  qa: QaResult;
+} | null> {
+  const { qa, ctx } = args;
+  if (qa.seoData.qa_pass !== false) return null;
+
+  const nudge = buildQaRevisionNudge(qa.seoData);
+  // qa_pass can be false on findings that carry no actionable text (a contrast
+  // warning alone). Nothing to tell the model means nothing to gain.
+  if (!nudge) return null;
+
+  const fixed = qaFailureReasons(qa.seoData);
+  logWarn(
+    "pipeline:generate:qa-revise",
+    `draft failed QA (${fixed.length} issue${fixed.length === 1 ? "" : "s"}); revising once`,
+    { brandId: ctx.brand.id, topicId: ctx.topic.id },
+  );
+
+  try {
+    const revision = await generateEmailCopy(args.system, args.user + nudge, args.copyOpts);
+    const rendered = args.render(revision.parsed);
+    const requalified = await runQaPass(
+      ctx,
+      rendered.copy,
+      rendered.content.html,
+      args.lengthTarget,
+      args.emailType,
+      args.brief,
+    );
+    return {
+      ...rendered,
+      qa: {
+        meta: requalified.meta,
+        seoData: {
+          ...requalified.seoData,
+          qa_revision: { fixed, resolved: requalified.seoData.qa_pass !== false },
+        },
+        // Both rounds are charged, so both rounds are metered.
+        usageDeltas: [
+          ...qa.usageDeltas,
+          ...revision.usageDeltas,
+          ...requalified.usageDeltas,
+        ],
+      },
+    };
+  } catch (err) {
+    logError("pipeline:generate:qa-revise", err, { topicId: ctx.topic.id });
+    return null;
+  }
+}
+
 /**
  * Rejects the current draft and regenerates a new version with the reviewer's
  * feedback woven into the prompt. Returns { newDraftId } on success or
@@ -812,6 +961,7 @@ export async function regenerateEmailDraft(
   // opts.templateOverride (the reviewer picked a different layout in the UI)
   // still wins over the stored one. Only a FRESH generation rotates.
   const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
+  const storedAngle = chosenAngle(draftCtx.meta.angles);
   const { system, user, emailType, templateId, styleId, lengthTarget } =
     buildEmailMessages(ctx, tokens, {
       brief,
@@ -820,6 +970,11 @@ export async function regenerateEmailDraft(
       heroImage,
       emailTypeOverride: draftCtx.emailType ?? undefined,
       feedbackExamples,
+      // Reuse the angle this draft was built on rather than paying for a fresh
+      // strategy pass: a rejection carries explicit instructions that outrank
+      // it anyway, and keeping the angle is what makes this a revision of the
+      // same idea instead of an unrelated second email.
+      angle: storedAngle,
       rejection: {
         feedback,
         previousSubject: draftCtx.content.subject,
@@ -835,15 +990,30 @@ export async function regenerateEmailDraft(
     brandId: ctx.brand.id,
   });
 
-  const { content, copy, designSource } = renderEmailForContext(
-    ctx,
-    parsed,
-    templateId,
-    heroImage,
-    brief,
-  );
+  const render = (output: EmailDraftOutput) =>
+    renderEmailForContext(ctx, output, templateId, heroImage, brief);
 
-  const qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
+  let { content, copy, designSource } = render(parsed);
+
+  let qa = await runQaPass(ctx, copy, content.html, lengthTarget, emailType, brief);
+
+  // Same one-shot QA fix the fresh path gets: a human-requested regeneration
+  // shouldn't be the one version that ships with invented specifics in it.
+  const revised = await reviseForQa({
+    ctx,
+    system,
+    user,
+    copyOpts: { lengthTarget, emailType, designReference, brandId: ctx.brand.id },
+    render,
+    qa,
+    lengthTarget,
+    emailType,
+    brief,
+  });
+  if (revised) {
+    ({ content, copy, designSource, qa } = revised);
+  }
+
   usageDeltas.push(...qa.usageDeltas);
   let usage: DraftUsage | undefined;
   for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -855,6 +1025,9 @@ export async function regenerateEmailDraft(
     email_type: emailType,
     email_copy: copy,
     email_design_source: designSource,
+    // Carried forward so the new version remembers the strategy it was written
+    // against, the same way it carries its layout and style.
+    ...(draftCtx.meta.angles ? { angles: draftCtx.meta.angles } : {}),
     ...(heroImage ? { hero_image: heroImage } : {}),
     usage,
   };
@@ -870,20 +1043,4 @@ export async function regenerateEmailDraft(
   });
 
   return { newDraftId };
-}
-
-// MailerLite rejects campaigns without the {$unsubscribe} merge tag. The prompt
-// asks for it, but we guarantee it here so a forgetful generation can't produce
-// an unpublishable draft.
-export function ensureUnsubscribeTag(html: string): string {
-  if (html.includes("{$unsubscribe}")) return html;
-
-  const footer =
-    '<p style="margin:24px 0 0;font-size:12px;color:#888;text-align:center;">' +
-    '<a href="{$unsubscribe}" style="color:#888;">Unsubscribe</a></p>';
-
-  if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${footer}</body>`);
-  }
-  return html + footer;
 }

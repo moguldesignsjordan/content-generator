@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDueSchedules } from "@/lib/db/queries";
 import { runDueSchedule } from "@/lib/pipeline/run-schedule";
 
-// Sequential per-schedule generation (each ~30-90s); comfortable at the
-// one-brand/few-schedules volume expected for this cut. Matches the existing
-// SSE route's ceiling.
-export const maxDuration = 300;
+// Sequential per-schedule generation. Each draft is now a multi-call run
+// (angle, write, QA + possible revision, design critique) taking 2 to 3
+// minutes, so this matches the SSE route's raised ceiling. At the one-brand
+// volume this cut expects that is still comfortable; a busier account will
+// need the schedules fanned out rather than run in one request.
+export const maxDuration = 600;
 
 /**
  * Vercel Cron's daily tick (see vercel.json). Fails closed: 503 if

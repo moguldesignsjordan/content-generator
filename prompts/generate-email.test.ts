@@ -15,6 +15,7 @@ import {
   buildBriefPhotosBlock,
   buildFeedbackBlock,
   buildOfferBlock,
+  buildQaRevisionNudge,
   countEmailWords,
   resolveEmailLayout,
   resolveEmailTemplateId,
@@ -422,5 +423,43 @@ describe("buildBriefPhotosBlock", () => {
       photo_urls: ["https://example.com/a.jpg"],
     });
     expect(block).toContain("1 real photo the user attached");
+  });
+});
+
+describe("buildQaRevisionNudge", () => {
+  it("returns empty string when QA found nothing actionable", () => {
+    expect(buildQaRevisionNudge({})).toBe("");
+    expect(buildQaRevisionNudge({ issues: [], unsupported_specifics: [] })).toBe("");
+  });
+
+  it("quotes unsupported specifics verbatim so the model knows which to cut", () => {
+    const nudge = buildQaRevisionNudge({
+      unsupported_specifics: ["saved 47 hours a week", "used by 3,000 agencies"],
+    });
+    expect(nudge).toContain('"saved 47 hours a week"');
+    expect(nudge).toContain('"used by 3,000 agencies"');
+    expect(nudge).toContain("Do not swap in a different invented number");
+  });
+
+  it("lists banned terms and AI tells as separate, named problems", () => {
+    const nudge = buildQaRevisionNudge({
+      banned_terms_found: ["synergy"],
+      ai_tells_found: ["It's not just a website, it's a system"],
+    });
+    expect(nudge).toContain("Banned terms appeared in the copy: synergy");
+    expect(nudge).toContain('"It\'s not just a website, it\'s a system"');
+  });
+
+  it("tells the model to keep what worked instead of starting over", () => {
+    const nudge = buildQaRevisionNudge({ issues: ["Length: 120 of 200 words."] });
+    expect(nudge).toContain("same angle, same structure, same layout");
+    expect(nudge).toContain("targeted fix, not a fresh start");
+  });
+
+  it("names the content type so the blog path reads correctly", () => {
+    expect(buildQaRevisionNudge({ issues: ["x"] })).toContain("Write the email again");
+    expect(buildQaRevisionNudge({ issues: ["x"] }, "blog post")).toContain(
+      "Write the blog post again",
+    );
   });
 });

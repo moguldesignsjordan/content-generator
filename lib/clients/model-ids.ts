@@ -4,7 +4,16 @@
 // for persistence).
 
 /** Model used for generating email/blog drafts. */
-export const DRAFT_MODEL = "claude-sonnet-4-6";
+export const DRAFT_MODEL = "claude-sonnet-5";
+
+/**
+ * The "Opus for hard pieces" tier the architecture always specified: reserved
+ * for the judgment calls, not the volume work. Choosing an angle and critiquing
+ * a design are one-shot decisions that shape an entire draft, so they're worth
+ * an Opus call each; drafting stays on DRAFT_MODEL, which runs on every
+ * generation and every retry.
+ */
+export const HARD_MODEL = "claude-opus-5";
 
 /**
  * Cheapest/fastest tier, for small structured-output calls where quality

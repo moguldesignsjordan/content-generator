@@ -15,10 +15,13 @@ import type {
   CampaignChatState,
   CampaignPublishProgress,
   CampaignStatus,
+  Cluster,
   CompetitorProfile,
   CompetitorReference,
   ContentJobType,
   ContentSchedule,
+  DraftEdit,
+  DraftEditKind,
   DraftFeedback,
   DraftForReview,
   DraftGenerationState,
@@ -49,6 +52,7 @@ import type {
   MediaAssetSource,
   OnboardingState,
   PerformanceMetric,
+  Pillar,
   PillarWithClusters,
   PlanCode,
   Positioning,
@@ -62,6 +66,7 @@ import type {
   SeoDefaults,
   Strategy,
   Topic,
+  TopPerformingEmail,
   TopicContext,
   TopicFormData,
   VisualIdentity,
@@ -156,16 +161,19 @@ export async function getTopicContext(
   if (topicErr) throw topicErr;
   if (!topic) return null;
 
+  // Full rows, not just the foreign keys: the pillar's business_goal and the
+  // cluster's hub intent are what tell generation why this piece exists, and
+  // selecting them costs nothing on a query we already make.
   const { data: cluster, error: clusterErr } = await db
     .from("clusters")
-    .select("pillar_id")
+    .select("*")
     .eq("id", topic.cluster_id)
     .single();
   if (clusterErr) throw clusterErr;
 
   const { data: pillar, error: pillarErr } = await db
     .from("pillars")
-    .select("strategy_id")
+    .select("*")
     .eq("id", cluster.pillar_id)
     .single();
   if (pillarErr) throw pillarErr;
@@ -184,13 +192,13 @@ export async function getTopicContext(
     .single();
   if (brandErr) throw brandErr;
 
-  // Prefer the primary ICP; fall back to any ICP on the strategy.
+  // Primary ICP first, but load them ALL: the voice block still speaks to the
+  // primary one, while angle selection needs to know who else is reading.
   const { data: icps, error: icpErr } = await db
     .from("icps")
     .select("*")
     .eq("strategy_id", strategy.id)
-    .order("is_primary", { ascending: false })
-    .limit(1);
+    .order("is_primary", { ascending: false });
   if (icpErr) throw icpErr;
 
   // Resolve the topic's product slug to a real offer so the prompt can pitch
@@ -227,7 +235,10 @@ export async function getTopicContext(
     topic: topic as Topic,
     brand: brand as Brand,
     strategy: strategy as Strategy,
+    pillar: (pillar as Pillar) ?? null,
+    cluster: (cluster as Cluster) ?? null,
     primaryIcp: (icps?.[0] as Icp) ?? null,
+    icps: (icps as Icp[]) ?? [],
     product,
     referenceEmails,
     emailDesignRefs,
@@ -715,6 +726,32 @@ export async function recordPublication(args: {
   throw error;
 }
 
+/**
+ * Updates delivery state on an existing publication row. Used when a campaign
+ * that was created but never delivered (status "draft") is successfully
+ * re-scheduled, so the row reflects the retry instead of staying stuck.
+ */
+export async function updatePublicationDelivery(args: {
+  jobId: string;
+  target: string;
+  status: string;
+  scheduledFor?: string;
+}): Promise<PublicationRecord> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("publications")
+    .update({
+      status: args.status,
+      scheduled_for: args.scheduledFor ?? null,
+    })
+    .eq("job_id", args.jobId)
+    .eq("target", args.target)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as PublicationRecord;
+}
+
 /** Flips a job to published and stamps the topic's published_url when given. */
 export async function markJobPublished(
   jobId: string,
@@ -1113,6 +1150,10 @@ export async function setDraftFeedback(
 export async function listFeedbackEmailExamples(
   brandId: string,
   perSide = 3,
+  /** Which pipeline's history to read. Blogs and flyers get the same
+   * liked/disliked treatment as emails; before this they got none, so a
+   * thumbs-down on a blog post changed nothing about the next one. */
+  jobType: ContentJobType = "email",
 ): Promise<FeedbackEmailExample[]> {
   const db = getAdminClient();
   let { data, error } = await db
@@ -1122,7 +1163,7 @@ export async function listFeedbackEmailExamples(
        content_jobs!inner ( brand_id, type, email_type )`,
     )
     .eq("content_jobs.brand_id", brandId)
-    .eq("content_jobs.type", "email")
+    .eq("content_jobs.type", jobType)
     .not("feedback", "is", null)
     .order("created_at", { ascending: false })
     .limit(24);
@@ -1138,7 +1179,7 @@ export async function listFeedbackEmailExamples(
          content_jobs!inner ( brand_id, type, email_type )`,
       )
       .eq("content_jobs.brand_id", brandId)
-      .eq("content_jobs.type", "email")
+      .eq("content_jobs.type", jobType)
       .not("feedback", "is", null)
       .order("created_at", { ascending: false })
       .limit(24);
@@ -1161,10 +1202,16 @@ export async function listFeedbackEmailExamples(
   }[]) {
     const feedback = row.feedback === "up" || row.feedback === "down" ? row.feedback : null;
     if (!feedback || counts[feedback] >= perSide) continue;
-    const copy = row.meta?.email_copy;
-    const subject = copy?.subject ?? row.content?.subject ?? "";
-    const body = (copy?.body_sections ?? [])
-      .map((s) => s.body)
+    // Emails keep structured copy in meta.email_copy, blogs in meta.blog_copy;
+    // content.subject/html is the shared fallback either way.
+    const emailCopy = row.meta?.email_copy;
+    const blogCopy = row.meta?.blog_copy;
+    const subject = emailCopy?.subject ?? blogCopy?.title ?? row.content?.subject ?? "";
+    const body = (
+      emailCopy?.body_sections?.map((s) => s.body) ??
+      blogCopy?.sections?.map((s) => s.body) ??
+      []
+    )
       .join("\n")
       .trim();
     if (!subject && !body) continue;
@@ -1178,6 +1225,158 @@ export async function listFeedbackEmailExamples(
     });
   }
   return examples;
+}
+
+/**
+ * The brand's best-performing published emails, ranked by real open and click
+ * rates, distilled to what a writer can learn from: the subject line and the
+ * opening that followed it.
+ *
+ * The performance table has been collecting these numbers since Slice 4 and
+ * nothing has ever read them back into generation, so the engine has been
+ * guessing at angles while the answer sat in the database. Ties break on open
+ * rate, since a click rate on a tiny send is noisy.
+ *
+ * Non-fatal and always optional: a brand that has never published, or a DB
+ * without the tables, simply gets no examples and generation is unchanged.
+ */
+export async function listTopPerformingEmails(
+  brandId: string,
+  limit = 3,
+): Promise<TopPerformingEmail[]> {
+  const db = getAdminClient();
+  try {
+    // publications -> content_jobs (for the brand filter) -> performance rows.
+    // Metrics are one row per name, so they're pivoted in code below.
+    const { data, error } = await db
+      .from("publications")
+      .select(
+        `id, published_at,
+         content_jobs!inner ( brand_id, type,
+           drafts ( content, meta, state ) ),
+         performance ( metric, value )`,
+      )
+      .eq("content_jobs.brand_id", brandId)
+      .eq("content_jobs.type", "email")
+      .order("published_at", { ascending: false })
+      .limit(40);
+    if (error) throw error;
+
+    const scored: (TopPerformingEmail & { rank: [number, number] })[] = [];
+    for (const row of (data ?? []) as {
+      content_jobs?: {
+        drafts?: { content: EmailDraftContent | null; meta: DraftMeta | null; state: string }[];
+      };
+      performance?: { metric: string; value: number | null }[];
+    }[]) {
+      const metrics = new Map(
+        (row.performance ?? []).map((m) => [m.metric, Number(m.value ?? 0)]),
+      );
+      const openRate = metrics.get("open_rate") ?? 0;
+      const clickRate = metrics.get("click_rate") ?? 0;
+      // Nothing measured yet (just-published sends sit at 0/0): no signal, so
+      // including them would dilute the list with untested emails.
+      if (openRate <= 0 && clickRate <= 0) continue;
+
+      // A job can hold several draft versions; the approved one is what shipped.
+      const drafts = row.content_jobs?.drafts ?? [];
+      const shipped = drafts.find((d) => d.state === "approved") ?? drafts[0];
+      if (!shipped) continue;
+
+      const copy = shipped.meta?.email_copy;
+      const subject = copy?.subject ?? shipped.content?.subject ?? "";
+      if (!subject) continue;
+      const opening = (copy?.body_sections?.[0]?.body ?? "").trim();
+
+      scored.push({
+        subject,
+        opening: opening.slice(0, 300),
+        open_rate: openRate,
+        click_rate: clickRate,
+        rank: [clickRate, openRate],
+      });
+    }
+
+    scored.sort((a, b) => b.rank[0] - a.rank[0] || b.rank[1] - a.rank[1]);
+    return scored.slice(0, limit).map(({ rank: _rank, ...e }) => e);
+  } catch (err) {
+    logWarn(
+      "db:listTopPerformingEmails",
+      err instanceof Error ? err.message : String(err),
+      { brandId },
+    );
+    return [];
+  }
+}
+
+/**
+ * Records one reviewer edit (migration 026).
+ *
+ * Fire-and-forget by design: this is a learning signal, never part of the
+ * user's action. A missing table (migration not applied) or any write failure
+ * logs once and returns, so capturing feedback can never be the reason an edit
+ * appears to fail after it has already been saved.
+ */
+export async function recordDraftEdit(edit: {
+  brandId: string;
+  draftId: string;
+  kind: DraftEditKind;
+  region?: string | null;
+  before?: string | null;
+  after?: string | null;
+  instruction?: string | null;
+}): Promise<void> {
+  // An "edit" that changed nothing (opened a region, clicked away) is noise.
+  if (edit.kind !== "style" && edit.before === edit.after) return;
+  try {
+    const db = getAdminClient();
+    const { error } = await db.from("draft_edits").insert({
+      brand_id: edit.brandId,
+      draft_id: edit.draftId,
+      kind: edit.kind,
+      region: edit.region ?? null,
+      before_text: edit.before ?? null,
+      after_text: edit.after ?? null,
+      instruction: edit.instruction ?? null,
+    });
+    if (error) throw error;
+  } catch (err) {
+    logWarn(
+      "db:recordDraftEdit",
+      err instanceof Error ? err.message : String(err),
+      { draftId: edit.draftId, kind: edit.kind },
+    );
+  }
+}
+
+/**
+ * The reviewer's recent edits, newest first, for the "learn from my edits"
+ * distillation in Settings. Non-fatal: an unapplied migration means an empty
+ * list and a Settings action that honestly reports it has nothing to learn
+ * from yet.
+ */
+export async function listDraftEdits(
+  brandId: string,
+  limit = 60,
+): Promise<DraftEdit[]> {
+  try {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("draft_edits")
+      .select("kind, region, before_text, after_text, instruction, created_at")
+      .eq("brand_id", brandId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as DraftEdit[];
+  } catch (err) {
+    logWarn(
+      "db:listDraftEdits",
+      err instanceof Error ? err.message : String(err),
+      { brandId },
+    );
+    return [];
+  }
 }
 
 // ── Brand resolution (multi-tenant: a brand belongs to its members) ──────────

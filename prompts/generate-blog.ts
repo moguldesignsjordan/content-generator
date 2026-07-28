@@ -1,14 +1,22 @@
 import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { BlogType, CampaignBrief, TopicContext } from "@/lib/db/types";
+import type {
+  BlogType,
+  CampaignBrief,
+  FeedbackEmailExample,
+  TopicContext,
+} from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
   buildCampaignBriefBlock,
   buildGuidelinesBlock,
   buildKeywordLines,
   buildPositioningBlock,
+  buildStrategyBlock,
 } from "./brand-voice";
-import { buildOfferBlock, resolveCta } from "./generate-email";
+import { buildFeedbackBlock, buildOfferBlock, resolveCta } from "./generate-email";
+import { AI_TELL_WRITER_RULES } from "./ai-tells";
+import { buildChosenAngleBlock, type Angle } from "./angle";
 
 // Blog generation mirrors the email path's reliable pattern: brand blocks from
 // prompts/brand-voice.ts verbatim + a FORCED save_blog_draft tool call, never
@@ -235,6 +243,13 @@ export function buildBlogMessages(
     brief?: CampaignBrief | null;
     blogTypeOverride?: BlogType;
     rejection?: { feedback: string; previousTitle: string; previousMetaDescription: string };
+    /** The angle chosen up front by the strategy pass. Absent when that step
+     * was skipped or failed, in which case the model picks its own as before. */
+    angle?: Angle | null;
+    /** Recent thumbs-rated past POSTS, as liked/disliked taste examples. Blogs
+     * share the email block builder: the guidance is about register and
+     * structure, which is channel-agnostic. */
+    feedbackExamples?: FeedbackEmailExample[];
   } = {},
 ): { system: string; user: string; blogType: BlogType } {
   const { topic, brand } = ctx;
@@ -258,6 +273,8 @@ export function buildBlogMessages(
     guidelinesBlock,
     voiceBlock,
     positioningBlock,
+    buildStrategyBlock(ctx),
+    buildFeedbackBlock(opts.feedbackExamples),
     "",
     "WRITING PRINCIPLES:",
     "- Lead with the reader's problem or outcome; the brand earns its place after.",
@@ -266,6 +283,7 @@ export function buildBlogMessages(
     "  and named outcomes over adjectives, when a real one is available (see",
     "  below). A reader should be able to act on it.",
     "- One post, one job: everything builds toward the single CTA at the end.",
+    ...AI_TELL_WRITER_RULES,
     "- Never invent numbers, statistics, dates, prices, testimonials, or customer",
     "  names. Use only what the CAMPAIGN BRIEF, the offer block, or the brand",
     "  facts above give you. With no real number available, get concrete WITHOUT",
@@ -295,6 +313,8 @@ export function buildBlogMessages(
   const user = [
     "Write one blog post.",
     "",
+    // Ahead of the brief: the angle frames everything read after it.
+    buildChosenAngleBlock(opts.angle),
     briefBlock,
     `BLOG TYPE: ${blogType}`,
     `LENGTH FOR THIS POST (required, not optional): ${length.words[0]} to ${length.words[1]} words total across ${length.sections[0]} to ${length.sections[1]} sections. This is ${blogType === "landing" ? `an ${blogType}` : `a ${blogType.replace(/_/g, " ")}`} post: ${length.directive} The intro plus section bodies plus conclusion together must reach ${length.words[0]} words.`,

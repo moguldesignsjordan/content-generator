@@ -380,6 +380,32 @@ export function BlogReviewActions({
               {seoData.qa_pass ? "Pass" : "Issues found"}
             </Badge>
           </div>
+          {seoData.qa_revision && (
+            <div className="mt-3 rounded-lg border border-border bg-surface/50 p-3 text-[13px]">
+              <p className="font-medium text-foreground">
+                {seoData.qa_revision.resolved
+                  ? "Rewritten once before you saw it"
+                  : "Rewritten once, still not clean"}
+              </p>
+              <p className="mt-1 text-muted">
+                The first draft had {seoData.qa_revision.fixed.length}{" "}
+                {seoData.qa_revision.fixed.length === 1 ? "problem" : "problems"}, so
+                it was written again with those flagged.{" "}
+                {seoData.qa_revision.resolved
+                  ? "This version came back clean."
+                  : "Anything still listed below survived the rewrite, so look closely."}
+              </p>
+              <ul className="mt-2 space-y-1 text-muted">
+                {seoData.qa_revision.fixed.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span>·</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="mt-4 space-y-3 text-[13px]">
             {(seoData.issues?.length ?? 0) > 0 && (
               <ul className="space-y-1 text-foreground/80">

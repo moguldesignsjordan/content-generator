@@ -8,6 +8,7 @@ import type {
   ReferenceEmail,
   Strategy,
   Topic,
+  TopicContext,
   VoiceExampleChannel,
 } from "@/lib/db/types";
 
@@ -62,6 +63,62 @@ export function buildBrandVoiceBlock(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Where this piece sits in the strategy: the pillar it serves, the business
+ * goal that pillar exists for, the cluster it belongs to, and the other
+ * audiences on the strategy.
+ *
+ * This data was always loaded (getTopicContext walks pillar and cluster rows
+ * to reach the strategy) and never used. Without it the model sees a title, a
+ * keyword, and a funnel stage, and has to guess what the piece is FOR, which
+ * is exactly the "wrong angle" failure: a technically fine email aimed at
+ * nothing in particular.
+ *
+ * Empty string when a context has no pillar/cluster (chat surfaces and tests
+ * build TopicContext by hand), so nothing regresses for those callers.
+ */
+export function buildStrategyBlock(ctx: TopicContext): string {
+  const { pillar, cluster, topic } = ctx;
+  const lines: string[] = [];
+
+  if (pillar) {
+    lines.push(`Content pillar: ${pillar.name}`);
+    if (pillar.description) lines.push(`  What it covers: ${pillar.description}`);
+    if (pillar.business_goal) {
+      lines.push(`  Business goal this pillar serves: ${pillar.business_goal}`);
+    }
+  }
+  if (cluster) {
+    lines.push(`Topic cluster: ${cluster.hub_title}`);
+    if (cluster.hub_intent) lines.push(`  Reader intent for the cluster: ${cluster.hub_intent}`);
+  }
+  if (topic.internal_link_targets?.length) {
+    lines.push(
+      `Related pieces you may reference naturally: ${topic.internal_link_targets.join(", ")}`,
+    );
+  }
+
+  // Secondary audiences: named so an angle that would alienate them can be
+  // avoided. The voice block already speaks to the primary ICP in full, so
+  // repeating that detail here would be noise.
+  const secondary = (ctx.icps ?? []).filter((i) => i.id !== ctx.primaryIcp?.id);
+  if (secondary.length) {
+    lines.push(
+      `Also reading (secondary audiences, do not alienate): ${secondary
+        .map((i) => i.label)
+        .join(", ")}`,
+    );
+  }
+
+  if (!lines.length) return "";
+
+  return [
+    "WHERE THIS PIECE FITS (the strategy it serves; use it to choose the angle,",
+    "not as something to mention out loud):",
+    ...lines,
+  ].join("\n");
 }
 
 // Builds the positioning context block: what the business is, its tagline, what

@@ -7,7 +7,9 @@ import { requireDraftInBrand } from "@/lib/draft-access";
 import type { EmailTemplateId } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 
-export const maxDuration = 300;
+// Regeneration runs the same write + QA + revise + critique sequence as a
+// fresh generation, so it needs the same headroom (see generate-stream).
+export const maxDuration = 600;
 
 const KNOWN_TEMPLATES: EmailTemplateId[] = [
   "newsletter_tip",

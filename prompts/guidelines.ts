@@ -1,5 +1,5 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { Brand, Icp, Product, Strategy } from "@/lib/db/types";
+import type { Brand, DraftEdit, Icp, Product, Strategy } from "@/lib/db/types";
 
 // Brand-guidelines synthesis: Claude distills everything stored about the
 // brand into one guidelines document. The route returns it as a PROPOSAL for
@@ -72,6 +72,12 @@ export function buildGuidelinesMessages(args: {
   strategy: Strategy | null;
   icps: Icp[];
   products: Product[];
+  /** What the user has actually changed on real drafts (migration 026), plus
+   * the reasons they gave on thumbs-down ratings. This is the only input here
+   * that reflects behavior rather than stated intention, so it's the most
+   * honest evidence of the brand's real voice. Empty for a new account. */
+  edits?: DraftEdit[];
+  dislikeNotes?: string[];
 }): { system: string; user: string } {
   const { brand, strategy, icps, products } = args;
   const v = brand.voice_profile ?? {};
@@ -86,6 +92,12 @@ export function buildGuidelinesMessages(args: {
     `${brand.name}. Distill ONLY the data provided into clear, usable guidance a`,
     "copywriter and designer can follow. Never invent facts, services, or claims",
     "that aren't in the data. Write plainly and specifically; no agency jargon.",
+    "",
+    "When EDIT HISTORY is present, weight it heavily: those are changes the user",
+    "made by hand to real drafts, so they show what this brand actually sounds",
+    "like rather than what someone said it should sound like. Look for the",
+    "pattern across edits, not the one-off typo fix, and turn a repeated pattern",
+    "into a concrete do_language or dont_language line.",
     "NEVER use em dashes anywhere. Use a comma, colon, or period instead.",
     "Call save_brand_guidelines with every required field filled.",
   ].join("\n");
@@ -148,6 +160,7 @@ export function buildGuidelinesMessages(args: {
           .join("\n")
       : "",
     transcript ? `\nONBOARDING CONVERSATION (raw, for voice cues):\n${transcript}` : "",
+    buildEditHistoryBlock(args.edits, args.dislikeNotes),
     "",
     "Synthesize the brand guidelines from this data and call save_brand_guidelines.",
   ]
@@ -155,4 +168,54 @@ export function buildGuidelinesMessages(args: {
     .join("\n");
 
   return { system, user };
+}
+
+/**
+ * The user's own corrections, rendered as evidence.
+ *
+ * Inline edits are shown as before/after pairs because the DIFF is the signal:
+ * "cut the adverb", "shortened every sentence", "replaced the exclamation
+ * mark" only becomes visible when both sides are present. Style instructions
+ * and thumbs-down reasons are already stated in the user's words, so they pass
+ * through as written.
+ */
+export function buildEditHistoryBlock(
+  edits: DraftEdit[] | undefined,
+  dislikeNotes: string[] | undefined,
+): string {
+  const inline = (edits ?? []).filter(
+    (e) => e.kind === "inline" && e.before_text && e.after_text,
+  );
+  const style = (edits ?? []).filter((e) => e.kind === "style" && e.instruction);
+  const notes = (dislikeNotes ?? []).filter(Boolean);
+  if (!inline.length && !style.length && !notes.length) return "";
+
+  const trim = (t: string) => t.replace(/\s+/g, " ").trim().slice(0, 240);
+
+  return [
+    "",
+    "EDIT HISTORY (what the user actually changed on real drafts; the strongest",
+    "available evidence of this brand's true voice):",
+    ...(inline.length
+      ? [
+          "Copy they rewrote by hand, before then after:",
+          ...inline.map(
+            (e) =>
+              `  - was: "${trim(e.before_text!)}"\n    became: "${trim(e.after_text!)}"`,
+          ),
+        ]
+      : []),
+    ...(style.length
+      ? [
+          "Design changes they asked for, in their words:",
+          ...style.map((e) => `  - ${trim(e.instruction!)}`),
+        ]
+      : []),
+    ...(notes.length
+      ? [
+          "Reasons they gave for rejecting drafts:",
+          ...notes.map((n) => `  - ${trim(n)}`),
+        ]
+      : []),
+  ].join("\n");
 }

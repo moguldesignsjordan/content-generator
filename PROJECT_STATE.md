@@ -7,12 +7,71 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-19 (competitor ad swipe-file library built AND
-live-verified — see session below; still open: the older-standing
-**migrations 020 AND 021** — until 021 is applied, prompt capture silently
-no-ops and /prompts stays empty; until 020, rating an email 500s).
+Last updated: 2026-07-27 (generation quality overhaul: QA now REVISES instead
+of just reporting, an Opus angle pass runs before drafting, a design critique
+runs after, models moved to Sonnet 5 / Opus 5, and reviewer edits are captured
+as a learning signal. Typecheck + 491 tests + build green; NOT committed, and
+**migration 026 is NOT applied** — until it is, edit capture no-ops. No
+browser click-through yet: it needs a real login. Older-standing
+**migrations 020 AND 021** are still unapplied too.)
 
-## Session 2026-07-19 (latest): competitor ad swipe-file library
+Previously: 2026-07-19 (CTA link + clickable image fix confirmed
+committed & pushed to origin/main, 434ea70; its browser click-through was
+offered and explicitly declined by Jordan, closed as-is. Competitor ad
+swipe-file library built AND live-verified — see session below; still open:
+the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
+capture silently no-ops and /prompts stays empty; until 020, rating an email
+500s).
+
+## Session 2026-07-27 (latest): generation quality overhaul
+
+Jordan asked how to make generated content better. His three complaints:
+design/layout is off, copy sounds generic/AI, and the angle is often wrong.
+He explicitly accepted 2-3x token cost per draft to fix it. Plan lives at
+`~/.claude/plans/how-can-we-enhance-wondrous-cocke.md`.
+
+The through-line of the diagnosis: **the engine generated once, checked its
+own work, and then did nothing with the answer.** Five loops closed:
+
+1. **QA now revises.** `runQaPass` caught invented statistics and banned
+   terms and wrote them to `seo_data` for a human to notice. It now gates: on
+   failure the draft is rewritten ONCE with the reviewer's specific findings
+   quoted verbatim, then re-QA'd. Capped at one revision by design. Blogs had
+   NO model QA at all (code checks only) and now get the grounding + AI-tell
+   audit too (`prompts/qa-grounding.ts`). The AI-tell list moved to
+   `prompts/ai-tells.ts` so the writer and the auditor read one source: those
+   rules existed for months but nothing checked them.
+2. **An angle is chosen before drafting** (`lib/pipeline/pick-angle.ts`, the
+   one Opus call in the pipeline, `effort: xhigh`). It proposes 3 substantially
+   different angles and picks one; all three are stored on `meta.angles` so a
+   later UI can offer "use the second one" without regenerating.
+3. **Strategy data finally reaches the prompt.** `getTopicContext` always
+   walked pillar and cluster rows to reach the strategy and read only their
+   foreign keys, so `pillar.business_goal` and `cluster.hub_intent` — the two
+   facts that say what a piece is FOR — never reached a prompt. Now injected
+   via `buildStrategyBlock`, along with secondary ICPs.
+4. **Real send data feeds angle selection.** `listTopPerformingEmails` ranks
+   published emails by actual click/open rate. The `performance` table has
+   been collecting these since Slice 4 and nothing had ever read them back.
+5. **A design critique runs after QA** (`lib/pipeline/critique-design.ts`,
+   Opus, `xhigh`). Returns find/replace patches only, so it mechanically
+   cannot touch anything outside the spans it names; skipped entirely when the
+   code template produced the HTML.
+
+Plus: reviewer edits are captured (`draft_edits`, migration 026) and feed the
+existing human-approved guidelines synthesis in Settings, rather than a new
+button. Blogs and flyers now get the thumbs feedback block that was
+email-only. Models: `DRAFT_MODEL` → `claude-sonnet-5`, new `HARD_MODEL` =
+`claude-opus-5`, effort set explicitly everywhere; cost table updated.
+
+**Honest limits.** The design critique reads markup, not pixels — if layout
+complaints persist, the real fix is a screenshot + vision critique, which
+needs a renderer the app doesn't have. Generation is now ~4 model calls, so
+`maxDuration` went 300 → 600 on generate-stream/reject/cron and the progress
+copy now says two to three minutes. Nothing here is live-verified: it needs a
+login and migration 026.
+
+## Session 2026-07-19: competitor ad swipe-file library
 
 Ran the plan at `~/.claude/plans/nifty-crafting-patterson.md`: a "Competitor
 Ads" library so Jordan can save a competitor ad (pasted copy, a screenshot,
@@ -80,8 +139,12 @@ leftover SW registration before assuming the code is broken.
 
 Jordan's ask: "my button didn't work" + "add links to images." Verified with
 `npm run typecheck` + `npm test` (430, up from 421) + `npm run build`, all
-green. **Not yet committed.** Browser click-through open (needs a real
-login; Playwright MCP off by default).
+green. **COMMITTED & PUSHED (434ea70, confirmed on origin/main).** Browser
+click-through: offered on 2026-07-19 in a follow-up session (would have
+needed a temp password reset via `scripts/reset-password.ts` since email
+reset is still broken) — Jordan explicitly chose to skip it and accept
+typecheck/tests/build as sufficient verification for this change. Not an
+open item; closed by Jordan's call.
 
 - **Root cause of the dead button:** the CTA link field in the review
   screen (`ReviewActions`) only lived in local React state until Approve —

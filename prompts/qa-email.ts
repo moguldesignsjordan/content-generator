@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { CampaignBrief, EmailCopy, TopicContext } from "@/lib/db/types";
+import { AI_TELL_AUDIT_RULES } from "./ai-tells";
 
 export const QaSchema = z.object({
   meta_title: z
@@ -25,10 +26,15 @@ export const QaSchema = z.object({
   readability_note: z
     .string()
     .describe("One sentence on readability: sentence length, clarity, and flow. Flag if sentences consistently run long or jargon appears."),
+  ai_tells_found: z
+    .array(z.string())
+    .describe(
+      "Every phrase in the copy that matches one of the AI TELLS listed in the system prompt, quoted verbatim. Only structural or verbatim matches, never a stylistic preference. Empty array if none.",
+    ),
   qa_pass: z
     .boolean()
     .describe(
-      "True only if no banned terms were found AND the keyword is used AND unsupported_specifics is empty. False otherwise.",
+      "True only if no banned terms were found AND the keyword is used AND unsupported_specifics is empty AND ai_tells_found is empty. False otherwise.",
     ),
   issues: z
     .array(z.string())
@@ -73,9 +79,16 @@ export const QA_TOOL: Anthropic.Tool = {
       },
       banned_terms_found: { type: "array", items: { type: "string" }, description: "Banned terms found, or empty." },
       readability_note: { type: "string", description: "One sentence on readability." },
+      ai_tells_found: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Phrases matching the AI TELLS list, quoted verbatim. Structural or verbatim matches only. Empty if none.",
+      },
       qa_pass: {
         type: "boolean",
-        description: "True only if no banned terms, keyword is used, and unsupported_specifics is empty.",
+        description:
+          "True only if no banned terms, keyword is used, unsupported_specifics is empty, and ai_tells_found is empty.",
       },
       issues: { type: "array", items: { type: "string" }, description: "Actionable issues, or empty." },
       unsupported_specifics: {
@@ -100,6 +113,7 @@ export const QA_TOOL: Anthropic.Tool = {
       "keyword_placement",
       "banned_terms_found",
       "readability_note",
+      "ai_tells_found",
       "qa_pass",
       "issues",
       "unsupported_specifics",
@@ -116,7 +130,7 @@ export const QA_TOOL: Anthropic.Tool = {
  * there's nothing to ground against (a thin brief still gets checked, it just
  * has no allowlist, so ANY number/claim in the copy is unsupported).
  */
-function buildGroundingFactsBlock(
+export function buildGroundingFactsBlock(
   ctx: TopicContext,
   brief: CampaignBrief | null | undefined,
 ): string {
@@ -159,6 +173,8 @@ export function buildQaMessages(
     "anything that isn't backed by those facts in unsupported_specifics, even",
     "when it reads as plausible marketing copy: a plausible-sounding invented",
     "number is exactly the failure mode this check exists to catch.",
+    "",
+    ...AI_TELL_AUDIT_RULES,
   ].join("\n");
 
   const bodyLines = copy.body_sections
