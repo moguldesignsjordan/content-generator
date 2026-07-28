@@ -85,6 +85,20 @@ export interface PublishResult {
   scheduleError?: string;
 }
 
+/**
+ * Re-runs ONLY the delivery step for a resource that already exists at the
+ * destination. Exists because a failed schedule leaves a real campaign behind:
+ * publish() must never run again for it (that would create a duplicate), but
+ * the send/schedule call itself is safe to retry.
+ */
+export interface ScheduleExistingInput {
+  /** publications.external_id: the campaign already created at the destination. */
+  externalId: string;
+  schedule?: PublishSchedule;
+  brand: Brand;
+  integration: BrandIntegration | null;
+}
+
 export interface FetchStatsInput {
   /** publications.external_id: the campaign/document id at the destination. */
   externalId: string;
@@ -117,6 +131,13 @@ export interface PublishProvider {
    * the pipeline's publications-row check that runs before every call.
    */
   publish(input: PublishInput): Promise<PublishResult>;
+  /**
+   * Retries delivery for an already-created resource, WITHOUT re-creating it.
+   * Optional: providers with no separate delivery step (Sanity publishes in
+   * one call) don't implement it, and the pipeline then leaves the existing
+   * publication untouched.
+   */
+  scheduleExisting?(input: ScheduleExistingInput): Promise<PublishResult>;
   /**
    * Pulls the latest performance numbers for an already-published item.
    * Optional: providers with no reporting concept yet (Sanity/blog, deferred

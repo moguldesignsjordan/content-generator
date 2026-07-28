@@ -6,6 +6,7 @@ import {
   getBrandByDraftId,
   markJobPublished,
   recordPublication,
+  updatePublicationDelivery,
 } from "@/lib/db/queries";
 import type { BrandIntegration } from "@/lib/db/types";
 import { getProvider, providersForKind } from "@/lib/publishing/registry";
@@ -30,8 +31,11 @@ export interface PublishOutcome {
  * kind (or an explicit target id) → adapter.publish → record the publication.
  *
  * Idempotent at the pipeline level: an existing publications row for
- * (job, target) short-circuits BEFORE any external call, and recordPublication
- * tolerates the raced-insert case, so a retry never double-posts.
+ * (job, target) short-circuits BEFORE any create call, and recordPublication
+ * tolerates the raced-insert case, so a retry never double-posts. The one
+ * exception is a row still in status "draft" (created at the destination but
+ * never delivered): that retries the provider's DELIVERY step alone via
+ * scheduleExisting, which is safe because it never re-creates the resource.
  *
  * The human-approval gate is enforced here, not just in the UI: only drafts
  * in state "approved" can publish, ever. Provider credentials resolve from
@@ -88,6 +92,34 @@ export async function publishDraft(
 
   const existing = await getPublication(draft.jobId, provider.id);
   if (existing?.external_id) {
+    // status "draft" means the resource exists at the destination but delivery
+    // never happened (the provider's send/schedule call failed). Short-circuiting
+    // that case made the failure permanent: every later Publish/Schedule click
+    // returned "already published" without ever retrying delivery. Retry the
+    // delivery step only — never publish(), which would create a duplicate.
+    if (existing.status === "draft" && provider.scheduleExisting) {
+      const retry = await provider.scheduleExisting({
+        externalId: existing.external_id,
+        schedule,
+        brand,
+        integration,
+      });
+      const updated = await updatePublicationDelivery({
+        jobId: draft.jobId,
+        target: provider.id,
+        status: retry.status ?? "sent",
+        scheduledFor: retry.scheduledFor,
+      });
+      return {
+        target: provider.id,
+        externalId: existing.external_id,
+        url: updated.url ?? retry.url ?? undefined,
+        alreadyPublished: false,
+        status: updated.status,
+        scheduledFor: updated.scheduled_for ?? undefined,
+        scheduleError: retry.scheduleError,
+      };
+    }
     return {
       target: provider.id,
       externalId: existing.external_id,

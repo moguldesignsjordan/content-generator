@@ -1,5 +1,6 @@
 import "server-only";
 import { resolvePlain, resolveSecret } from "../credentials";
+import { logError } from "@/lib/log";
 import type { Brand, BrandIntegration, PerformanceMetric } from "@/lib/db/types";
 import type {
   FetchStatsInput,
@@ -7,6 +8,8 @@ import type {
   PublishInput,
   PublishProvider,
   PublishResult,
+  PublishSchedule,
+  ScheduleExistingInput,
 } from "../provider";
 
 // API shape verified against developers.mailerlite.com (campaigns docs):
@@ -34,7 +37,14 @@ import type {
 // actual send/schedule too, so there's no second manual step inside MailerLite's
 // own dashboard. timezone_id is deliberately omitted: schedule() relies on
 // MailerLite's account-default timezone rather than adding a timezone setting
-// to this app.
+// to this app. NOTE: that means a scheduled time is interpreted in the
+// MailerLite account's timezone, not the browser's — a time chosen close to
+// "now" can be rejected as not in the future.
+//
+// Create and deliver are two calls, and only the second one is retryable: a
+// failed schedule leaves a real campaign behind, so deliverCampaign() is
+// exposed again via scheduleExisting() (see lib/pipeline/publish.ts) instead of
+// re-running publish() and creating a duplicate.
 
 const API_BASE = "https://connect.mailerlite.com/api";
 
@@ -50,8 +60,7 @@ export const MAILERLITE_FIELDS: ProviderField[] = [
     key: "groupIds",
     label: "Group IDs",
     list: true,
-    optional: true,
-    hint: "Audience group IDs to target. Optional.",
+    hint: "Audience group IDs to send to. Required: a campaign with no group can be created but never sent.",
   },
 ];
 
@@ -77,6 +86,83 @@ export function resolveMailerliteConfig(
   };
 }
 
+const campaignUrl = (id: string) =>
+  `https://dashboard.mailerlite.com/campaigns/${id}`;
+
+/**
+ * Runs the send/schedule step for a campaign that already exists in MailerLite.
+ * Shared by publish() (right after create) and scheduleExisting() (retry of a
+ * campaign whose earlier delivery failed) so the request shape and the failure
+ * handling exist in exactly one place.
+ *
+ * Failure is deliberately RETURNED, not thrown: the campaign already exists, so
+ * throwing would send callers back through POST /campaigns and create a
+ * duplicate. Status "draft" means "created, not delivered" and is what makes the
+ * campaign eligible for a scheduleExisting() retry later.
+ */
+async function deliverCampaign(
+  id: string,
+  schedule: PublishSchedule | undefined,
+  apiKey: string,
+  groupIds: string[] | undefined,
+): Promise<PublishResult> {
+  const url = campaignUrl(id);
+  const s = schedule ?? { type: "instant" as const };
+  const body =
+    s.type === "scheduled"
+      ? {
+          delivery: "scheduled",
+          schedule: { date: s.date, hours: s.hours, minutes: s.minutes },
+        }
+      : { delivery: "instant" };
+
+  const res = await fetch(`${API_BASE}/campaigns/${id}/schedule`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const responseBody = await res.text().catch(() => "");
+    // Log the raw rejection: this used to surface only in a toast, which meant
+    // the one piece of information needed to diagnose a failed schedule was
+    // gone the moment the toast cleared.
+    logError(
+      "publish:mailerlite:schedule",
+      `MailerLite schedule failed (${res.status}): ${responseBody.slice(0, 400)}`,
+      {
+        campaignId: id,
+        delivery: body.delivery,
+        groupCount: groupIds?.length ?? 0,
+      },
+    );
+    return {
+      externalId: id,
+      url,
+      status: "draft",
+      scheduleError: `MailerLite schedule failed (${res.status}): ${responseBody.slice(0, 400)}`,
+    };
+  }
+
+  if (s.type === "scheduled") {
+    return {
+      externalId: id,
+      url,
+      status: "scheduled",
+      // Naive local timestamp for display only; the actual delivery time is
+      // whatever MailerLite's account timezone resolves this wall-clock
+      // time to.
+      scheduledFor: `${s.date}T${s.hours}:${s.minutes}:00`,
+    };
+  }
+
+  return { externalId: id, url, status: "sent" };
+}
+
 export const mailerliteProvider: PublishProvider = {
   id: "mailerlite",
   kind: "email",
@@ -99,6 +185,15 @@ export const mailerliteProvider: PublishProvider = {
     if (!ml.senderEmail || !ml.senderName) {
       throw new Error(
         "MailerLite sender is not set. Add sender name and a verified sender email in Settings.",
+      );
+    }
+    if (!ml.groupIds?.length) {
+      // Thrown BEFORE POST /campaigns, so nothing is created and there's no
+      // orphan to clean up. A campaign with no audience is created happily by
+      // MailerLite but cannot be scheduled or sent ("campaign settings
+      // missing"), which surfaced as an unexplained schedule failure.
+      throw new Error(
+        "MailerLite has no audience group selected. Add a group ID in Settings → Connections.",
       );
     }
     if (!content.html.includes("{$unsubscribe}")) {
@@ -141,58 +236,22 @@ export const mailerliteProvider: PublishProvider = {
       throw new Error("MailerLite response had no campaign id.");
     }
 
-    const url = `https://dashboard.mailerlite.com/campaigns/${id}`;
+    return deliverCampaign(String(id), input.schedule, ml.apiKey, ml.groupIds);
+  },
 
-    // Deliberately not thrown on failure: the campaign above already exists
-    // in MailerLite, so throwing here would make a retry call POST /campaigns
-    // again and create a duplicate. Returning status "draft" instead lets the
-    // pipeline still record the publication (idempotent on retry) while
-    // surfacing that delivery needs to be finished manually in MailerLite.
-    const schedule = input.schedule ?? { type: "instant" as const };
-    const scheduleRes = await fetch(`${API_BASE}/campaigns/${id}/schedule`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ml.apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(
-        schedule.type === "scheduled"
-          ? {
-              delivery: "scheduled",
-              schedule: {
-                date: schedule.date,
-                hours: schedule.hours,
-                minutes: schedule.minutes,
-              },
-            }
-          : { delivery: "instant" },
-      ),
-    });
-
-    if (!scheduleRes.ok) {
-      const body = await scheduleRes.text().catch(() => "");
-      return {
-        externalId: String(id),
-        url,
-        status: "draft",
-        scheduleError: `MailerLite schedule failed (${scheduleRes.status}): ${body.slice(0, 400)}`,
-      };
+  async scheduleExisting(input: ScheduleExistingInput): Promise<PublishResult> {
+    const ml = resolveMailerliteConfig(input.brand, input.integration);
+    if (!ml.apiKey) {
+      throw new Error(
+        "MailerLite is not connected. Add an API key in Settings → Connections.",
+      );
     }
-
-    if (schedule.type === "scheduled") {
-      return {
-        externalId: String(id),
-        url,
-        status: "scheduled",
-        // Naive local timestamp for display only; the actual delivery time is
-        // whatever MailerLite's account timezone resolves this wall-clock
-        // time to.
-        scheduledFor: `${schedule.date}T${schedule.hours}:${schedule.minutes}:00`,
-      };
-    }
-
-    return { externalId: String(id), url, status: "sent" };
+    return deliverCampaign(
+      input.externalId,
+      input.schedule,
+      ml.apiKey,
+      ml.groupIds,
+    );
   },
 
   async fetchStats(input: FetchStatsInput): Promise<PerformanceMetric[]> {
