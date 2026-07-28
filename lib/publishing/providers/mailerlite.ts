@@ -1,7 +1,12 @@
 import "server-only";
 import { resolvePlain, resolveSecret } from "../credentials";
 import { logError } from "@/lib/log";
-import type { Brand, BrandIntegration, PerformanceMetric } from "@/lib/db/types";
+import type {
+  Brand,
+  BrandIntegration,
+  EmailDraftContent,
+  PerformanceMetric,
+} from "@/lib/db/types";
 import type {
   FetchStatsInput,
   ProviderField,
@@ -166,6 +171,117 @@ async function deliverCampaign(
   return { externalId: id, url, status: "sent" };
 }
 
+/**
+ * The campaign body MailerLite wants, shared by create (POST /campaigns) and
+ * edit (PUT /campaigns/{id}) — the two take the same shape, so building it in
+ * one place is what keeps an updated campaign identical to a freshly created
+ * one rather than a slightly different second implementation.
+ */
+function campaignBody(
+  content: EmailDraftContent,
+  ml: ResolvedMailerlite,
+  fallbackName: string,
+) {
+  return {
+    name: content.subject.slice(0, 255) || fallbackName,
+    type: "regular",
+    emails: [
+      {
+        subject: content.subject,
+        from_name: ml.senderName,
+        from: ml.senderEmail,
+        content: content.html,
+      },
+    ],
+    ...(ml.groupIds?.length ? { groups: ml.groupIds } : {}),
+  };
+}
+
+/**
+ * Everything that must be true before we touch MailerLite's campaign
+ * endpoints. Throws BEFORE any create/update call, so a rejected send never
+ * leaves an orphan or a half-edited campaign behind.
+ */
+function assertSendable(ml: ResolvedMailerlite, content: EmailDraftContent) {
+  if (!ml.apiKey) {
+    throw new Error(
+      "MailerLite is not connected. Add an API key in Settings → Connections.",
+    );
+  }
+  if (!ml.senderEmail || !ml.senderName) {
+    throw new Error(
+      "MailerLite sender is not set. Add sender name and a verified sender email in Settings.",
+    );
+  }
+  if (!ml.groupIds?.length) {
+    // A campaign with no audience is created happily by MailerLite but cannot
+    // be scheduled or sent ("campaign settings missing"), which surfaced as an
+    // unexplained schedule failure.
+    throw new Error(
+      "MailerLite has no audience group selected. Add a group ID in Settings → Connections.",
+    );
+  }
+  if (!content.html.includes("{$unsubscribe}")) {
+    // The pipeline guarantees this; check again at the boundary anyway.
+    throw new Error("Email HTML is missing the {$unsubscribe} merge tag.");
+  }
+}
+
+/** POST /campaigns → the new campaign id. */
+async function createCampaign(
+  content: EmailDraftContent,
+  ml: ResolvedMailerlite,
+  fallbackName: string,
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/campaigns`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ml.apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(campaignBody(content, ml, fallbackName)),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `MailerLite campaign create failed (${res.status}): ${body.slice(0, 400)}`,
+    );
+  }
+
+  const data = (await res.json()) as { data?: { id?: string | number } };
+  const id = data.data?.id;
+  if (id === undefined || id === null) {
+    throw new Error("MailerLite response had no campaign id.");
+  }
+  return String(id);
+}
+
+/**
+ * Current campaign status at MailerLite, or "gone" when the id no longer
+ * exists there. This is the gate for editing: MailerLite only accepts PUT on a
+ * campaign in "draft" status, a "ready" (scheduled) one has to be cancelled
+ * back to draft first, and a sent one can never be edited at all.
+ */
+async function fetchCampaignStatus(
+  id: string,
+  apiKey: string,
+): Promise<{ status: string } | { gone: true }> {
+  const res = await fetch(`${API_BASE}/campaigns/${id}`, {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+  });
+  if (res.status === 404 || res.status === 410) return { gone: true };
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `MailerLite campaign fetch failed (${res.status}): ${body.slice(0, 400)}`,
+    );
+  }
+  const data = (await res.json()) as { data?: { status?: string } };
+  return { status: data.data?.status ?? "draft" };
+}
+
 export const mailerliteProvider: PublishProvider = {
   id: "mailerlite",
   kind: "email",
@@ -179,67 +295,120 @@ export const mailerliteProvider: PublishProvider = {
   async publish(input: PublishInput): Promise<PublishResult> {
     const { content, brand, integration } = input;
     const ml = resolveMailerliteConfig(brand, integration);
+    assertSendable(ml, content);
 
-    if (!ml.apiKey) {
-      throw new Error(
-        "MailerLite is not connected. Add an API key in Settings → Connections.",
+    const id = await createCampaign(
+      content,
+      ml,
+      `Content Engine ${input.jobId}`,
+    );
+    return deliverCampaign(id, input.schedule, ml.apiKey!, ml.groupIds);
+  },
+
+  /**
+   * Pushes the draft's current content over the existing campaign and delivers
+   * it again, so approving is not a one-way door: a typo caught after the fact
+   * is fixed and re-sent from this app, never by rebuilding the email inside
+   * MailerLite's own editor.
+   *
+   * Three cases, decided by the campaign's live status (never by our stored
+   * one, which goes stale the moment anyone touches MailerLite directly):
+   *  - draft: PUT the new content, then deliver.
+   *  - ready (scheduled): cancel back to draft first, since MailerLite refuses
+   *    PUT on anything but a draft, then PUT and re-schedule.
+   *  - sent: unfixable at MailerLite. Refused outright unless the caller
+   *    explicitly opted into allowRecreate, which sends a NEW campaign to the
+   *    same audience (a second email in their inbox, so it stays a deliberate
+   *    human choice, not a retry side effect).
+   * A campaign that's gone (deleted at MailerLite) is recreated the same way.
+   */
+  async updatePublished(input): Promise<PublishResult> {
+    const { content, brand, integration, externalId, allowRecreate } = input;
+    const ml = resolveMailerliteConfig(brand, integration);
+    assertSendable(ml, content);
+    const apiKey = ml.apiKey!;
+
+    const recreate = async (): Promise<PublishResult> => {
+      const newId = await createCampaign(
+        content,
+        ml,
+        `Content Engine ${input.jobId}`,
       );
-    }
-    if (!ml.senderEmail || !ml.senderName) {
-      throw new Error(
-        "MailerLite sender is not set. Add sender name and a verified sender email in Settings.",
+      const delivered = await deliverCampaign(
+        newId,
+        input.schedule,
+        apiKey,
+        ml.groupIds,
       );
-    }
-    if (!ml.groupIds?.length) {
-      // Thrown BEFORE POST /campaigns, so nothing is created and there's no
-      // orphan to clean up. A campaign with no audience is created happily by
-      // MailerLite but cannot be scheduled or sent ("campaign settings
-      // missing"), which surfaced as an unexplained schedule failure.
-      throw new Error(
-        "MailerLite has no audience group selected. Add a group ID in Settings → Connections.",
-      );
-    }
-    if (!content.html.includes("{$unsubscribe}")) {
-      // The pipeline guarantees this; check again at the boundary anyway.
-      throw new Error("Email HTML is missing the {$unsubscribe} merge tag.");
+      return { ...delivered, recreated: true };
+    };
+
+    const live = await fetchCampaignStatus(externalId, apiKey);
+    if ("gone" in live) return recreate();
+
+    if (live.status !== "draft" && live.status !== "ready") {
+      // "sent"/"finished"/"started"/"queued": the mail is already on its way
+      // or delivered, and MailerLite has no edit path for it.
+      if (!allowRecreate) {
+        throw new Error(
+          "This campaign has already gone out, so MailerLite can't edit it. You can send the updated email as a new campaign instead.",
+        );
+      }
+      return recreate();
     }
 
-    const res = await fetch(`${API_BASE}/campaigns`, {
-      method: "POST",
+    if (live.status === "ready") {
+      const cancelled = await fetch(
+        `${API_BASE}/campaigns/${externalId}/cancel`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+        },
+      );
+      if (!cancelled.ok) {
+        const body = await cancelled.text().catch(() => "");
+        // Thrown, not returned: nothing has changed yet, so failing here
+        // leaves the existing schedule intact and safe to retry.
+        throw new Error(
+          `MailerLite couldn't unschedule this campaign to edit it (${cancelled.status}): ${body.slice(0, 400)}`,
+        );
+      }
+    }
+
+    const res = await fetch(`${API_BASE}/campaigns/${externalId}`, {
+      method: "PUT",
       headers: {
-        Authorization: `Bearer ${ml.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({
-        name: content.subject.slice(0, 255) || `Content Engine ${input.jobId}`,
-        type: "regular",
-        emails: [
-          {
-            subject: content.subject,
-            from_name: ml.senderName,
-            from: ml.senderEmail,
-            content: content.html,
-          },
-        ],
-        ...(ml.groupIds?.length ? { groups: ml.groupIds } : {}),
-      }),
+      body: JSON.stringify(
+        campaignBody(content, ml, `Content Engine ${input.jobId}`),
+      ),
     });
-
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      logError(
+        "publish:mailerlite:update",
+        `MailerLite campaign update failed (${res.status}): ${body.slice(0, 400)}`,
+        { campaignId: externalId, status: live.status },
+      );
+      // A cancelled-then-failed update leaves the campaign sitting as a draft
+      // in MailerLite rather than scheduled. Say so, because the previously
+      // scheduled send is genuinely no longer going to happen.
       throw new Error(
-        `MailerLite campaign create failed (${res.status}): ${body.slice(0, 400)}`,
+        `MailerLite campaign update failed (${res.status}): ${body.slice(0, 400)}${
+          live.status === "ready"
+            ? " The campaign is now unscheduled in MailerLite, so nothing will send until you retry."
+            : ""
+        }`,
       );
     }
 
-    const data = (await res.json()) as { data?: { id?: string | number } };
-    const id = data.data?.id;
-    if (id === undefined || id === null) {
-      throw new Error("MailerLite response had no campaign id.");
-    }
-
-    return deliverCampaign(String(id), input.schedule, ml.apiKey, ml.groupIds);
+    return deliverCampaign(externalId, input.schedule, apiKey, ml.groupIds);
   },
 
   async scheduleExisting(input: ScheduleExistingInput): Promise<PublishResult> {

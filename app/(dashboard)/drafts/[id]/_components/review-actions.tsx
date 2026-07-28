@@ -125,6 +125,17 @@ export function ReviewActions({
   const [publication, setPublication] = useState(initialPublication);
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduleDateTime, setScheduleDateTime] = useState("");
+  // Post-publish update: pushing edits over the campaign that's already in
+  // MailerLite. Separate schedule sheet + confirm state from the first send so
+  // neither flow can pick up the other's half-filled inputs.
+  const [republishing, setRepublishing] = useState(false);
+  const [showResendSchedule, setShowResendSchedule] = useState(false);
+  const [resendDateTime, setResendDateTime] = useState("");
+  const [pendingResend, setPendingResend] = useState<
+    | { type: "instant" }
+    | { type: "scheduled"; date: string; hours: string; minutes: string }
+    | null
+  >(null);
 
   const [subject, setSubject] = useState(initialContent.subject);
   const [preheader, setPreheader] = useState(initialContent.preheader);
@@ -551,6 +562,94 @@ export function ReviewActions({
     }
   }
 
+  // Pushes the CURRENT (possibly edited) email over the campaign that's
+  // already in MailerLite, instead of creating a second one. Approving isn't
+  // a one-way door: as long as MailerLite still has the campaign as a draft or
+  // scheduled, a fix made here lands on that same campaign.
+  //
+  // Once it has actually gone out MailerLite can't edit it at all; the server
+  // answers 409 alreadySent and the only way forward is an explicit "send as a
+  // new campaign", confirmed by the user, never automatic.
+  async function handleRepublish(
+    schedule:
+      | { type: "instant" }
+      | { type: "scheduled"; date: string; hours: string; minutes: string } = { type: "instant" },
+    allowRecreate = false,
+  ) {
+    setRepublishing(true);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/republish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: "mailerlite",
+          schedule,
+          allowRecreate,
+          editedContent: { subject, preheader, html },
+          meta: {
+            ...initialMeta,
+            meta_title: metaTitle,
+            meta_description: metaDesc,
+            ...(initialMeta.email_copy && {
+              email_copy: { ...initialMeta.email_copy, cta_url: ctaUrl.trim() || undefined },
+            }),
+          },
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        alreadySent?: boolean;
+        target?: string;
+        externalId?: string;
+        url?: string;
+        status?: string;
+        scheduledFor?: string;
+        scheduleError?: string;
+        recreated?: boolean;
+      };
+      if (res.status === 409 && data.alreadySent) {
+        setPendingResend(schedule);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error ?? "Failed to update the campaign.");
+      setPublication({
+        id: "",
+        job_id: "",
+        target: data.target ?? "mailerlite",
+        external_id: data.externalId ?? null,
+        url: data.url ?? null,
+        published_at: "",
+        status: data.status ?? "sent",
+        scheduled_for: data.scheduledFor ?? null,
+      });
+      setShowSchedule(false);
+      setShowResendSchedule(false);
+      setPendingResend(null);
+      if (data.status === "draft") {
+        toast.error(
+          data.scheduleError
+            ? `Updated in MailerLite but delivery failed: ${data.scheduleError}`
+            : "Updated in MailerLite but couldn't confirm delivery. Check MailerLite directly.",
+        );
+      } else if (data.recreated) {
+        toast.success(
+          data.status === "scheduled"
+            ? "Sent as a new campaign, scheduled in MailerLite."
+            : "Sent as a new campaign in MailerLite.",
+        );
+      } else if (data.status === "scheduled") {
+        toast.success("Campaign updated and rescheduled in MailerLite.");
+      } else {
+        toast.success("Updated and sent via MailerLite.");
+      }
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update the campaign.");
+    } finally {
+      setRepublishing(false);
+    }
+  }
+
   function handleScheduleSubmit() {
     if (!scheduleDateTime) return;
     const [date, time] = scheduleDateTime.split("T");
@@ -565,6 +664,18 @@ export function ReviewActions({
       return;
     }
     void handlePublish({ type: "scheduled", date, hours, minutes });
+  }
+
+  function handleResendScheduleSubmit() {
+    if (!resendDateTime) return;
+    const [date, time] = resendDateTime.split("T");
+    const [hours, minutes] = (time ?? "").split(":");
+    if (!date || !hours || !minutes) return;
+    if (new Date(resendDateTime).getTime() <= Date.now()) {
+      toast.error("Pick a time in the future.");
+      return;
+    }
+    void handleRepublish({ type: "scheduled", date, hours, minutes });
   }
 
   // Why the Reject button won't respond, surfaced via tooltip since the
@@ -976,6 +1087,34 @@ export function ReviewActions({
                   </div>
                 </div>
               )}
+              {/* Edits after publishing. The email above stays fully editable
+                  (preview, Design Chat, subject, CTA) once approved; this is
+                  how those changes reach the campaign that's already there,
+                  without creating a second one. */}
+              <div className="flex w-full flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+                <p className="text-[13px] text-muted">
+                  {publication.status === "sent"
+                    ? "Already delivered, so MailerLite can't edit it. You can still edit above and send it again as a new campaign."
+                    : "Changed something above? Push it to this same campaign, no duplicate."}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={republishing || publishing}
+                    onClick={() => setShowResendSchedule(true)}
+                  >
+                    Update &amp; schedule
+                  </Button>
+                  <Button
+                    variant="solid"
+                    loading={republishing && !showResendSchedule}
+                    disabled={republishing || publishing}
+                    onClick={() => void handleRepublish()}
+                  >
+                    {publication.status === "sent" ? "Send updated version" : "Update & send now"}
+                  </Button>
+                </div>
+              </div>
               {publication.url && (
                 <a
                   href={publication.url}
@@ -1058,7 +1197,7 @@ export function ReviewActions({
         ) : (
           <p className="text-[13px] text-muted">
             {state === "approved"
-              ? "This draft has already been approved."
+              ? "Approved. You can still edit it above and push the changes to MailerLite."
               : state === "rejected"
                 ? "This draft was rejected. Check for a newer version of this email."
                 : "This is no longer the active version of this draft."}
@@ -1284,6 +1423,62 @@ export function ReviewActions({
           onChange={(e) => setDownReason(e.target.value)}
           placeholder="Anything specific? (optional)"
         />
+      </Sheet>
+
+      {/* The campaign already went out, so there is nothing left to edit at
+          MailerLite. Sending anyway means a SECOND email in every subscriber's
+          inbox, which is exactly why it needs an explicit yes. */}
+      <ConfirmDialog
+        open={pendingResend !== null}
+        onClose={() => setPendingResend(null)}
+        onConfirm={() => {
+          const schedule = pendingResend ?? { type: "instant" as const };
+          setPendingResend(null);
+          void handleRepublish(schedule, true);
+        }}
+        tone="danger"
+        title="This campaign already went out"
+        description="MailerLite can't edit a campaign that's been delivered. Sending the updated version creates a brand new campaign, so everyone in the group gets a second email."
+        confirmLabel="Send as a new campaign"
+        cancelLabel="Cancel"
+        loading={republishing}
+      />
+
+      {/* Update & schedule: same date/time contract as the first send. */}
+      <Sheet
+        open={showResendSchedule}
+        onClose={() => setShowResendSchedule(false)}
+        title="Update & schedule"
+        description="Pushes your latest edits to this campaign and sets a new send time. Uses your MailerLite account's timezone."
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="subtle"
+              className="flex-1"
+              onClick={() => setShowResendSchedule(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gradient"
+              className="flex-1"
+              loading={republishing}
+              disabled={!resendDateTime}
+              onClick={handleResendScheduleSubmit}
+            >
+              Update & schedule
+            </Button>
+          </div>
+        }
+      >
+        <Field label="Send at">
+          <Input
+            type="datetime-local"
+            value={resendDateTime}
+            min={localDateTimeValue(new Date())}
+            onChange={(e) => setResendDateTime(e.target.value)}
+          />
+        </Field>
       </Sheet>
 
       {/* Schedule for later: date/time only, no timezone field, MailerLite

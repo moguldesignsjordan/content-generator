@@ -23,31 +23,17 @@ export interface PublishOutcome {
   scheduledFor?: string;
   /** Present when status is 'draft' because the provider's send/schedule call failed. */
   scheduleError?: string;
+  /** True when the destination couldn't be edited so a NEW resource was created. */
+  recreated?: boolean;
 }
 
 /**
- * Publishes an approved draft through the provider registry. Provider-agnostic
- * by design: resolve the draft's channel → the configured provider of that
- * kind (or an explicit target id) → adapter.publish → record the publication.
- *
- * Idempotent at the pipeline level: an existing publications row for
- * (job, target) short-circuits BEFORE any create call, and recordPublication
- * tolerates the raced-insert case, so a retry never double-posts. The one
- * exception is a row still in status "draft" (created at the destination but
- * never delivered): that retries the provider's DELIVERY step alone via
- * scheduleExisting, which is safe because it never re-creates the resource.
- *
- * The human-approval gate is enforced here, not just in the UI: only drafts
- * in state "approved" can publish, ever. Provider credentials resolve from
- * the brand's saved connection with env-var fallback (see lib/publishing/
- * credentials.ts), so a brand with its own API key takes precedence over the
- * shared server env.
+ * Resolves the draft, its brand, and the destination adapter + credentials for
+ * one publish-ish action. Shared by publishDraft and republishDraft so the
+ * approval gate, the ownership chain (draft -> job -> brand, never the
+ * session), and the "is this destination actually usable" checks exist once.
  */
-export async function publishDraft(
-  draftId: string,
-  targetId?: string,
-  schedule?: PublishSchedule,
-): Promise<PublishOutcome> {
+async function resolveTarget(draftId: string, targetId?: string) {
   const draft = await getDraftWithJobContext(draftId);
   if (!draft) throw new Error(`Draft ${draftId} not found.`);
   if (draft.state !== "approved") {
@@ -55,9 +41,8 @@ export async function publishDraft(
   }
 
   // Load the brand and its connections BEFORE provider selection: isConfigured
-  // now needs (brand, integration), and the chosen provider's publish() needs
-  // the matching integration row. Brand comes from the draft (draft -> job ->
-  // brand), not the session, since a draft's owner is intrinsic to it.
+  // needs (brand, integration), and the chosen provider's publish() needs the
+  // matching integration row.
   const brand = await getBrandByDraftId(draftId);
   if (!brand) throw new Error("No brand found.");
 
@@ -89,6 +74,107 @@ export async function publishDraft(
       `${provider.label} is not configured. Connect it in Settings → Connections.`,
     );
   }
+
+  return { draft, brand, provider, integration };
+}
+
+/**
+ * Pushes the draft's CURRENT content over an already-published destination and
+ * delivers it again. This is what makes approval reversible in practice: an
+ * email adjusted after it went to MailerLite is corrected in place (the same
+ * campaign, no duplicate) as long as MailerLite still allows an edit.
+ *
+ * Reads the draft fresh, so whatever the review screen last saved is what goes
+ * out. Never creates a second publications row: the existing row is repointed
+ * only in the one case where the provider had to recreate the resource.
+ */
+export async function republishDraft(
+  draftId: string,
+  opts: {
+    targetId?: string;
+    schedule?: PublishSchedule;
+    /** Explicit opt-in to sending a NEW campaign when the old one already went out. */
+    allowRecreate?: boolean;
+  } = {},
+): Promise<PublishOutcome> {
+  const { draft, brand, provider, integration } = await resolveTarget(
+    draftId,
+    opts.targetId,
+  );
+
+  const existing = await getPublication(draft.jobId, provider.id);
+  if (!existing?.external_id) {
+    throw new Error(
+      `This draft hasn't been published to ${provider.label} yet, so there's nothing to update.`,
+    );
+  }
+  if (!provider.updatePublished) {
+    throw new Error(
+      `${provider.label} can't update something already published. Publish a new version instead.`,
+    );
+  }
+
+  const result = await provider.updatePublished({
+    jobId: draft.jobId,
+    draftId: draft.draftId,
+    content: draft.content,
+    meta: draft.meta,
+    brand,
+    integration,
+    schedule: opts.schedule,
+    externalId: existing.external_id,
+    allowRecreate: opts.allowRecreate,
+  });
+
+  const updated = await updatePublicationDelivery({
+    jobId: draft.jobId,
+    target: provider.id,
+    status: result.status ?? "sent",
+    scheduledFor: result.scheduledFor,
+    // Only a recreate changes the id; an in-place edit keeps the same campaign.
+    externalId: result.recreated ? result.externalId : undefined,
+    url: result.recreated ? result.url : undefined,
+  });
+
+  return {
+    target: provider.id,
+    externalId: updated.external_id ?? result.externalId,
+    url: updated.url ?? result.url ?? undefined,
+    alreadyPublished: false,
+    status: updated.status,
+    scheduledFor: updated.scheduled_for ?? undefined,
+    scheduleError: result.scheduleError,
+    recreated: result.recreated,
+  };
+}
+
+/**
+ * Publishes an approved draft through the provider registry. Provider-agnostic
+ * by design: resolve the draft's channel → the configured provider of that
+ * kind (or an explicit target id) → adapter.publish → record the publication.
+ *
+ * Idempotent at the pipeline level: an existing publications row for
+ * (job, target) short-circuits BEFORE any create call, and recordPublication
+ * tolerates the raced-insert case, so a retry never double-posts. The one
+ * exception is a row still in status "draft" (created at the destination but
+ * never delivered): that retries the provider's DELIVERY step alone via
+ * scheduleExisting, which is safe because it never re-creates the resource.
+ *
+ * The human-approval gate is enforced here, not just in the UI: only drafts
+ * in state "approved" can publish, ever. Provider credentials resolve from
+ * the brand's saved connection with env-var fallback (see lib/publishing/
+ * credentials.ts), so a brand with its own API key takes precedence over the
+ * shared server env.
+ */
+export async function publishDraft(
+  draftId: string,
+  targetId?: string,
+  schedule?: PublishSchedule,
+): Promise<PublishOutcome> {
+  const { draft, brand, provider, integration } = await resolveTarget(
+    draftId,
+    targetId,
+  );
 
   const existing = await getPublication(draft.jobId, provider.id);
   if (existing?.external_id) {

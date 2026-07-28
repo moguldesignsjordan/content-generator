@@ -173,3 +173,89 @@ describe("mailerlite scheduleExisting", () => {
     expect(result.scheduleError).toContain("422");
   });
 });
+
+// Editing after publishing. The whole point is that approving isn't final:
+// as long as MailerLite still holds the campaign as draft or ready, the fixed
+// email lands on that SAME campaign id rather than a duplicate.
+describe("mailerlite updatePublished", () => {
+  const updateInput = (overrides: Record<string, unknown> = {}) =>
+    ({ ...publishInput(), externalId: "42", ...overrides }) as never;
+
+  const campaignUrl = `${CREATE}/42`;
+
+  it("edits a draft campaign in place and re-delivers it", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "draft" } })) // GET
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 42 } })) // PUT
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "sent" } })); // deliver
+
+    const result = await mailerliteProvider.updatePublished!(updateInput());
+
+    expect(fetchMock.mock.calls[1][0]).toBe(campaignUrl);
+    expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
+    expect(result.externalId).toBe("42");
+    expect(result.recreated).toBeUndefined();
+    expect(result.status).toBe("sent");
+  });
+
+  it("cancels a scheduled campaign first, since MailerLite only edits drafts", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "ready" } })) // GET
+      .mockResolvedValueOnce(jsonResponse({ data: {} })) // cancel
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 42 } })) // PUT
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "ready" } })); // deliver
+
+    await mailerliteProvider.updatePublished!(updateInput());
+
+    expect(fetchMock.mock.calls[1][0]).toBe(`${campaignUrl}/cancel`);
+    expect(fetchMock.mock.calls[2][1].method).toBe("PUT");
+  });
+
+  it("refuses a sent campaign unless recreating was explicitly allowed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { status: "sent" } }));
+
+    await expect(
+      mailerliteProvider.updatePublished!(updateInput()),
+    ).rejects.toThrow(/already gone out/);
+    // Nothing beyond the status read: no edit, no second campaign.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a new campaign when the caller opts into resending a sent one", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "sent" } })) // GET
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 99 } })) // create
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "sent" } })); // deliver
+
+    const result = await mailerliteProvider.updatePublished!(
+      updateInput({ allowRecreate: true }),
+    );
+
+    expect(fetchMock.mock.calls[1][0]).toBe(CREATE);
+    expect(result.externalId).toBe("99");
+    expect(result.recreated).toBe(true);
+  });
+
+  it("recreates a campaign that no longer exists at MailerLite", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: "gone" }, false, 404))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 77 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "sent" } }));
+
+    const result = await mailerliteProvider.updatePublished!(updateInput());
+
+    expect(result.externalId).toBe("77");
+    expect(result.recreated).toBe(true);
+  });
+
+  it("says the send is off when an unschedule succeeded but the edit failed", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { status: "ready" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: {} })) // cancel succeeded
+      .mockResolvedValueOnce(jsonResponse({ message: "bad" }, false, 422));
+
+    await expect(
+      mailerliteProvider.updatePublished!(updateInput()),
+    ).rejects.toThrow(/now unscheduled/);
+  });
+});

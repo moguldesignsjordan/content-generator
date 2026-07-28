@@ -90,6 +90,31 @@ export interface PublishResult {
    * delivery failure, which must never trigger a re-create (would duplicate).
    */
   gone?: boolean;
+  /**
+   * Set by updatePublished when the destination could not be edited in place
+   * and a NEW resource was created instead (e.g. a MailerLite campaign that
+   * had already gone out). The pipeline repoints the publications row at the
+   * new external id, and the UI says "sent as a new campaign", not "updated".
+   */
+  recreated?: boolean;
+}
+
+/**
+ * Pushes the draft's CURRENT content over a resource that already exists at
+ * the destination, then re-runs delivery. Distinct from publish() (which
+ * creates) and from scheduleExisting() (which only re-delivers what's already
+ * there): this is "I changed the email after approving it, send the new one."
+ */
+export interface UpdatePublishedInput extends PublishInput {
+  /** publications.external_id: the resource to overwrite. */
+  externalId: string;
+  /**
+   * When the destination refuses an in-place edit (a MailerLite campaign that
+   * has already gone out can never be edited), create a fresh resource instead
+   * of failing. Off by default: re-sending to a whole audience is a decision
+   * the human makes explicitly, never a silent fallback.
+   */
+  allowRecreate?: boolean;
 }
 
 /**
@@ -145,6 +170,13 @@ export interface PublishProvider {
    * publication untouched.
    */
   scheduleExisting?(input: ScheduleExistingInput): Promise<PublishResult>;
+  /**
+   * Overwrites an already-published resource with the draft's current content
+   * and delivers it again. Optional: a provider that can't edit after the fact
+   * simply doesn't implement it, and the pipeline refuses the request rather
+   * than pretending the update landed.
+   */
+  updatePublished?(input: UpdatePublishedInput): Promise<PublishResult>;
   /**
    * Pulls the latest performance numbers for an already-published item.
    * Optional: providers with no reporting concept yet (Sanity/blog, deferred

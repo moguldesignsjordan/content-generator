@@ -965,6 +965,73 @@ export async function updateDraftContent(
 }
 
 /**
+ * Layers the handful of meta fields the review client actually owns (the two
+ * web-version text fields and the CTA url) onto the CURRENT stored meta.
+ *
+ * Never flat-replace: the client builds its payload from meta captured at page
+ * mount, so a replace would clobber whatever the in-place edit pipelines wrote
+ * after load (email_copy synced after a copy edit, new style_edit_history
+ * entries). The server stays authoritative for those.
+ */
+async function mergeClientOwnedMeta(
+  draftId: string,
+  editedMeta: DraftMeta,
+  // Not DraftMeta: email_copy is partial here by design (the client only owns
+  // cta_url, and a draft that never had email_copy still gets just that key).
+): Promise<Record<string, unknown>> {
+  const db = getAdminClient();
+  const { data: row, error } = await db
+    .from("drafts")
+    .select("meta")
+    .eq("id", draftId)
+    .single();
+  if (error) throw error;
+  const currentMeta = (row?.meta ?? {}) as DraftMeta;
+  return {
+    ...currentMeta,
+    meta_title: editedMeta.meta_title ?? currentMeta.meta_title,
+    meta_description:
+      editedMeta.meta_description ?? currentMeta.meta_description,
+    email_copy: {
+      ...currentMeta.email_copy,
+      cta_url: editedMeta.email_copy?.cta_url ?? currentMeta.email_copy?.cta_url,
+    },
+  };
+}
+
+/**
+ * Saves edits to a draft that is ALREADY approved, without touching its state.
+ *
+ * Exists because approval is not the end of the line for an email: a campaign
+ * that's still a draft or scheduled in MailerLite can be adjusted and pushed
+ * again (see lib/pipeline/publish.ts republishDraft). Recorded as an "edited"
+ * approval row so the audit trail shows the change happened post-approval.
+ */
+export async function saveApprovedDraftEdits(
+  draftId: string,
+  editedContent?: EmailDraftContent,
+  editedMeta?: DraftMeta,
+): Promise<void> {
+  if (!editedContent && !editedMeta) return;
+  const db = getAdminClient();
+
+  const update: Record<string, unknown> = {};
+  if (editedContent) update.content = editedContent;
+  if (editedMeta) update.meta = await mergeClientOwnedMeta(draftId, editedMeta);
+
+  const { error: updateErr } = await db
+    .from("drafts")
+    .update(update)
+    .eq("id", draftId);
+  if (updateErr) throw updateErr;
+
+  const { error: approvalErr } = await db
+    .from("approvals")
+    .insert({ draft_id: draftId, decision: "edited" });
+  if (approvalErr) throw approvalErr;
+}
+
+/**
  * Approves a draft. If editedContent is supplied the draft's content is updated
  * first and the decision is recorded as "edited"; otherwise it's "approved".
  */
@@ -978,32 +1045,7 @@ export async function approveDraft(
 
   const update: Record<string, unknown> = { state: "approved" };
   if (editedContent) update.content = editedContent;
-  if (editedMeta) {
-    // Merge over the CURRENT stored meta rather than flat-replacing it. The
-    // review client builds its approve payload from meta captured at page
-    // mount, so a flat replace would clobber anything the in-place edit
-    // pipelines wrote after load: email_copy synced after a copy edit, and
-    // new style_edit_history entries. The server stays
-    // authoritative for those; the client only meaningfully owns the two meta
-    // text fields and the CTA url, so we layer just those onto the stored row.
-    const { data: row, error: readErr } = await db
-      .from("drafts")
-      .select("meta")
-      .eq("id", draftId)
-      .single();
-    if (readErr) throw readErr;
-    const currentMeta = (row?.meta ?? {}) as DraftMeta;
-    update.meta = {
-      ...currentMeta,
-      meta_title: editedMeta.meta_title ?? currentMeta.meta_title,
-      meta_description:
-        editedMeta.meta_description ?? currentMeta.meta_description,
-      email_copy: {
-        ...currentMeta.email_copy,
-        cta_url: editedMeta.email_copy?.cta_url ?? currentMeta.email_copy?.cta_url,
-      },
-    };
-  }
+  if (editedMeta) update.meta = await mergeClientOwnedMeta(draftId, editedMeta);
 
   const { error: updateErr } = await db
     .from("drafts")
