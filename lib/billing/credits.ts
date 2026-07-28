@@ -59,7 +59,7 @@ export function findPack(
 export const DEFAULT_BILLING_CONFIG: BillingConfig = {
   creditsPerUsd: 100,
   markupMultiplier: Number(process.env.CREDIT_MARKUP_MULTIPLIER ?? 2.0),
-  starterCreditGrant: 2000,
+  starterCreditGrant: 500,
   freeMonthlyAllowance: 1000,
   paidMonthlyAllowance: 10000,
   packs: [],
