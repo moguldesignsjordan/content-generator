@@ -68,7 +68,7 @@ import { scrapeCompetitorAdUrl } from "@/lib/scrape";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
-import { isHttpUrl, mergeBrief } from "./brief-merge";
+import { buildConversationNotes, isHttpUrl, mergeBrief } from "./brief-merge";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -166,6 +166,7 @@ async function withScrapedCompetitorUrl(
 }
 
 export type { CreateBriefCard };
+
 
 interface TurnState {
   brief: CampaignBrief;
@@ -295,8 +296,15 @@ export async function POST(req: NextRequest) {
       },
     ];
 
+    // Refreshed every turn (not merged) so the digest always reflects the whole
+    // conversation as it stands, including edits and corrections.
+    const conversationNotes = buildConversationNotes(history, message.trim());
+
     const state: TurnState = {
-      brief: campaign.brief ?? {},
+      brief: {
+        ...(campaign.brief ?? {}),
+        ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
+      },
       topicId: campaign.topic_id,
       // Seed the card's topic/CTA rows from the attached topic so they show
       // immediately on turns that don't re-select.
@@ -722,6 +730,10 @@ async function dispatchTool(
               : {}),
             ...(state.brief.reader_belief
               ? { reader_belief: state.brief.reader_belief }
+              : {}),
+            // The campaign-wide conversation applies to every email in it.
+            ...(state.brief.conversation_notes
+              ? { conversation_notes: state.brief.conversation_notes }
               : {}),
             ...(typeof includeImage === "boolean"
               ? { include_image: includeImage }

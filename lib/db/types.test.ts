@@ -16,7 +16,10 @@ type NonTextField =
   | "use_ai_image_instead"
   | "style_example"
   | "campaign_kind"
-  | "competitor_reference_id";
+  | "competitor_reference_id"
+  // Written by the create-chat route from the transcript, never by a model
+  // tool call, so it has no place in the model-facing allowlist.
+  | "conversation_notes";
 
 type ExpectedTextField = Exclude<keyof CampaignBrief, NonTextField>;
 type ListedField = (typeof CAMPAIGN_BRIEF_TEXT_FIELDS)[number];

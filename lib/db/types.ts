@@ -413,7 +413,18 @@ export interface CampaignBrief {
    * CAMPAIGN_BRIEF_TEXT_FIELDS, needs its own mergeBrief branch like
    * product_photo_url. */
   competitor_reference_id?: string;
+  /** A verbatim digest of what the user actually typed in the create chat,
+   * newest last. The structured fields above are the model's summary of the
+   * conversation and lose the user's own words, details, and asides; this is
+   * the raw material generation reads so a draft can sound like the person
+   * who asked for it. Written by the create-chat route each turn (never by
+   * the model, so it stays out of CAMPAIGN_BRIEF_TEXT_FIELDS) and capped. */
+  conversation_notes?: string;
 }
+
+/** Cap on the stored conversation digest: enough for a full interview, small
+ * enough that a pasted wall of HTML can't balloon the brief or the prompt. */
+export const MAX_CONVERSATION_NOTES_CHARS = 6000;
 
 /** The kinds of multi-email campaign the create-agent interview can run;
  * each gets its own tailored question stages (see prompts/create-agent.ts). */

@@ -483,6 +483,24 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
       "  ---",
     );
   }
+  // The user's own words, last: everything above is a summary of them, and a
+  // summary is exactly what makes a draft sound generic. Details, asides, and
+  // phrasing that never fit a structured field live here.
+  if (brief.conversation_notes) {
+    lines.push(
+      "",
+      "  WHAT THE USER ACTUALLY SAID (their own words, from the conversation that",
+      "  produced this brief; newest last). Treat this as the richest source of",
+      "  truth: mine it for the specific details, examples, names, numbers, and",
+      "  turns of phrase the fields above flattened out, and let it steer how the",
+      "  piece sounds. Where it conflicts with a field above, the field wins on",
+      "  WHAT to say and this wins on HOW it sounds. Never quote the user's",
+      "  instructions back as copy, and never invent specifics it doesn't contain.",
+      "  ---",
+      brief.conversation_notes,
+      "  ---",
+    );
+  }
   if (!lines.length) return "";
   return ["CAMPAIGN BRIEF (from the strategy conversation; serve this):", ...lines].join(
     "\n",

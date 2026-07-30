@@ -143,6 +143,16 @@ export function buildGroundingFactsBlock(
   const p = ctx.product;
   if (p?.price_point) lines.push(`  Product price: ${p.price_point}`);
   if (p?.deliverables?.length) lines.push(`  Product includes: ${p.deliverables.join("; ")}`);
+  // What the user typed in the create chat is a first-class fact source: a
+  // number or client story they gave in conversation is real, and flagging it
+  // as invented sends the draft back for a rewrite it never needed.
+  if (brief?.conversation_notes) {
+    lines.push(
+      "  Straight from the user, in their own words (anything stated here is a",
+      "  real fact and must NOT be flagged):",
+      brief.conversation_notes,
+    );
+  }
   if (!lines.length) {
     return "GROUNDING FACTS: none on file. Any number, statistic, date, price, or named claim in the copy is unsupported.";
   }

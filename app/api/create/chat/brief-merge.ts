@@ -1,4 +1,10 @@
-import { CAMPAIGN_BRIEF_TEXT_FIELDS, type CampaignBrief, type CampaignKind, type VisualVibe } from "@/lib/db/types";
+import {
+  CAMPAIGN_BRIEF_TEXT_FIELDS,
+  MAX_CONVERSATION_NOTES_CHARS,
+  type CampaignBrief,
+  type CampaignKind,
+  type VisualVibe,
+} from "@/lib/db/types";
 import type { UpdateBriefInput } from "@/prompts/create-agent";
 import { emailHtmlToText, stripEmDashes } from "@/lib/text";
 import { MAX_BRIEF_PHOTOS } from "@/lib/email/brief-photos";
@@ -105,4 +111,31 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
     next.campaign_kind = input.campaign_kind;
   }
   return next;
+}
+
+/**
+ * The user's own side of the conversation, verbatim, for the brief.
+ *
+ * update_brief gives generation the model's SUMMARY of what was said, which
+ * is where the voice goes flat: the details, the asides, and the phrasing that
+ * made the request specific don't survive being squeezed into `key_message`.
+ * This keeps the raw text alongside it. User turns only (the assistant's own
+ * questions are noise to a writer), oldest first, capped from the END so the
+ * most recent, most specific answers always survive the cap.
+ */
+export function buildConversationNotes(
+  history: { role: "user" | "assistant"; content: string }[] | undefined,
+  latest: string,
+): string {
+  const lines = [...(history ?? []), { role: "user" as const, content: latest }]
+    .filter((m) => m.role === "user" && m.content.trim())
+    // The brief-state preamble the route prepends to each turn is our own
+    // scaffolding, not something the user said.
+    .map((m) => m.content.split("USER MESSAGE:").pop()!.trim())
+    .filter(Boolean);
+  if (!lines.length) return "";
+  const joined = lines.join("\n---\n");
+  return joined.length > MAX_CONVERSATION_NOTES_CHARS
+    ? joined.slice(joined.length - MAX_CONVERSATION_NOTES_CHARS)
+    : joined;
 }
