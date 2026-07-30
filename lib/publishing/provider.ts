@@ -139,6 +139,26 @@ export interface FetchStatsInput {
   integration: BrandIntegration | null;
 }
 
+export interface RegisterWebhooksInput {
+  brand: Brand;
+  integration: BrandIntegration | null;
+  /**
+   * The public URL the destination should POST to. Already carries the
+   * per-brand token, so the provider just registers it verbatim.
+   */
+  callbackUrl: string;
+}
+
+export interface RegisterWebhooksResult {
+  /** The destination's id for each subscription, so it can be removed later. */
+  webhookIds: string[];
+  /**
+   * The signing secret the destination will sign deliveries with. Stored
+   * ENCRYPTED on the connection; the receiving route verifies against it.
+   */
+  signingSecret: string;
+}
+
 export interface PublishProvider {
   /** Stable id, recorded as publications.target (e.g. "mailerlite"). */
   id: string;
@@ -183,4 +203,23 @@ export interface PublishProvider {
    * to Google Search Console) simply don't implement it.
    */
   fetchStats?(input: FetchStatsInput): Promise<PerformanceMetric[]>;
+  /**
+   * Subscribes the destination to push us event callbacks, replacing any
+   * subscription this connection already had. Optional: a provider with no
+   * webhook concept (Sanity) simply doesn't implement it, and connecting it
+   * stays a pure credential save.
+   *
+   * Called on connect/save, where it must never be fatal — a destination that
+   * refuses the subscription (or a dev machine with no public URL) still has a
+   * perfectly usable connection, just with pull-only stats.
+   */
+  registerWebhooks?(
+    input: RegisterWebhooksInput,
+  ): Promise<RegisterWebhooksResult>;
+  /** Removes previously registered subscriptions on disconnect. Best-effort. */
+  removeWebhooks?(input: {
+    brand: Brand;
+    integration: BrandIntegration | null;
+    webhookIds: string[];
+  }): Promise<void>;
 }

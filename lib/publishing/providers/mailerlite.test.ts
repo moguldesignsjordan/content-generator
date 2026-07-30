@@ -259,3 +259,90 @@ describe("mailerlite updatePublished", () => {
     ).rejects.toThrow(/now unscheduled/);
   });
 });
+
+// Webhook registration. Shapes verified against
+// developers.mailerlite.com/docs/webhooks.html: POST /api/webhooks returns
+// { data: { id, secret } }, and `batchable: true` is REQUIRED for
+// campaign.open / campaign.click (which is why this is two subscriptions, not
+// one — campaign.sent is not batchable).
+describe("mailerlite registerWebhooks", () => {
+  const callbackUrl = "https://app.example.com/api/webhooks/mailerlite/tok";
+
+  it("registers a non-batchable sent hook and a batchable open/click hook", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 1, secret: "s1" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 2, secret: "s2" } }));
+
+    const result = await mailerliteProvider.registerWebhooks!({
+      brand,
+      integration,
+      callbackUrl,
+    });
+
+    expect(result.webhookIds).toEqual(["1", "2"]);
+    expect(result.signingSecret).toBe("s1,s2");
+
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(first).toMatchObject({ events: ["campaign.sent"], url: callbackUrl });
+    expect(first.batchable).toBeUndefined();
+
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(second).toMatchObject({
+      events: ["campaign.open", "campaign.click"],
+      batchable: true,
+    });
+  });
+
+  it("deletes the previous subscriptions instead of accumulating duplicates", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 3, secret: "s3" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 4, secret: "s4" } }));
+
+    await mailerliteProvider.registerWebhooks!({
+      brand,
+      integration: {
+        config: { webhookIds: ["1", "2"] },
+      } as unknown as BrandIntegration,
+      callbackUrl,
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://connect.mailerlite.com/api/webhooks/1",
+    );
+    expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "https://connect.mailerlite.com/api/webhooks/2",
+    );
+  });
+
+  it("rolls back a partial registration so no orphan subscription is left", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 1, secret: "s1" } }))
+      .mockResolvedValueOnce(jsonResponse({ message: "nope" }, false, 422))
+      .mockResolvedValueOnce(jsonResponse({}));
+
+    await expect(
+      mailerliteProvider.registerWebhooks!({ brand, integration, callbackUrl }),
+    ).rejects.toThrow(/webhook registration failed \(422\)/);
+
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "https://connect.mailerlite.com/api/webhooks/1",
+    );
+    expect(fetchMock.mock.calls[2][1].method).toBe("DELETE");
+  });
+
+  it("treats an already-deleted subscription as removed, not an error", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "gone" }, false, 404));
+
+    await expect(
+      mailerliteProvider.removeWebhooks!({
+        brand,
+        integration,
+        webhookIds: ["9"],
+      }),
+    ).resolves.toBeUndefined();
+    expect(logError).not.toHaveBeenCalled();
+  });
+});

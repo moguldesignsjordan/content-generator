@@ -8,7 +8,13 @@ import {
 import { getProvider, listProviders } from "@/lib/publishing/registry";
 import { describeConnection } from "@/lib/publishing/connections";
 import { encryptSecret } from "@/lib/crypto/secrets";
-import { logError } from "@/lib/log";
+import {
+  generateWebhookToken,
+  webhookCallbackUrl,
+} from "@/lib/webhooks/callback-url";
+import type { Brand, BrandIntegration } from "@/lib/db/types";
+import type { PublishProvider } from "@/lib/publishing/provider";
+import { logError, logWarn } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 
 // Connections: per-brand publishing credentials (MailerLite API key, Sanity
@@ -105,11 +111,17 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const integration = await upsertBrandIntegration(
+    let integration = await upsertBrandIntegration(
       body.brandId,
       body.providerId,
       config,
     );
+
+    // Subscribe the destination to push us events. Best-effort by design: a
+    // connection whose webhook registration fails is still a working
+    // connection, just with pull-only stats.
+    integration = await syncWebhooks(provider, brand, integration);
+
     return NextResponse.json({
       saved: true,
       ...describeConnection(provider, brand, integration),
@@ -117,6 +129,56 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     logError("api:/api/settings/connections:patch", err);
     return NextResponse.json({ error: "Failed to save connection." }, { status: 500 });
+  }
+}
+
+/**
+ * Registers (or re-registers) this provider's webhooks and stores the result
+ * on the connection: the token that routes deliveries back to this brand, the
+ * destination's subscription ids (so they can be torn down), and the signing
+ * secret, ENCRYPTED like any other credential.
+ *
+ * Never throws. Skipped entirely with no public origin, which is the normal
+ * case on a dev machine — localhost is unreachable from MailerLite.
+ */
+async function syncWebhooks(
+  provider: PublishProvider,
+  brand: Brand,
+  integration: BrandIntegration,
+): Promise<BrandIntegration> {
+  if (!provider.registerWebhooks) return integration;
+  if (!provider.isConfigured(brand, integration)) return integration;
+
+  // Reuse the existing token so an already-registered URL keeps working.
+  const token =
+    (typeof integration.config?.webhookToken === "string" &&
+      integration.config.webhookToken) ||
+    generateWebhookToken();
+  const callbackUrl = webhookCallbackUrl(provider.id, token);
+  if (!callbackUrl) {
+    logWarn(
+      "connections:webhooks",
+      "No public app URL — skipping webhook registration. Set PUBLIC_APP_URL to enable push stats.",
+      { providerId: provider.id },
+    );
+    return integration;
+  }
+
+  try {
+    const result = await provider.registerWebhooks({
+      brand,
+      integration,
+      callbackUrl,
+    });
+    return await upsertBrandIntegration(brand.id, provider.id, {
+      ...integration.config,
+      webhookToken: token,
+      webhookIds: result.webhookIds,
+      webhookSecret: encryptSecret(result.signingSecret),
+    });
+  } catch (err) {
+    logError("connections:webhooks:register", err);
+    return integration;
   }
 }
 
@@ -131,6 +193,30 @@ export async function DELETE(req: NextRequest) {
     );
   }
   try {
+    // Ownership check, matching GET/PATCH: without it any signed-in user could
+    // disconnect another tenant's integration by passing their brandId.
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    const brand = await getSingleBrand(user.id);
+    if (!brand || brand.id !== brandId) {
+      return NextResponse.json({ error: "Brand not found." }, { status: 404 });
+    }
+
+    // Tear the subscriptions down at the destination first, so a disconnected
+    // provider stops POSTing at an endpoint whose secret no longer exists.
+    const provider = getProvider(providerId);
+    const integration = await getBrandIntegration(brandId, providerId);
+    const webhookIds = integration?.config?.webhookIds;
+    if (provider?.removeWebhooks && Array.isArray(webhookIds) && webhookIds.length) {
+      await provider
+        .removeWebhooks({
+          brand,
+          integration,
+          webhookIds: webhookIds.filter((v): v is string => typeof v === "string"),
+        })
+        .catch((err) => logError("connections:webhooks:remove", err));
+    }
+
     await deleteBrandIntegration(brandId, providerId);
     return NextResponse.json({ saved: true });
   } catch (err) {

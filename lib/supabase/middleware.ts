@@ -13,6 +13,14 @@ const PUBLIC_PATHS = [
   // session cookie — the route itself checks that secret (fails closed with
   // 503/401), so it must not be redirected to /login first.
   "/api/cron",
+  // Inbound webhooks are called by the provider's servers, never a browser
+  // with a session cookie. Redirecting them to /login makes every delivery
+  // look like a failure to the sender (a 307 is not a 2xx, and neither Stripe
+  // nor MailerLite follows it), so they retry and eventually give up. Each
+  // route authenticates itself instead: Stripe by signature, MailerLite by
+  // per-brand token + Signature HMAC.
+  "/api/stripe/webhook",
+  "/api/webhooks",
 ];
 
 function isPublic(pathname: string): boolean {

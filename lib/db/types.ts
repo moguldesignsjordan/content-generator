@@ -1155,6 +1155,24 @@ export interface PerformanceMetric {
   value: number;
 }
 
+// One inbound webhook delivery (migration 028). MailerLite sends no
+// per-delivery id, so `body_hash` (sha256 of the raw request body) is the
+// idempotency key: an exact retry collides on unique(provider, body_hash).
+// `processed_at` is stamped once the handler finished; `error` holds the
+// failure message when it didn't, so a stuck event is visible instead of
+// silently swallowed by the 200 we must return to stop provider retries.
+export interface WebhookEventRecord {
+  id: string;
+  provider: string;
+  body_hash: string;
+  event_type: string;
+  brand_id: string | null;
+  payload: Record<string, unknown>;
+  received_at: string;
+  processed_at: string | null;
+  error: string | null;
+}
+
 // A per-brand publishing connection (MailerLite, Sanity, ...). `config` holds
 // the connection's fields: plain values as-is, secret values as the
 // "gcm:v1:..." ciphertext from lib/crypto/secrets.ts. One row per

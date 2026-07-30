@@ -7,7 +7,18 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-27 (generation quality overhaul: QA now REVISES instead
+Last updated: 2026-07-30 (MailerLite webhooks: performance is now push-driven,
+not pull-only. `campaign.sent` flips the publication to sent and pulls the
+first snapshot; batched `campaign.open`/`campaign.click` trigger a 15-minute
+debounced refresh. Webhooks register themselves when the MailerLite connection
+is saved. Also fixed a **live bug**: `/api/stripe/webhook` was not in the
+middleware's public paths, so every unauthenticated Stripe delivery was
+307-redirected to /login and counted as failed. Typecheck + 541 tests + build
+green; UNCOMMITTED, **migration 028 NOT applied**, and no live delivery has
+been observed yet — registration needs `PUBLIC_APP_URL` (or a deploy) since
+localhost is unreachable from MailerLite.)
+
+Previously: 2026-07-27 (generation quality overhaul: QA now REVISES instead
 of just reporting, an Opus angle pass runs before drafting, a design critique
 runs after, models moved to Sonnet 5 / Opus 5, and reviewer edits are captured
 as a learning signal. Typecheck + 491 tests + build green; NOT committed, and
@@ -23,7 +34,33 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
-## Session 2026-07-27 (latest): generation quality overhaul
+## Session 2026-07-30 (latest): MailerLite webhooks
+
+- Receiver at `/api/webhooks/mailerlite/[token]`. No session auth: the `token`
+  path segment selects which brand's signing secret to use (you can't verify a
+  signature before you know whose secret), then the `Signature` HMAC-SHA256
+  over the raw body IS the auth. Verified against
+  developers.mailerlite.com/docs/webhooks.html.
+- Idempotency ledger `webhook_events` (migration 028). MailerLite ships no
+  per-delivery id, so the dedupe key is a sha256 of the raw body; a retry of an
+  identical payload collides and short-circuits.
+- Webhooks are a *trigger*, not a data source: events cause a `fetchStats`
+  refresh so the destination's own totals stay the single source of truth and
+  batched, possibly-dropped deltas can't drift. `campaign.sent` forces one;
+  open/click take a 15-minute debounce.
+- Registration lives behind the provider abstraction
+  (`registerWebhooks`/`removeWebhooks`), called on connection save/delete. Two
+  subscriptions, because `batchable: true` is required for open/click and
+  forbidden for sent. Best-effort: failure leaves a working, pull-only
+  connection.
+- Also fixed: the connections DELETE handler had no brand-ownership check
+  (GET/PATCH both do), so any signed-in user could disconnect another tenant's
+  integration by passing their brandId.
+- Still open: apply migration 028; set `PUBLIC_APP_URL`; save the MailerLite
+  connection once so the subscriptions actually register; confirm a real
+  delivery (send a campaign, or use MailerLite's webhook test fire).
+
+## Session 2026-07-27: generation quality overhaul
 
 Jordan asked how to make generated content better. His three complaints:
 design/layout is off, copy sounds generic/AI, and the angle is often wrong.

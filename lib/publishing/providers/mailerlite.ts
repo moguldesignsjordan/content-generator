@@ -486,4 +486,112 @@ export const mailerliteProvider: PublishProvider = {
       { metric: "click_rate", value: stats.click_rate?.float ?? 0 },
     ];
   },
+
+  async registerWebhooks(input) {
+    const ml = resolveMailerliteConfig(input.brand, input.integration);
+    if (!ml.apiKey) {
+      throw new Error("MailerLite is not connected.");
+    }
+
+    // Replace rather than accumulate: saving the connection twice must not
+    // leave two live subscriptions posting duplicate events at us.
+    const previous = readWebhookIds(input.integration);
+    if (previous.length) {
+      await deleteWebhooks(ml.apiKey, previous);
+    }
+
+    // One subscription per event: MailerLite's `batchable` flag is per-webhook
+    // and is REQUIRED true for campaign.open/campaign.click, so they can't
+    // share a registration with campaign.sent, which is not batchable.
+    const created: { id: string; secret: string }[] = [];
+    for (const [events, batchable] of WEBHOOK_SUBSCRIPTIONS) {
+      const res = await fetch(`${API_BASE}/webhooks`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ml.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          name: `Content Engine (${events.join(", ")})`,
+          events,
+          url: input.callbackUrl,
+          enabled: true,
+          ...(batchable ? { batchable: true } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        // Roll back what we just created so a partial failure doesn't leave
+        // orphan subscriptions MailerLite would keep POSTing from.
+        if (created.length) {
+          await deleteWebhooks(
+            ml.apiKey,
+            created.map((c) => c.id),
+          ).catch(() => {});
+        }
+        throw new Error(
+          `MailerLite webhook registration failed (${res.status}): ${body.slice(0, 400)}`,
+        );
+      }
+      const data = (await res.json()) as {
+        data?: { id?: string | number; secret?: string };
+      };
+      if (data.data?.id == null || !data.data.secret) {
+        throw new Error("MailerLite webhook response had no id or secret.");
+      }
+      created.push({ id: String(data.data.id), secret: data.data.secret });
+    }
+
+    // Every subscription gets its own secret; deliveries are verified against
+    // any of them (see lib/webhooks/mailerlite.ts), so keep them all.
+    return {
+      webhookIds: created.map((c) => c.id),
+      signingSecret: created.map((c) => c.secret).join(","),
+    };
+  },
+
+  async removeWebhooks({ brand, integration, webhookIds }) {
+    const ml = resolveMailerliteConfig(brand, integration);
+    if (!ml.apiKey || !webhookIds.length) return;
+    await deleteWebhooks(ml.apiKey, webhookIds);
+  },
 };
+
+// Which events we subscribe to, and whether that subscription must be
+// batchable. Verified against developers.mailerlite.com/docs/webhooks.html:
+//   POST /api/webhooks { name, events, url, enabled, batchable }
+//     → { data: { id, secret, ... } }   ← `secret` signs every delivery
+//   DELETE /api/webhooks/{id}
+//   Deliveries carry a `Signature` header: HMAC-SHA256 of the raw body.
+// `batchable: true` is REQUIRED for campaign.open and campaign.click.
+const WEBHOOK_SUBSCRIPTIONS: [events: string[], batchable: boolean][] = [
+  [["campaign.sent"], false],
+  [["campaign.open", "campaign.click"], true],
+];
+
+/** MailerLite webhook ids previously stored on the connection. */
+export function readWebhookIds(integration: BrandIntegration | null): string[] {
+  const raw = integration?.config?.webhookIds;
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** Best-effort teardown: a already-deleted (404) subscription is not an error. */
+async function deleteWebhooks(apiKey: string, ids: string[]): Promise<void> {
+  for (const id of ids) {
+    try {
+      const res = await fetch(`${API_BASE}/webhooks/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      });
+      if (!res.ok && res.status !== 404) {
+        logError(
+          "mailerlite:removeWebhooks",
+          new Error(`Delete webhook ${id} failed (${res.status})`),
+        );
+      }
+    } catch (err) {
+      logError("mailerlite:removeWebhooks", err);
+    }
+  }
+}

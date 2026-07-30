@@ -71,6 +71,7 @@ import type {
   TopicFormData,
   VisualIdentity,
   VoiceProfile,
+  WebhookEventRecord,
 } from "./types";
 
 /**
@@ -824,6 +825,121 @@ export async function getLatestPerformance(
   return Array.from(latest.values());
 }
 
+// ── Inbound webhooks (migration 028) ──────────────────────────────────────────
+
+/**
+ * The publication a provider's webhook is talking about, found by the id the
+ * destination knows it as. Scoped by target so two providers can never collide
+ * on the same external id string.
+ *
+ * Webhooks arrive with no session, so this (plus the brand check the caller
+ * does against the token's brand) is the entire tenant-resolution path.
+ */
+export async function getPublicationByExternalId(
+  target: string,
+  externalId: string,
+): Promise<PublicationRecord | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("publications")
+    .select("*")
+    .eq("target", target)
+    .eq("external_id", externalId)
+    .order("published_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as PublicationRecord) ?? null;
+}
+
+/** The brand that owns a publication, via job → topic/campaign → brand. */
+export async function getBrandIdForPublication(
+  publicationId: string,
+): Promise<string | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("publications")
+    .select("content_jobs(brand_id)")
+    .eq("id", publicationId)
+    .maybeSingle();
+  if (error) throw error;
+  const job = (data as { content_jobs?: { brand_id?: string } | null } | null)
+    ?.content_jobs;
+  return job?.brand_id ?? null;
+}
+
+/** Flips a publication's delivery status (e.g. 'scheduled' → 'sent'). */
+export async function updatePublicationStatus(
+  publicationId: string,
+  status: "sent" | "scheduled" | "draft",
+): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("publications")
+    .update({ status })
+    .eq("id", publicationId);
+  if (error) throw error;
+}
+
+/**
+ * Records an inbound delivery, or returns null when this exact body was
+ * already recorded (unique(provider, body_hash) — Postgres 23505). Null is the
+ * caller's signal to stop and answer 200 without re-running side effects.
+ *
+ * Insert-then-process, never process-then-insert: a crash mid-handler leaves a
+ * row with processed_at null, which is visible and retryable, rather than a
+ * side effect nobody can account for.
+ */
+export async function recordWebhookEvent(input: {
+  provider: string;
+  bodyHash: string;
+  eventType: string;
+  brandId: string | null;
+  payload: Record<string, unknown>;
+}): Promise<WebhookEventRecord | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("webhook_events")
+    .insert({
+      provider: input.provider,
+      body_hash: input.bodyHash,
+      event_type: input.eventType,
+      brand_id: input.brandId,
+      payload: input.payload,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    // 23505 = duplicate delivery, the expected path on a provider retry.
+    if ((error as { code?: string }).code === "23505") return null;
+    if (isMissingTableError(error)) {
+      logWarn(
+        "db:recordWebhookEvent",
+        "webhook_events table is missing — apply migration 028.",
+      );
+      return null;
+    }
+    throw error;
+  }
+  return data as WebhookEventRecord;
+}
+
+/** Stamps an event done, or records why it wasn't. Never throws. */
+export async function finishWebhookEvent(
+  eventId: string,
+  error?: string,
+): Promise<void> {
+  const db = getAdminClient();
+  const { error: err } = await db
+    .from("webhook_events")
+    .update({
+      processed_at: new Date().toISOString(),
+      error: error ?? null,
+    })
+    .eq("id", eventId);
+  if (err) logError("db:finishWebhookEvent", err);
+}
+
 // ── Brand integrations (per-brand publishing connections; env stays fallback) ──
 
 /** All configured connections for a brand. Empty before the user connects any. */
@@ -843,6 +959,32 @@ export async function getBrandIntegrations(
     throw error;
   }
   return (data ?? []) as BrandIntegration[];
+}
+
+/**
+ * The connection whose config holds this webhook token. The token is the only
+ * thing an inbound webhook URL carries, and it's what selects WHICH brand's
+ * signing secret verifies the payload — so this runs before any signature
+ * check, on unauthenticated input. It matches on an exact config value only;
+ * a wrong token simply finds nothing.
+ */
+export async function getBrandIntegrationByWebhookToken(
+  providerId: string,
+  token: string,
+): Promise<BrandIntegration | null> {
+  if (!token) return null;
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("brand_integrations")
+    .select("*")
+    .eq("provider_id", providerId)
+    .eq("config->>webhookToken", token)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as BrandIntegration) ?? null;
 }
 
 /** One connection by provider, or null if the brand hasn't connected it. */
