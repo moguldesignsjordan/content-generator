@@ -592,7 +592,7 @@ export async function getDraftWithJobContext(
   let primary = db
     .from("drafts")
     .select(
-      `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, campaign_id, type, email_type, blog_type, brand_id)`,
+      `id, job_id, version, content, meta, seo_data, state, content_jobs!inner(topic_id, campaign_id, type, email_type, blog_type, brand_id)`,
     )
     .eq("id", draftId);
   if (brandId) primary = primary.eq("content_jobs.brand_id", brandId);
@@ -601,7 +601,7 @@ export async function getDraftWithJobContext(
     let fallback = db
       .from("drafts")
       .select(
-        `id, job_id, version, content, meta, state, content_jobs!inner(topic_id, type, email_type, blog_type, brand_id)`,
+        `id, job_id, version, content, meta, seo_data, state, content_jobs!inner(topic_id, type, email_type, blog_type, brand_id)`,
       )
       .eq("id", draftId);
     if (brandId) fallback = fallback.eq("content_jobs.brand_id", brandId);
@@ -630,6 +630,7 @@ export async function getDraftWithJobContext(
     version: data.version as number,
     content: data.content as EmailDraftContent,
     meta: (data.meta as DraftMeta) ?? {},
+    seoData: (data.seo_data as DraftSeoData) ?? {},
     jobType: (job?.type as ContentJobType) ?? "email",
     state: (data.state as string) ?? "in_review",
     emailType: (job?.email_type as EmailType | null) ?? null,
@@ -957,9 +958,12 @@ export async function updateDraftContent(
   draftId: string,
   content: EmailDraftContent,
   meta?: DraftMeta,
+  seoData?: DraftSeoData,
 ): Promise<void> {
   const db = getAdminClient();
-  const patch = meta !== undefined ? { content, meta } : { content };
+  const patch: Record<string, unknown> = { content };
+  if (meta !== undefined) patch.meta = meta;
+  if (seoData !== undefined) patch.seo_data = seoData;
   const { error } = await db.from("drafts").update(patch).eq("id", draftId);
   if (error) throw error;
 }

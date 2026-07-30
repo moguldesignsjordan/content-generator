@@ -19,6 +19,7 @@ import {
   type RedesignToolInput,
 } from "@/prompts/redesign-email";
 import { stripEmDashes } from "@/lib/text";
+import { contrastIssues, designQaIssues } from "@/lib/email/quality";
 import { ensureUnsubscribeTag, validateModelEmailHtml } from "./generate";
 import { spliceHeroImage } from "./generate-image";
 import type { StyleEditHistoryEntry } from "@/lib/db/types";
@@ -103,6 +104,10 @@ export async function redesignEmail(
     direction,
     heroImage,
     styleId: draftCtx.meta.email_style_variant,
+    // A redesign is a fresh document, so it's the natural place to clear the
+    // design faults the quality check flagged. Without this the model rebuilds
+    // the same low-contrast pairing and the warning survives the redesign.
+    qaDesignIssues: designQaIssues(draftCtx.seoData),
   });
 
   // FAST_MODEL first (no copywriting judgment needed, just following the
@@ -134,10 +139,22 @@ export async function redesignEmail(
     },
   ].slice(-MAX_HISTORY);
 
+  // Re-check the new document so the review screen reflects THIS design, not
+  // the one it replaced: a contrast warning that the redesign fixed should
+  // disappear, and one it introduced should show up.
+  const seoData = {
+    ...draftCtx.seoData,
+    issues: [
+      ...(draftCtx.seoData.issues ?? []).filter((i) => !/contrast/i.test(i)),
+      ...contrastIssues(html),
+    ],
+  };
+
   await updateDraftContent(
     draftId,
     { subject: draftCtx.content.subject, preheader: draftCtx.content.preheader, html },
     { ...draftCtx.meta, style_edit_history: history, email_design_source: "model" },
+    seoData,
   );
 
   return { ok: true, html, history };

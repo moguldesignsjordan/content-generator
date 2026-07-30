@@ -7,6 +7,7 @@ import type {
   VisualVibe,
 } from "@/lib/db/types";
 import { EMAIL_STYLES, type EmailStyleDirective } from "./email-styles";
+import { onColor } from "@/lib/email/templates/shared";
 
 // The default accent discipline: color is a signal, not a theme.
 const ACCENT_BUDGET_DEFAULT = [
@@ -136,14 +137,21 @@ function buildFooterChrome(tokens: BrandTokens): string[] {
           ...socialLines,
         ]
       : []),
-    ...(footer.postal_address
+    ...(footer.guarantee
       ? [
-          `  4) the postal address "${footer.postal_address}" at 11px (marketing-email law requires it).`,
+          `  4) the brand guarantee line, verbatim: "${footer.guarantee}", at 12px semi-bold`,
+          "     in the body text color (not muted). It is a standing promise, so it belongs",
+          "     in the footer on every send. Do not reword it.",
         ]
       : []),
-    `  5) a short permission line ("You're receiving this email because you subscribed to`,
+    ...(footer.postal_address
+      ? [
+          `  5) the postal address "${footer.postal_address}" at 11px (marketing-email law requires it).`,
+        ]
+      : []),
+    `  6) a short permission line ("You're receiving this email because you subscribed to`,
     `     updates from ${tokens.sender_name}.") at 11px,`,
-    "  6) and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
+    "  7) and REQUIRED: an unsubscribe link whose href is the literal merge tag {$unsubscribe}.",
   ];
 }
 
@@ -214,8 +222,8 @@ export function buildEmailDesignBrief(
     "  exactly those classes, each declaration with !important (head CSS must beat the",
     "  inline styles): a near-black page background, a slightly lighter dark card",
     "  surface, near-white headings, soft light-gray body text, muted-but-readable",
-    "  footer. Keep the accent (top bar, CTA button) unchanged, its white button text",
-    "  already reads on dark. Never invert or restyle images.",
+    "  footer. Keep the accent (top bar, CTA button) unchanged, including its button",
+    "  text color, which already reads on dark. Never invert or restyle images.",
     "- Dark rules live ONLY inside that media query, so clients that strip <style>",
     "  still get the correct light email.",
     hero
@@ -246,8 +254,11 @@ export function buildEmailDesignBrief(
     "- Clear hierarchy: ONE headline (28 to 32px, tight letter-spacing), scannable",
     "  sections, short paragraphs (1 to 3 sentences each).",
     "- Exactly ONE dominant call-to-action: a bulletproof button, an <a> styled",
-    "  display:inline-block with the accent background, white text, 15px+ vertical",
-    "  padding, rounded corners. Text links may support it; nothing competes with it.",
+    `  display:inline-block with the accent background and ${onColor(tokens.colors.accent)} text`,
+    "  (that exact color: it is the one that passes contrast on THIS accent, and white",
+    "  on a bright accent is the contrast failure the quality check catches most),",
+    "  15px+ vertical padding, rounded corners. Text links may support it; nothing",
+    "  competes with it.",
     "- Color contrast must stay comfortably readable (body text on background at",
     "  WCAG-AA-level contrast or better).",
     "",

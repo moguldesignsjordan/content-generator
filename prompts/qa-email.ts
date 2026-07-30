@@ -135,6 +135,10 @@ export function buildGroundingFactsBlock(
   brief: CampaignBrief | null | undefined,
 ): string {
   const lines: string[] = [];
+  // A standing brand promise (it prints in the footer of every send) is a real
+  // fact, so copy that states it must not come back as an invented claim.
+  const guarantee = ctx.brand.visual_identity?.footer?.guarantee;
+  if (guarantee) lines.push(`  Brand guarantee (real, shown in every footer): ${guarantee}`);
   if (brief?.proof) lines.push(`  Proof: ${brief.proof}`);
   if (brief?.offer_deal) lines.push(`  Offer deal: ${brief.offer_deal}`);
   if (brief?.offer_deadline) lines.push(`  Offer deadline: ${brief.offer_deadline}`);

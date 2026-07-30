@@ -65,8 +65,13 @@ export function buildRedesignMessages(args: {
    * fresh rotation. Falls back to the safe baseline when unset (older
    * drafts that predate the style library). */
   styleId?: EmailStyleId;
+  /** Design problems the quality check found on the draft being redesigned
+   * (contrast failures and the like). A redesign is the one chance to fix
+   * them, so they're stated as requirements, not suggestions. */
+  qaDesignIssues?: string[];
 }): { system: string; user: string } {
   const { copy, tokens, templateId, ctx, direction, heroImage, styleId } = args;
+  const qaDesignIssues = args.qaDesignIssues ?? [];
   const designBrief = buildEmailDesignBrief(tokens, templateId, {
     heroImage,
     style: styleId ? EMAIL_STYLES[styleId] : undefined,
@@ -123,6 +128,14 @@ export function buildRedesignMessages(args: {
     `CTA TEXT: ${copy.cta_text}`,
     copy.cta_url ? `CTA URL: ${copy.cta_url}` : "",
     direction ? `\nCREATIVE DIRECTION (explicit override, follow exactly): ${direction}` : "",
+    qaDesignIssues.length
+      ? [
+          "",
+          "QUALITY CHECK FAILURES ON THE CURRENT DESIGN (the redesign must fix",
+          "every one of these; do not carry any of them forward):",
+          ...qaDesignIssues.map((s) => `- ${s}`),
+        ].join("\n")
+      : "",
     "",
     "Call save_redesigned_email with the complete document.",
   ]

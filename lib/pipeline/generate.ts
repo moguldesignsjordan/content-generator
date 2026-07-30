@@ -982,8 +982,18 @@ export async function regenerateEmailDraft(
       },
     });
 
+  // The rejected draft's own QA findings ride along with the human feedback.
+  // The reviewer rejected it for their reason; the quality check had its own
+  // list (invented specifics, banned terms, AI tells, length). Without this
+  // the new version only fixes what the human typed and can ship the same
+  // QA failures again, since a rejection is the one path that never saw the
+  // reviseForQa nudge for the draft it's replacing.
+  const priorQaNudge = buildQaRevisionNudge(draftCtx.seoData);
+  const userWithQa =
+    draftCtx.seoData.qa_pass === false && priorQaNudge ? user + priorQaNudge : user;
+
   const designReference = await loadEmailDesignReference(ctx, draftId);
-  const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
+  const { parsed, usageDeltas } = await generateEmailCopy(system, userWithQa, {
     lengthTarget,
     emailType,
     designReference,
@@ -1002,7 +1012,7 @@ export async function regenerateEmailDraft(
   const revised = await reviseForQa({
     ctx,
     system,
-    user,
+    user: userWithQa,
     copyOpts: { lengthTarget, emailType, designReference, brandId: ctx.brand.id },
     render,
     qa,

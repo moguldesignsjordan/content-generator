@@ -1,6 +1,32 @@
 import "server-only";
 import type { BrandTokens } from "./types";
 
+/**
+ * Readable text color for a solid brand-color background: white unless the
+ * color is light enough that white text fails WCAG AA, in which case near
+ * black. A bright accent (orange, yellow, lime) with hardcoded white text was
+ * the single most common contrast failure the quality check reported.
+ */
+export function onColor(hex: string): string {
+  const h = hex.trim().replace("#", "");
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff";
+  const channel = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const [r, g, b] = [0, 2, 4].map((i) => channel(parseInt(full.slice(i, i + 2), 16)));
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const onWhite = 1.05 / (lum + 0.05);
+  return onWhite >= 4.5 ? "#ffffff" : "#111111";
+}
+
 /** Escapes user-supplied copy so it can never inject markup into the template. */
 export function escapeHtml(s: string): string {
   return s
@@ -167,6 +193,11 @@ export function renderFooter(tokens: BrandTokens): string {
     `<div style="margin:0;">${wordmark}</div>` +
     contactRow +
     renderSocialBadges(tokens) +
+    // The standing brand promise, stated once where it can't be mistaken for
+    // a claim invented for this send.
+    (f.guarantee
+      ? `<div style="margin:14px 0 0;font-size:12px;font-weight:600;color:${tokens.colors.text};">${escapeHtml(f.guarantee)}</div>`
+      : "") +
     // CAN-SPAM/GDPR: marketing email must carry the sender's physical address.
     (f.postal_address
       ? `<div style="margin:14px 0 0;font-size:11px;">${escapeHtml(f.postal_address)}</div>`
@@ -191,7 +222,7 @@ export function renderCtaButton(
   return (
     `<div data-region="cta" style="text-align:center;margin:36px 0 8px;">` +
     `<a href="${escapeHtml(href)}" style="display:inline-block;background:${tokens.colors.accent};` +
-    `color:#ffffff;font-family:${tokens.fonts.body};font-size:16px;font-weight:600;` +
+    `color:${onColor(tokens.colors.accent)};font-family:${tokens.fonts.body};font-size:16px;font-weight:600;` +
     `letter-spacing:0.2px;text-decoration:none;padding:15px 36px;border-radius:10px;">` +
     `${escapeHtml(text)}</a>` +
     `</div>`

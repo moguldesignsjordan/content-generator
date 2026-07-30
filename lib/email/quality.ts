@@ -85,3 +85,15 @@ export function contrastIssues(html: string): string[] {
   }
   return issues;
 }
+
+/**
+ * The subset of a draft's QA issues a REDESIGN can actually fix. A redesign
+ * keeps the copy word for word, so an invented statistic or a banned term is
+ * not its problem; a low-contrast color pair is exactly its problem. Feeding
+ * the model copy issues it cannot touch only invites it to edit the copy.
+ */
+export function designQaIssues(seo: {
+  issues?: string[];
+}): string[] {
+  return (seo.issues ?? []).filter((issue) => /contrast/i.test(issue));
+}

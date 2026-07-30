@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countRegion, ensureEditableRegions } from "@/lib/email/inline-style";
-import { renderFooter, renderSocialBadges, renderShell } from "./shared";
+import { onColor, renderCtaButton, renderFooter, renderSocialBadges, renderShell } from "./shared";
 import { newsletterFeature } from "./newsletter-feature";
 import type { BrandTokens } from "./types";
 import type { EmailCopy } from "@/lib/db/types";
@@ -140,5 +140,45 @@ describe("renderSocialBadges", () => {
 
   it("returns an empty string with no social links", () => {
     expect(renderSocialBadges({ ...TOKENS, footer: {} })).toBe("");
+  });
+});
+
+describe("onColor", () => {
+  it("keeps white text on a dark accent", () => {
+    expect(onColor("#2563EB")).toBe("#ffffff");
+  });
+
+  it("switches to dark text on a bright accent white would fail on", () => {
+    // The exact case the quality check reported: white on #ff9d14 is 2.1:1.
+    expect(onColor("#ff9d14")).toBe("#111111");
+  });
+
+  it("falls back to white on an unparseable color", () => {
+    expect(onColor("not-a-color")).toBe("#ffffff");
+  });
+});
+
+describe("renderCtaButton", () => {
+  it("uses a button text color that passes contrast on the accent", () => {
+    const bright = { ...TOKENS, colors: { ...TOKENS.colors, accent: "#ff9d14" } };
+    expect(renderCtaButton("Book a call", "https://example.com", bright)).toContain(
+      "color:#111111",
+    );
+  });
+});
+
+describe("renderFooter guarantee", () => {
+  it("prints the brand guarantee when one is set", () => {
+    const withGuarantee = {
+      ...TOKENS,
+      footer: { ...TOKENS.footer, guarantee: "Money-back guarantee on every print run." },
+    };
+    expect(renderFooter(withGuarantee)).toContain(
+      "Money-back guarantee on every print run.",
+    );
+  });
+
+  it("omits the line entirely when no guarantee is set", () => {
+    expect(renderFooter(TOKENS)).not.toContain("guarantee");
   });
 });

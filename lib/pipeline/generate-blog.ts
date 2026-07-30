@@ -217,7 +217,14 @@ export async function regenerateBlogDraft(
   });
   const lengthTarget = BLOG_LENGTH_TARGETS[blogType];
 
-  const { parsed, usageDeltas } = await generateBlogCopy(system, user, {
+  // The rejected post's QA findings ride along with the human feedback, same
+  // as the email path: the reviewer's reason and the quality check's list are
+  // two different sets of problems, and the rewrite should fix both.
+  const priorQaNudge = buildQaRevisionNudge(draftCtx.seoData, "blog post");
+  const userWithQa =
+    draftCtx.seoData.qa_pass === false && priorQaNudge ? user + priorQaNudge : user;
+
+  const { parsed, usageDeltas } = await generateBlogCopy(system, userWithQa, {
     lengthTarget,
     blogType,
     brandId: ctx.brand.id,
@@ -234,7 +241,7 @@ export async function regenerateBlogDraft(
   const checked = await qaBlogWithRevision({
     ctx,
     system,
-    user,
+    user: userWithQa,
     copyOpts: { lengthTarget, blogType, brandId: ctx.brand.id },
     copy,
     html,

@@ -70,6 +70,11 @@ export interface BrandFooter {
   // CAN-SPAM/GDPR require a physical postal address in marketing email.
   // Rendered muted in the footer next to the unsubscribe link.
   postal_address?: string;
+  /** A standing promise the brand makes on every send, e.g. "Money-back
+   * guarantee on every print run." Rendered in the footer AND listed in the
+   * QA grounding facts, so the copy is allowed to state it: a guarantee the
+   * brand really offers should not read as an invented claim. */
+  guarantee?: string;
 }
 
 // Brand-level image generation preference, set during onboarding or in
@@ -1110,6 +1115,10 @@ export interface DraftJobContext {
   version: number;
   content: EmailDraftContent;
   meta: DraftMeta;
+  /** The QA verdict on THIS draft. Reject/regenerate and redesign read it so
+   * the concerns the quality check already found get carried into the next
+   * version instead of being rediscovered (or shipped again). */
+  seoData: DraftSeoData;
   jobType: ContentJobType;
   state: string;
   // content_jobs.email_type/blog_type: null unless set explicitly at shell

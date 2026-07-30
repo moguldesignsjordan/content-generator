@@ -126,16 +126,26 @@ export function buildStrategyBlock(ctx: TopicContext): string {
 // the copy reflects the brand's actual positioning (not a guess).
 export function buildPositioningBlock(brand: Brand): string {
   const p = brand.positioning ?? {};
+  // The standing guarantee is a real, always-true fact (it prints in every
+  // footer), so the writer is allowed to lean on it and QA won't flag it.
+  const guarantee = brand.visual_identity?.footer?.guarantee;
   if (
     !p.business_description &&
     !p.tagline &&
     !p.differentiators?.length &&
-    !p.competitors?.length
+    !p.competitors?.length &&
+    !guarantee
   ) {
     return "";
   }
 
   const lines: string[] = ["POSITIONING:"];
+  if (guarantee) {
+    lines.push(
+      `  Standing guarantee (a REAL promise, printed in every email footer; you may`,
+      `  state it in the copy, word for word or naturally): ${guarantee}`,
+    );
+  }
   if (p.tagline) lines.push(`  Tagline: ${p.tagline}`);
   if (p.business_description) lines.push(`  What we do: ${p.business_description}`);
   if (p.differentiators?.length) {

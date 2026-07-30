@@ -77,6 +77,7 @@ export function VisualIdentityForm({
   const [postalAddress, setPostalAddress] = useState(
     initialFooter.postal_address ?? "",
   );
+  const [guarantee, setGuarantee] = useState(initialFooter.guarantee ?? "");
   const [social, setSocial] = useState(initialSocial);
   // Auto image generation is on by default (see maybeAutoHeroImage); only an
   // explicit false in saved settings turns it off.
@@ -134,6 +135,7 @@ export function VisualIdentityForm({
               contact_email: contactEmail.trim() || undefined,
               website: website.trim() || undefined,
               postal_address: postalAddress.trim() || undefined,
+              guarantee: guarantee.trim() || undefined,
               social,
             },
             image_gen: {
@@ -297,6 +299,18 @@ export function VisualIdentityForm({
               value={postalAddress}
               onChange={(e) => setPostalAddress(e.target.value)}
               placeholder="123 Main St, Suite 200, Austin, TX 78701"
+            />
+          </Field>
+        </div>
+        <div className="sm:col-span-2">
+          <Field
+            label="Guarantee"
+            hint="A standing promise printed in every email footer. Setting it also tells the quality check the claim is real, so copy can state it without being flagged as unsupported."
+          >
+            <Input
+              value={guarantee}
+              onChange={(e) => setGuarantee(e.target.value)}
+              placeholder="Money-back guarantee on every print run."
             />
           </Field>
         </div>
