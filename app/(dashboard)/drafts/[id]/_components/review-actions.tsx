@@ -979,88 +979,58 @@ export function ReviewActions({
         </Card>
       )}
 
-      {/* Blog spin-off. If a blog already exists for this email, link to it
-          instead of offering to create a duplicate; otherwise one click drafts
-          a fresh, search-optimized post on the same topic, no re-briefing. */}
-      {existingBlog ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Blog post created from this email
-            </p>
-            <p className="truncate text-[13px] text-muted">
-              {existingBlog.subject || "Untitled blog post"}
-            </p>
-          </div>
+      {/* Spin-offs: turn this email into a blog post and/or a social flyer.
+          If one already exists, that half links to it instead of offering to
+          create a duplicate. Combined into one card (was two) to cut
+          duplicate visual blocks off the page. */}
+      <Card className="grid gap-4 p-5 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-foreground">
+            {existingBlog ? "Blog post created from this email" : "Create a blog post"}
+          </p>
+          <p className="text-[13px] text-muted">
+            {existingBlog
+              ? existingBlog.subject || "Untitled blog post"
+              : "A fresh, search-optimized long-form post on the same topic."}
+          </p>
           <Button
             variant="outline"
-            onClick={() => router.push(`/drafts/${existingBlog.draftId}`)}
-          >
-            Open blog post
-          </Button>
-        </Card>
-      ) : (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Create a blog post from this topic
-            </p>
-            <p className="text-[13px] text-muted">
-              Drafts a fresh, search-optimized long-form post on the same topic,
-              separate from this email.
-            </p>
-          </div>
-          <Button
-            variant="outline"
+            className="mt-auto"
             loading={creatingBlog}
             disabled={busy}
-            onClick={handleCreateBlog}
+            onClick={
+              existingBlog
+                ? () => router.push(`/drafts/${existingBlog.draftId}`)
+                : handleCreateBlog
+            }
           >
-            Create blog post
+            {existingBlog ? "Open blog post" : "Create blog post"}
           </Button>
-        </Card>
-      )}
-
-      {/* Flyer spin-off: a social post graphic distilled from THIS email's
-          copy. Same link-not-duplicate behavior as the blog card. */}
-      {existingFlyer ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Flyer created from this email
-            </p>
-            <p className="truncate text-[13px] text-muted">
-              {existingFlyer.subject || "Untitled flyer"}
-            </p>
-          </div>
+        </div>
+        <div className="flex flex-col gap-2 border-t border-border pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+          <p className="text-sm font-medium text-foreground">
+            {existingFlyer ? "Flyer created from this email" : "Create a social flyer"}
+          </p>
+          <p className="text-[13px] text-muted">
+            {existingFlyer
+              ? existingFlyer.subject || "Untitled flyer"
+              : "A Facebook/Instagram post graphic with this email's offer."}
+          </p>
           <Button
             variant="outline"
-            onClick={() => router.push(`/drafts/${existingFlyer.draftId}`)}
-          >
-            Open flyer
-          </Button>
-        </Card>
-      ) : (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Create a social flyer from this email
-            </p>
-            <p className="text-[13px] text-muted">
-              Designs a Facebook/Instagram post graphic with this email's
-              offer, ready to download and post.
-            </p>
-          </div>
-          <Button
-            variant="outline"
+            className="mt-auto"
             loading={creatingFlyer}
             disabled={busy}
-            onClick={handleCreateFlyer}
+            onClick={
+              existingFlyer
+                ? () => router.push(`/drafts/${existingFlyer.draftId}`)
+                : handleCreateFlyer
+            }
           >
-            Create flyer
+            {existingFlyer ? "Open flyer" : "Create flyer"}
           </Button>
-        </Card>
-      )}
+        </div>
+      </Card>
 
       {/* Publish to MailerLite (appears once approved). Mirrors the blog
           screen's Sanity card: shows the existing campaign if already pushed,
