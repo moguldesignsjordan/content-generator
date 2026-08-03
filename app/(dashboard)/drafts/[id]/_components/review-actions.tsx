@@ -150,6 +150,11 @@ export function ReviewActions({
   const [previewMode, setPreviewMode] = useState<EmailPreviewMode>(() =>
     hasDarkModeSupport(initialContent.html) ? "light" : "auto",
   );
+  // Raw HTML source view, a plain alternative to InlinePreview's
+  // click-to-edit for whoever wants to see or hand-edit the markup directly.
+  // Shares the same `html` state, so switching back to Preview picks up
+  // whatever was typed here, and it rides the normal Approve/Republish save.
+  const [viewMode, setViewMode] = useState<"preview" | "code">("preview");
   // Older drafts, and any model-authored draft that skipped the dark-mode CSS
   // the prompt asks for, have nothing for the toggle to force — disable
   // Light/Dark rather than let them silently do nothing.
@@ -699,25 +704,36 @@ export function ReviewActions({
             Click a section to select it, double-click to type on it
           </p>
           <div className="flex items-center gap-3">
-            <Tooltip
-              label={
-                darkSupported
-                  ? "Preview and download this email locked to light or dark."
-                  : "This draft doesn't have dark-mode styling. Reject & regenerate to get a version that supports it."
-              }
-              side="bottom"
-            >
-              <SegmentedControl
-                size="sm"
-                value={previewMode}
-                onChange={setPreviewMode}
-                options={[
-                  { value: "auto", label: "Auto" },
-                  { value: "light", label: "Light", disabled: !darkSupported },
-                  { value: "dark", label: "Dark", disabled: !darkSupported },
-                ]}
-              />
-            </Tooltip>
+            <SegmentedControl
+              size="sm"
+              value={viewMode}
+              onChange={setViewMode}
+              options={[
+                { value: "preview", label: "Preview" },
+                { value: "code", label: "Code" },
+              ]}
+            />
+            {viewMode === "preview" && (
+              <Tooltip
+                label={
+                  darkSupported
+                    ? "Preview and download this email locked to light or dark."
+                    : "This draft doesn't have dark-mode styling. Reject & regenerate to get a version that supports it."
+                }
+                side="bottom"
+              >
+                <SegmentedControl
+                  size="sm"
+                  value={previewMode}
+                  onChange={setPreviewMode}
+                  options={[
+                    { value: "auto", label: "Auto" },
+                    { value: "light", label: "Light", disabled: !darkSupported },
+                    { value: "dark", label: "Dark", disabled: !darkSupported },
+                  ]}
+                />
+              </Tooltip>
+            )}
             <button
               type="button"
               onClick={handleDownload}
@@ -727,14 +743,23 @@ export function ReviewActions({
             </button>
           </div>
         </div>
-        <EmailPreview
-          draftId={draftId}
-          html={html}
-          onHtmlChange={setHtml}
-          initialImage={initialMeta.hero_image}
-          onEdited={() => setHistoryRefreshKey((k) => k + 1)}
-          previewMode={previewMode}
-        />
+        {viewMode === "code" ? (
+          <textarea
+            value={html}
+            onChange={(e) => setHtml(e.target.value)}
+            spellCheck={false}
+            className="h-[600px] w-full resize-none border-0 bg-background p-4 font-mono text-[12.5px] text-foreground outline-none"
+          />
+        ) : (
+          <EmailPreview
+            draftId={draftId}
+            html={html}
+            onHtmlChange={setHtml}
+            initialImage={initialMeta.hero_image}
+            onEdited={() => setHistoryRefreshKey((k) => k + 1)}
+            previewMode={previewMode}
+          />
+        )}
       </Card>
 
       <DesignChat
