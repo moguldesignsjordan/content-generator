@@ -4,7 +4,9 @@ import type {
   BrandColors,
   BrandFonts,
   BrandFooter,
+  ContentImage,
   EmailCopy,
+  EmailStyleId,
   EmailTemplateId,
 } from "@/lib/db/types";
 
@@ -19,9 +21,24 @@ export interface BrandTokens {
   sender_name: string;
 }
 
+// The offer a product showcase email is built around, resolved from the
+// product row (plus any brief price) so the panel shows real facts, never
+// model-written ones.
+export interface ShowcaseProduct {
+  name: string;
+  price: string | null;
+  details: string[];
+  url: string | null;
+}
+
 export interface RenderArgs {
   copy: EmailCopy;
   tokens: BrandTokens;
+  // Only the product showcase layout reads these; other templates ignore them
+  // and get the hero image spliced in afterwards instead.
+  product?: ShowcaseProduct | null;
+  image?: ContentImage | null;
+  styleId?: EmailStyleId;
 }
 
 export interface EmailTemplate {

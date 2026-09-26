@@ -30,6 +30,7 @@ const ALL_LAYOUTS: EmailTemplateId[] = [
   "promotional_bold",
   "announcement_banner",
   "product_spotlight",
+  "product_showcase",
   "digest",
 ];
 

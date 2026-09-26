@@ -85,6 +85,12 @@ const LAYOUT_SHAPES: Record<EmailTemplateId, string> = {
     "PRODUCT SPOTLIGHT layout: an uppercase eyebrow naming the category, a headline " +
     "focused on the outcome the reader gets, a short feature list (2 to 4 short lines " +
     "each led by a small accent marker or checkmark), then the CTA button.",
+  product_showcase:
+    "PRODUCT SHOWCASE layout: a top accent bar, a centered logo, a very large centered " +
+    "headline whose last word is in the accent color, a one-line hero sentence, the product " +
+    "photo with rounded corners, a dark product panel (small accent label, product name, " +
+    "price and specs line, pill Shop button), benefit blocks on an accent left rule, then a " +
+    "centered closing question with a large pill CTA button.",
   digest:
     "DIGEST layout: an uppercase accent eyebrow, one short intro line, then 3 to 5 " +
     "compact items each with a bold lead-in phrase followed by one supporting sentence " +

@@ -131,6 +131,17 @@ describe("resolveEmailType", () => {
 });
 
 describe("resolveEmailLayout", () => {
+  it("uses the product showcase for every product, service, or promo email with a product", () => {
+    for (const type of ["product", "service", "promotional"] as EmailType[]) {
+      expect(
+        resolveEmailLayout(type, makeTopic({ distribution_recipe: [] }), { hasProduct: true }),
+      ).toBe("product_showcase");
+    }
+    expect(
+      resolveEmailLayout("newsletter", makeTopic({ distribution_recipe: [] }), { hasProduct: true }),
+    ).not.toBe("product_showcase");
+  });
+
   const COMPATIBLE: Record<EmailType, EmailTemplateId[]> = {
     newsletter: ["newsletter_tip", "newsletter_feature", "newsletter_howto", "digest"],
     product: ["product_spotlight", "newsletter_feature"],

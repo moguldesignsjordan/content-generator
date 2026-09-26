@@ -47,6 +47,7 @@ import type {
   ContentImageStyle,
   EmailCopy,
   EmailDraftContent,
+  EmailStyleId,
   EmailTemplateId,
   EmailType,
   DraftMeta,
@@ -161,6 +162,10 @@ export async function generateEmailForTopicStreamed(
     // this sequence and drifting from it.
     let heroImage: ContentImage | undefined;
     const renderWithHero = (output: EmailDraftOutput) => {
+      // The showcase template has its own designed image slot.
+      if (templateId === "product_showcase") {
+        return renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId);
+      }
       const rendered = renderEmailForContext(ctx, output, templateId, undefined, brief);
       if (heroImage) {
         rendered.content.html =
@@ -226,7 +231,7 @@ export async function generateEmailForTopicStreamed(
       );
     }
     if (heroImage) {
-      content.html = spliceHeroImage(content.html, heroImage) ?? content.html;
+      content = renderWithHero(parsed).content;
     }
 
     const checking = { phase: "checking", label: "Running quality checks" };
@@ -622,6 +627,7 @@ function renderEmailForContext(
   templateId: EmailTemplateId,
   heroImage?: ContentImage,
   brief?: CampaignBrief | null,
+  styleId?: EmailStyleId,
 ): {
   content: EmailDraftContent;
   copy: EmailCopy;
@@ -661,7 +667,25 @@ function renderEmailForContext(
   const modelHtml = validateModelEmailHtml(parsed.html);
   let designSource: "model" | "template";
   let html: string;
-  if (modelHtml && hasDarkModeSupport(modelHtml)) {
+  if (templateId === "product_showcase") {
+    // A fixed house design: the model's HTML is ignored so every product
+    // email looks the same, and the panel shows real product facts.
+    designSource = "template";
+    html = renderEmailTemplate(templateId, {
+      copy,
+      tokens,
+      product: ctx.product
+        ? {
+            name: ctx.product.name,
+            price: brief?.offer_price ?? ctx.product.price_point,
+            details: ctx.product.deliverables.slice(0, 2),
+            url: ctx.product.url,
+          }
+        : null,
+      image: heroImage,
+      styleId,
+    });
+  } else if (modelHtml && hasDarkModeSupport(modelHtml)) {
     designSource = "model";
     // The model's dark-mode CSS routinely misses elements (black text on the
     // dark card); repair coverage mechanically rather than trusting the prompt.
@@ -1015,7 +1039,7 @@ export async function regenerateEmailDraft(
   });
 
   const render = (output: EmailDraftOutput) =>
-    renderEmailForContext(ctx, output, templateId, heroImage, brief);
+    renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId);
 
   let { content, copy, designSource } = render(parsed);
 

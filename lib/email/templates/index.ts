@@ -7,10 +7,11 @@ import { newsletterHowto } from "./newsletter-howto";
 import { promotionalBold } from "./promotional-bold";
 import { announcementBanner } from "./announcement-banner";
 import { productSpotlight } from "./product-spotlight";
+import { productShowcase } from "./product-showcase";
 import { digest } from "./digest";
 
 export { resolveBrandTokens } from "./types";
-export type { BrandTokens, EmailTemplate, RenderArgs } from "./types";
+export type { BrandTokens, EmailTemplate, RenderArgs, ShowcaseProduct } from "./types";
 
 export const TEMPLATES: Record<EmailTemplateId, EmailTemplate> = {
   newsletter_tip: newsletterTip,
@@ -19,6 +20,7 @@ export const TEMPLATES: Record<EmailTemplateId, EmailTemplate> = {
   promotional_bold: promotionalBold,
   announcement_banner: announcementBanner,
   product_spotlight: productSpotlight,
+  product_showcase: productShowcase,
   digest: digest,
 };
 
@@ -30,6 +32,7 @@ export const TEMPLATE_LIST: EmailTemplate[] = [
   promotionalBold,
   announcementBanner,
   productSpotlight,
+  productShowcase,
   digest,
 ];
 

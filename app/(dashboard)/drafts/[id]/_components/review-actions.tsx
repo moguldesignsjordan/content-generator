@@ -62,6 +62,7 @@ const LAYOUT_LABELS: Record<EmailTemplateId, string> = {
   promotional_bold: "Promotional",
   announcement_banner: "Announcement",
   product_spotlight: "Product spotlight",
+  product_showcase: "Product showcase",
   digest: "Digest",
 };
 

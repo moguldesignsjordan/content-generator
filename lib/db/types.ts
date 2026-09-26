@@ -557,6 +557,7 @@ export type EmailTemplateId =
   | "promotional_bold"
   | "announcement_banner"
   | "product_spotlight"
+  | "product_showcase"
   | "digest";
 
 // A curated visual design direction (page background, card frame, header

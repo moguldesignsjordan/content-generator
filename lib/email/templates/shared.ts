@@ -81,7 +81,7 @@ export function renderDivider(): string {
  * The trailing zero-width/space padding stops body copy from leaking into the
  * preview line.
  */
-function renderPreheader(text: string): string {
+export function renderPreheader(text: string): string {
   if (!text) return "";
   const pad = "&#847;&zwnj;&nbsp;".repeat(40);
   return (
@@ -250,7 +250,7 @@ const DARK = {
  * inline styles email requires). The light design is the base; stripping
  * this block leaves a correct light email.
  */
-function renderDarkModeStyle(accent: string): string {
+export function renderDarkModeStyle(accent: string): string {
   return (
     `<style>` +
     `:root{color-scheme:light dark;supported-color-schemes:light dark;}` +

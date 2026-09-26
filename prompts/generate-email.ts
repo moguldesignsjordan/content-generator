@@ -165,6 +165,7 @@ const ALL_LAYOUT_IDS: EmailTemplateId[] = [
   "promotional_bold",
   "announcement_banner",
   "product_spotlight",
+  "product_showcase",
   "digest",
 ];
 
@@ -195,6 +196,8 @@ const LAYOUT_COMPATIBILITY: Record<EmailType, EmailTemplateId[]> = {
   announcement: ["announcement_banner"],
 };
 
+const SHOWCASE_TYPES: EmailType[] = ["product", "service", "promotional"];
+
 /**
  * Resolves the layout SHAPE for a fresh generation: the topic's distribution
  * recipe still wins when it names a known layout (unchanged behavior); other-
@@ -206,12 +209,15 @@ const LAYOUT_COMPATIBILITY: Record<EmailType, EmailTemplateId[]> = {
 export function resolveEmailLayout(
   emailType: EmailType,
   topic: Topic,
-  opts: { recent?: EmailTemplateId[]; seedIndex?: number } = {},
+  opts: { recent?: EmailTemplateId[]; seedIndex?: number; hasProduct?: boolean } = {},
 ): EmailTemplateId {
   const recipe = topic.distribution_recipe ?? [];
   for (const r of recipe) {
     if ((ALL_LAYOUT_IDS as string[]).includes(r)) return r as EmailTemplateId;
   }
+  // Every email selling a real product row gets the one fixed product design,
+  // not a rotation: consistency across a product campaign is the point.
+  if (opts.hasProduct && SHOWCASE_TYPES.includes(emailType)) return "product_showcase";
   const candidates = LAYOUT_COMPATIBILITY[emailType] ?? ["newsletter_tip"];
   return pickRotation(candidates, {
     recent: opts.recent,
@@ -382,6 +388,20 @@ export function resolveEmailType(
 
   return "newsletter";
 }
+
+// Copy budget for the product_showcase template, which renders each section
+// into a fixed slot (see lib/email/templates/product-showcase.ts).
+export const SHOWCASE_LENGTH_TARGET: EmailLengthTarget = {
+  words: [40, 120],
+  sections: [3, 4],
+  directive:
+    "a product showcase in a fixed, pre-built design, so each body_section fills one slot, in this order. " +
+    "FIRST: the hero line, one or two sentences under 30 words, and its heading is a 2 to 4 word label for the product panel (e.g. 'Business card package'). " +
+    "MIDDLE (one or two sections): a benefit, heading is one punchy line under 10 words, body is one or two sentences. " +
+    "LAST: the closing, heading is a short question that invites action (under 8 words), body is a one-line recap of what they get. " +
+    "The headline is 3 to 6 words and its LAST word is set in the accent color, so end on the word that should pop. " +
+    "The product's name, price, and link are shown from the offer block automatically; don't restate the price in every section.",
+};
 
 /** Word count of an email's body copy (the sections, not the one-line headline). */
 export function countEmailWords(
@@ -619,16 +639,19 @@ export function buildEmailMessages(
     override: opts.emailTypeOverride,
   });
   // A length picked for THIS piece in the chat wins over the brand-wide setting.
-  const length = resolveLengthTarget(
-    emailType,
-    opts.brief?.length ?? brand.voice_profile?.email_length,
-  );
   const templateId =
     opts.templateOverride ??
     resolveEmailLayout(emailType, topic, {
       recent: opts.recentLayouts,
       seedIndex: opts.seedIndex,
+      hasProduct: Boolean(ctx.product),
     });
+  // The showcase design has fixed slots, so its shape outranks the type's
+  // length budget and any length picked in the chat.
+  const length =
+    templateId === "product_showcase"
+      ? SHOWCASE_LENGTH_TARGET
+      : resolveLengthTarget(emailType, opts.brief?.length ?? brand.voice_profile?.email_length);
   // A regenerate's styleOverride wins (a locked draft keeps its look), then
   // the piece's explicit design choice (brief.email_style, guarded against a
   // stale id in old brief JSON), then the vibe-narrowed rotation.
