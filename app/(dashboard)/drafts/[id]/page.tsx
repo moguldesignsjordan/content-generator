@@ -15,6 +15,8 @@ import { ensureEditableRegions } from "@/lib/email/inline-style";
 import { resolveSanityConfig } from "@/lib/clients/sanity";
 import { resolveMailerliteConfig } from "@/lib/publishing/providers/mailerlite";
 import { getPerformanceForDraft } from "@/lib/pipeline/performance";
+import { imageCostUsd } from "@/lib/pipeline/cost";
+import { resolveImageModel } from "@/lib/clients/gemini-image";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
@@ -152,6 +154,7 @@ export default async function DraftReviewPage({
           state={draft.state}
           initialMeta={draft.meta}
           initialArchived={draft.archived}
+          proRenderUsd={imageCostUsd(resolveImageModel("pro"))}
         />
       ) : isBlog ? (
         <BlogReviewActions

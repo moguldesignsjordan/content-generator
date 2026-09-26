@@ -54,7 +54,7 @@ export async function critiqueDesign(args: {
       max_tokens: 8000,
       thinking: { type: "adaptive" },
       // Spotting what's visually off in a wall of table markup is the hardest
-      // reading task in the pipeline; it gets the same effort as the angle.
+      // reading task in the pipeline, which is why it's Opus and opt-in.
       output_config: { effort: "xhigh" },
       system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],

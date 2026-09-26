@@ -8,6 +8,7 @@ import {
 import { requireDraftInBrand } from "@/lib/draft-access";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
 import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
+import { resolveImageModel } from "@/lib/clients/gemini-image";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
 import { DEFAULT_FLYER_ASPECT, FLYER_ASPECTS, isFlyerAspect } from "@/prompts/generate-flyer";
@@ -28,11 +29,14 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
  *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt? }.
  *    Copy fields default to the stored flyer_copy; exactPrompt sends the full
  *    prompt verbatim (the tweak-and-regenerate path). Zero Claude tokens
- *    either way, one Gemini render.
+ *    either way, one Gemini render. { tier: "pro" } is "Finalize in Pro":
+ *    the current option re-rendered on the pro image model.
  *  - "upload": { file } replaces the design with the user's own image,
  *    cover-fitted to the flyer's post shape. No AI.
  *  - "caption": { caption, hashtags? } edits the post caption only. No AI,
  *    no image change.
+ *  - "pick": { index } swaps in another already-rendered option from
+ *    meta.flyer_variants. No AI.
  * Only in_review drafts are editable: an approved flyer is a publish record.
  */
 export async function POST(
@@ -86,12 +90,55 @@ export async function POST(
         caption,
         ...(hashtags.length ? { hashtags } : {}),
       };
+      const variantIndex = meta.flyer_variant_index;
       await updateDraftContent(
         id,
         { ...draftCtx.content, preheader: caption.slice(0, 120) },
-        { ...meta, flyer_copy: flyerCopy },
+        {
+          ...meta,
+          flyer_copy: flyerCopy,
+          // Keep the picked option in sync, so switching away and back
+          // doesn't drop the caption edit.
+          ...(variantIndex !== undefined && meta.flyer_variants
+            ? {
+                flyer_variants: meta.flyer_variants.map((v, i) =>
+                  i === variantIndex ? { ...v, copy: flyerCopy } : v,
+                ),
+              }
+            : {}),
+        },
       );
       return NextResponse.json({ copy: flyerCopy });
+    }
+
+    // ── pick: swap in another option that's already rendered, free ─────────
+    if (mode === "pick") {
+      const index = Number(form.get("index"));
+      const variant = Number.isInteger(index) ? meta.flyer_variants?.[index] : undefined;
+      if (!variant) {
+        return NextResponse.json({ error: "That option doesn't exist." }, { status: 400 });
+      }
+      await updateDraftContent(
+        id,
+        {
+          ...draftCtx.content,
+          subject: variant.copy.headline,
+          preheader: variant.copy.caption.slice(0, 120),
+        },
+        {
+          ...meta,
+          flyer_copy: variant.copy,
+          flyer_image: variant.image,
+          flyer_scene: variant.scene,
+          flyer_style: variant.style,
+          flyer_variant_index: index,
+        },
+      );
+      return NextResponse.json({
+        image: variant.image,
+        copy: variant.copy,
+        aspect: meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT,
+      });
     }
 
     // ── upload: the user's own design, cover-fit to the post shape ─────────
@@ -155,6 +202,7 @@ export async function POST(
         ...meta,
         flyer_image: image,
         flyer_aspect: aspect,
+        flyer_variant_index: undefined,
       });
       return NextResponse.json({ image, aspect });
     }
@@ -225,6 +273,8 @@ export async function POST(
 
     const exactPrompt =
       (form.get("exactPrompt") as string | null)?.trim().slice(0, 2000) || undefined;
+    const finalize = form.get("tier") === "pro";
+    const variantIndex = meta.flyer_variant_index;
 
     const copyForRender = { headline, subtext, cta, caption: currentCopy?.caption ?? "", hashtags: currentCopy?.hashtags, scene };
     const { image, usage } = await regenerateFlyerImage({
@@ -235,6 +285,7 @@ export async function POST(
       style: meta.flyer_style,
       reference,
       exactPrompt,
+      ...(finalize ? { model: resolveImageModel("pro") } : {}),
       draftId: id,
     });
 
@@ -260,6 +311,16 @@ export async function POST(
         flyer_scene: scene,
         style_reference_id: styleReferenceId,
         usage: rolled,
+        // Finalizing upgrades the picked option in place, so switching away
+        // and back keeps the pro render. Any other re-render is a custom
+        // design that matches none of the options.
+        ...(finalize && variantIndex !== undefined && meta.flyer_variants
+          ? {
+              flyer_variants: meta.flyer_variants.map((v, i) =>
+                i === variantIndex ? { ...v, image, finalized: true } : v,
+              ),
+            }
+          : { flyer_variant_index: undefined }),
       },
     );
     return NextResponse.json({ image, copy: flyerCopy, aspect });

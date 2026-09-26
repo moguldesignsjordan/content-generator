@@ -50,6 +50,19 @@ export const AngleSchema = z.object({
 
 export type AngleOutput = z.infer<typeof AngleSchema>;
 
+/**
+ * The same three angles with the reviewer's pick as the chosen one, or null
+ * when `index` isn't a real alternative (out of range, or already chosen).
+ */
+export function switchAngle(
+  output: AngleOutput | null | undefined,
+  index: number,
+): AngleOutput | null {
+  if (!output || !Number.isInteger(index) || !output.angles[index]) return null;
+  if (index === output.chosen_index) return null;
+  return { ...output, chosen_index: index, choice_reason: "Picked by the reviewer." };
+}
+
 export const ANGLE_TOOL: Anthropic.Tool = {
   name: "choose_angle",
   description: "Propose three angles for this piece and choose the strongest one.",

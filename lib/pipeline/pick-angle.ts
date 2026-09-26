@@ -1,5 +1,5 @@
 import "server-only";
-import { HARD_MODEL, cacheableSystem, getAnthropic, logUsage } from "@/lib/clients/anthropic";
+import { DRAFT_MODEL, cacheableSystem, getAnthropic, logUsage } from "@/lib/clients/anthropic";
 import { listTopPerformingEmails } from "@/lib/db/queries";
 import type { CampaignBrief, TopicContext } from "@/lib/db/types";
 import {
@@ -14,11 +14,9 @@ import type { UsageDelta } from "./cost";
 /**
  * Picks the angle before drafting starts.
  *
- * This is the one place the pipeline spends Opus: it is a single short call
- * whose output shapes an entire piece, which is exactly the trade the
- * "Sonnet for drafts, Opus for hard pieces" rule was written for. Drafting
- * itself stays on DRAFT_MODEL because it runs on every generation, every
- * retry, and every QA revision.
+ * On DRAFT_MODEL at high effort, not Opus: it runs on every fresh email and
+ * blog, and choosing between three proposed angles is well within Sonnet's
+ * range.
  *
  * Non-fatal by design. A failed or malformed angle call returns null and
  * generation proceeds exactly as it did before this step existed: the angle is
@@ -38,23 +36,21 @@ export async function pickAngle(
     const { system, user } = buildAngleMessages(ctx, { ...opts, topPerformers });
 
     const response = await getAnthropic().messages.create({
-      model: HARD_MODEL,
+      model: DRAFT_MODEL,
       max_tokens: 4000,
       thinking: { type: "adaptive" },
-      // xhigh, not the default: this is a judgment call worth thinking about,
-      // and it's a few thousand tokens once per draft, not per retry.
-      output_config: { effort: "xhigh" },
+      output_config: { effort: "high" },
       system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],
       tools: [ANGLE_TOOL],
       tool_choice: { type: "tool", name: "choose_angle" },
     });
-    logUsage("pick-angle", HARD_MODEL, response.usage, {
+    logUsage("pick-angle", DRAFT_MODEL, response.usage, {
       brandId: ctx.brand.id,
       metered: true,
       requestId: response.id,
     });
-    usageDeltas.push({ model: HARD_MODEL, ...response.usage });
+    usageDeltas.push({ model: DRAFT_MODEL, ...response.usage });
 
     const tu = response.content.find(
       (b) => b.type === "tool_use" && b.name === "choose_angle",

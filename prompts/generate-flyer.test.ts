@@ -3,11 +3,14 @@ import {
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
   FLYER_STYLE_DIRECTIONS,
+  FLYER_VARIANT_COUNT,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
   isFlyerAspect,
   isFlyerStyle,
-  pickVariedFlyerStyle,
+  parseFlyerVariants,
+  pickFlyerStyleSet,
+  resolveVariantStyles,
   type FlyerCopyOutput,
 } from "./generate-flyer";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
@@ -111,16 +114,78 @@ describe("flyer style presets", () => {
     expect(isFlyerStyle(undefined)).toBe(false);
   });
 
-  it("pickVariedFlyerStyle is deterministic per seed and stays in the catalog", () => {
+  it("pickFlyerStyleSet returns distinct catalog styles, deterministic per seed", () => {
     const seed = "11111111-2222-3333-4444-555555555555";
-    expect(pickVariedFlyerStyle(seed)).toBe(pickVariedFlyerStyle(seed));
-    const seen = new Set<FlyerStyleId>();
-    for (let i = 0; i < 40; i++) {
-      const style = pickVariedFlyerStyle(`seed-${i}-${i * 7}`);
-      expect(isFlyerStyle(style)).toBe(true);
-      seen.add(style);
-    }
-    expect(seen.size).toBeGreaterThan(1);
+    const set = pickFlyerStyleSet(seed, 4);
+    expect(set).toEqual(pickFlyerStyleSet(seed, 4));
+    expect(set).toHaveLength(4);
+    expect(new Set(set).size).toBe(4);
+    for (const id of set) expect(isFlyerStyle(id)).toBe(true);
+
+    const firsts = new Set<FlyerStyleId>();
+    for (let i = 0; i < 40; i++) firsts.add(pickFlyerStyleSet(`seed-${i}-${i * 7}`, 4)[0]);
+    expect(firsts.size).toBeGreaterThan(1);
+  });
+
+  it("pickFlyerStyleSet never repeats a style, even when asked for more than exist", () => {
+    const set = pickFlyerStyleSet("x", 99);
+    expect(set).toHaveLength(FLYER_STYLE_CATALOG.length);
+    expect(new Set(set).size).toBe(FLYER_STYLE_CATALOG.length);
+  });
+
+  it("resolveVariantStyles: reference wins, then a fixed preset, then a distinct set", () => {
+    expect(
+      resolveVariantStyles("s", { fixedStyle: "minimal", hasReference: true }),
+    ).toEqual(Array(FLYER_VARIANT_COUNT).fill(undefined));
+    expect(
+      resolveVariantStyles("s", { fixedStyle: "minimal", hasReference: false }),
+    ).toEqual(Array(FLYER_VARIANT_COUNT).fill("minimal"));
+    const rotated = resolveVariantStyles("s", { hasReference: false });
+    expect(rotated).toHaveLength(FLYER_VARIANT_COUNT);
+    expect(new Set(rotated).size).toBe(FLYER_VARIANT_COUNT);
+  });
+});
+
+describe("parseFlyerVariants", () => {
+  const good = {
+    headline: "Fast sites win",
+    caption: "Speed sells.",
+    scene: "A stopwatch on a desk",
+  };
+
+  it("keeps complete variants, drops incomplete ones, and caps at count", () => {
+    const out = parseFlyerVariants(
+      {
+        variants: [
+          good,
+          { headline: "No caption", scene: "x" },
+          { ...good, headline: "Second" },
+          { ...good, headline: "Third" },
+        ],
+      },
+      2,
+    );
+    expect(out.map((v) => v.headline)).toEqual(["Fast sites win", "Second"]);
+  });
+
+  it("cleans em dashes, markdown, and hashtags on every variant", () => {
+    const [v] = parseFlyerVariants(
+      {
+        variants: [
+          { ...good, headline: "**Fast** sites \u2014 win", hashtags: ["webdesign", "#seo"] },
+        ],
+      },
+      4,
+    );
+    expect(v.headline).not.toContain("\u2014");
+    expect(v.headline).not.toContain("*");
+    expect(v.hashtags).toEqual(["#webdesign", "#seo"]);
+  });
+
+  it("returns an empty list for a malformed payload (the caller retries)", () => {
+    expect(parseFlyerVariants(null, 4)).toEqual([]);
+    expect(parseFlyerVariants({ variants: "nope" }, 4)).toEqual([]);
+    expect(parseFlyerVariants({}, 4)).toEqual([]);
   });
 });
 
@@ -130,11 +195,13 @@ describe("buildFlyerCopyMessages", () => {
     voiceBlock: "BRAND: Mogul\nVOICE: direct",
     topicTitle: "Why slow sites lose clients",
     aspect: "1:1" as const,
+    variants: { count: 4 },
   };
 
   it("includes the topic, shape, and voice block", () => {
     const { system, user } = buildFlyerCopyMessages(base);
-    expect(system).toContain("save_flyer_copy");
+    expect(system).toContain("save_flyer_variants");
+    expect(system).toContain("exactly 4 variants");
     expect(system).toContain("NEVER use em dashes");
     expect(user).toContain("FLYER TOPIC: Why slow sites lose clients");
     expect(user).toContain("Square post (1:1)");
@@ -174,5 +241,24 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain(FLYER_STYLE_DIRECTIONS.minimal);
     const { user: without } = buildFlyerCopyMessages(base);
     expect(without).not.toContain("DESIGN DIRECTION");
+  });
+
+  it("gives each variant its own direction when the styles differ", () => {
+    const styles: FlyerStyleId[] = ["bold_type", "minimal", "collage", "elegant"];
+    const { user } = buildFlyerCopyMessages({ ...base, variants: { count: 4, styles } });
+    expect(user).toContain("DESIGN DIRECTION PER VARIANT");
+    styles.forEach((id, i) => {
+      expect(user).toContain(`Variant ${i + 1}: ${FLYER_STYLE_DIRECTIONS[id]}`);
+    });
+  });
+
+  it("uses the single shared direction when every variant has the same style", () => {
+    const { user } = buildFlyerCopyMessages({
+      ...base,
+      style: "minimal",
+      variants: { count: 4, styles: Array(4).fill("minimal") },
+    });
+    expect(user).not.toContain("PER VARIANT");
+    expect(user).toContain(FLYER_STYLE_DIRECTIONS.minimal);
   });
 });

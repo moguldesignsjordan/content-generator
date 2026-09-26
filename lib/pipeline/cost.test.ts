@@ -36,6 +36,19 @@ describe("accumulateUsage image pricing", () => {
     expect(pro.estimated_usd).toBeGreaterThan(lite.estimated_usd);
     expect(pro.estimated_usd).toBeCloseTo(imageCostUsd(IMAGE_MODELS.pro), 4);
   });
+
+  it("sums a flyer's lite option renders and its pro finalize by model", () => {
+    let usage = undefined;
+    for (let i = 0; i < 4; i++) {
+      usage = accumulateUsage(usage, { model: IMAGE_MODELS.lite, images: 1 });
+    }
+    usage = accumulateUsage(usage, { model: IMAGE_MODELS.pro, images: 1 });
+    expect(usage.images).toBe(5);
+    expect(usage.estimated_usd).toBeCloseTo(
+      4 * imageCostUsd(IMAGE_MODELS.lite) + imageCostUsd(IMAGE_MODELS.pro),
+      4,
+    );
+  });
 });
 
 describe("image model tiers", () => {

@@ -2,10 +2,11 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type { EmailCopy, FlyerAspect, FlyerCopy, FlyerStyleId } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
+import { stripEmDashes, stripMarkdown } from "@/lib/text";
 
-// Flyer prompt assembly: one FAST_MODEL call produces the flyer's copy AND a
-// scene concept together (save_flyer_copy), then buildFlyerImagePrompt turns
-// that into the render prompt. Unlike the hero-image scaffolds
+// Flyer prompt assembly: one FAST_MODEL call produces several alternative
+// flyers, each with its copy AND a scene concept (save_flyer_variants), then
+// buildFlyerImagePrompt turns each into a render prompt. Unlike the hero-image scaffolds
 // (prompts/generate-image.ts), which forbid text, a flyer is a DESIGNED
 // GRAPHIC: the render prompt passes the exact headline/subtext/CTA strings for
 // the image model to typeset, plus the brand palette and font direction.
@@ -64,20 +65,43 @@ export function isFlyerStyle(value: unknown): value is FlyerStyleId {
   );
 }
 
-/**
- * The "no one chose a style" default for flyers, mirroring
- * pickVariedImageStyle for hero images: a deterministic per-draft rotation so
- * consecutive flyers don't all come out of the same generic recipe. Only used
- * when there's no explicit preset AND no uploaded style reference.
- */
-export function pickVariedFlyerStyle(seed?: string): FlyerStyleId {
-  const pool = FLYER_STYLE_CATALOG.map((s) => s.id);
-  if (!seed) return pool[Math.floor(Math.random() * pool.length)];
+function seedHash(seed: string): number {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return pool[hash % pool.length];
+  return hash;
+}
+
+/** How many options one flyer generation renders. */
+export const FLYER_VARIANT_COUNT = 4;
+
+/**
+ * `count` DISTINCT presets for a multi-variant generation, a consecutive run
+ * of the catalog starting at the seed's slot, so the options differ in look
+ * and not only in copy.
+ */
+export function pickFlyerStyleSet(seed: string, count: number): FlyerStyleId[] {
+  const pool = FLYER_STYLE_CATALOG.map((s) => s.id);
+  const start = seedHash(seed) % pool.length;
+  return Array.from(
+    { length: Math.min(count, pool.length) },
+    (_, i) => pool[(start + i) % pool.length],
+  );
+}
+
+/**
+ * One style per variant. A fixed preset applies to every option; an uploaded
+ * reference means no preset at all (the reference IS the style); otherwise
+ * each option gets its own look.
+ */
+export function resolveVariantStyles(
+  seed: string,
+  opts: { fixedStyle?: FlyerStyleId; hasReference: boolean },
+): (FlyerStyleId | undefined)[] {
+  if (opts.hasReference) return Array(FLYER_VARIANT_COUNT).fill(undefined);
+  if (opts.fixedStyle) return Array(FLYER_VARIANT_COUNT).fill(opts.fixedStyle);
+  return pickFlyerStyleSet(seed, FLYER_VARIANT_COUNT);
 }
 
 /** What the copy call returns via forced tool use. */
@@ -86,62 +110,76 @@ export interface FlyerCopyOutput extends FlyerCopy {
   scene: string;
 }
 
-/** Forced tool: flyer copy + the visual scene concept, one cheap call. */
-export const FLYER_COPY_TOOL: Anthropic.Tool = {
-  name: "save_flyer_copy",
-  description:
-    "Return the flyer's copy and its visual concept. headline/subtext/cta are " +
-    "typeset INTO the image exactly as written, so keep them short and " +
-    "spell-checked. caption is the social post text that accompanies the " +
-    "image. scene describes only the imagery/background, never the text.",
-  input_schema: {
-    type: "object",
-    properties: {
-      headline: {
-        type: "string",
-        description:
-          "The flyer's main line, 8 words or fewer, punchy and concrete. " +
-          "Rendered in the image exactly as written. Never use em dashes.",
-      },
-      subtext: {
-        type: "string",
-        description:
-          "One short supporting line under the headline, 12 words or fewer. " +
-          "Rendered in the image. Omit if the headline stands alone.",
-      },
-      cta: {
-        type: "string",
-        description:
-          "A 2 to 4 word call-to-action for the flyer's button or banner, " +
-          "e.g. 'Book a call'. Rendered in the image.",
-      },
-      caption: {
-        type: "string",
-        description:
-          "The social post caption: 1 to 3 short sentences in the brand " +
-          "voice, ending with a clear next step. Plain text, no markdown, " +
-          "never use em dashes.",
-      },
-      hashtags: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "3 to 6 relevant hashtags, each starting with #, camelCase for " +
-          "multi-word tags.",
-      },
-      scene: {
-        type: "string",
-        description:
-          "One or two sentences describing the flyer's imagery and background " +
-          "composition: concrete subjects, setting, layout feel. NO text " +
-          "content, no color or font words (the render prompt adds those).",
-      },
-    },
-    required: ["headline", "caption", "scene"],
+// One flyer's fields: each item of save_flyer_variants.
+const FLYER_COPY_PROPERTIES = {
+  headline: {
+    type: "string",
+    description:
+      "The flyer's main line, 8 words or fewer, punchy and concrete. " +
+      "Rendered in the image exactly as written. Never use em dashes.",
+  },
+  subtext: {
+    type: "string",
+    description:
+      "One short supporting line under the headline, 12 words or fewer. " +
+      "Rendered in the image. Omit if the headline stands alone.",
+  },
+  cta: {
+    type: "string",
+    description:
+      "A 2 to 4 word call-to-action for the flyer's button or banner, " +
+      "e.g. 'Book a call'. Rendered in the image.",
+  },
+  caption: {
+    type: "string",
+    description:
+      "The social post caption: 1 to 3 short sentences in the brand " +
+      "voice, ending with a clear next step. Plain text, no markdown, " +
+      "never use em dashes.",
+  },
+  hashtags: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "3 to 6 relevant hashtags, each starting with #, camelCase for " +
+      "multi-word tags.",
+  },
+  scene: {
+    type: "string",
+    description:
+      "One or two sentences describing the flyer's imagery and background " +
+      "composition: concrete subjects, setting, layout feel. NO text " +
+      "content, no color or font words (the render prompt adds those).",
   },
 };
 
-/** Builds the (system, user) pair for the flyer copy + scene call. */
+const FLYER_COPY_REQUIRED = ["headline", "caption", "scene"];
+
+/** Forced tool: several complete alternative flyers in one cheap call. */
+export const FLYER_VARIANTS_TOOL: Anthropic.Tool = {
+  name: "save_flyer_variants",
+  description:
+    "Return several alternative flyers for the same topic. Each one is " +
+    "complete: its own headline/subtext/cta (typeset INTO the image exactly " +
+    "as written), caption, hashtags, and scene. Make them genuinely different " +
+    "hooks, not rewordings of one idea.",
+  input_schema: {
+    type: "object",
+    properties: {
+      variants: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: FLYER_COPY_PROPERTIES,
+          required: FLYER_COPY_REQUIRED,
+        },
+      },
+    },
+    required: ["variants"],
+  },
+};
+
+/** Builds the (system, user) pair for the flyer variants call. */
 export function buildFlyerCopyMessages(args: {
   brandName: string;
   voiceBlock: string;
@@ -161,11 +199,18 @@ export function buildFlyerCopyMessages(args: {
     previousHeadline?: string;
     previousCaption?: string;
   };
+  /** How many alternative flyers to write. `styles` gives each option its
+   * own design direction, by position; when they're all the same (or absent),
+   * `style` (if any) applies to every option instead. */
+  variants: { count: number; styles?: (FlyerStyleId | undefined)[] };
 }): { system: string; user: string } {
+  const variants = args.variants;
+  const perVariantStyles =
+    variants.styles && new Set(variants.styles).size > 1 ? variants.styles : null;
   const system = [
     "You write copy for social media flyers (Instagram and Facebook post",
-    "graphics). Given a topic and brand context, produce the flyer's on-image",
-    "text, the post caption, and a visual concept. Rules:",
+    "graphics). Given a topic and brand context, produce alternative flyers,",
+    "each with its own on-image text, post caption, and visual concept. Rules:",
     "- headline: 8 words max, concrete benefit or hook, no clickbait.",
     "- subtext: one short line only when it adds something; otherwise omit.",
     "- cta: 2 to 4 words, action verb first.",
@@ -173,7 +218,9 @@ export function buildFlyerCopyMessages(args: {
     "- scene: imagery and composition only. Never describe the text, colors,",
     "  or fonts; the render prompt handles those.",
     "- NEVER use em dashes anywhere.",
-    "Call save_flyer_copy once.",
+    `Call save_flyer_variants once with exactly ${variants.count} variants. ` +
+      "Each needs a genuinely different hook and headline, not a rewording " +
+      "of another, so the reviewer has real alternatives to choose from.",
   ].join("\n");
 
   const emailLines = args.emailCopy
@@ -211,19 +258,62 @@ export function buildFlyerCopyMessages(args: {
     "",
     `FLYER TOPIC: ${args.topicTitle}`,
     `FLYER SHAPE: ${FLYER_ASPECTS[args.aspect].label}`,
-    args.style
-      ? `DESIGN DIRECTION (the scene you write must fit it): ${FLYER_STYLE_DIRECTIONS[args.style]}`
-      : "",
+    perVariantStyles
+      ? [
+          "DESIGN DIRECTION PER VARIANT (write each variant's scene to fit its own direction, in this order):",
+          ...perVariantStyles.map(
+            (id, i) =>
+              `  Variant ${i + 1}: ${id ? FLYER_STYLE_DIRECTIONS[id] : "Brand colors, no preset direction."}`,
+          ),
+        ].join("\n")
+      : args.style
+        ? `DESIGN DIRECTION (the scene you write must fit it): ${FLYER_STYLE_DIRECTIONS[args.style]}`
+        : "",
     args.brief ? `CREATIVE BRIEF FROM THE USER (follow it): ${args.brief}` : "",
     ...emailLines,
     ...rejectionLines,
     "",
-    "Call save_flyer_copy with the flyer copy, caption, and scene.",
+    `Call save_flyer_variants with ${variants.count} complete variants.`,
   ]
     .filter(Boolean)
     .join("\n");
 
   return { system, user };
+}
+
+/** Em-dash stripping + trimming across every text field, like the other pipelines. */
+export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
+  // Flyer copy is painted onto an image and posted as a caption: markdown the
+  // model slipped in would render as literal asterisks either way.
+  const plain = (text: string) => stripMarkdown(stripEmDashes(text));
+  return {
+    headline: plain(out.headline.trim()),
+    subtext: out.subtext?.trim() ? plain(out.subtext.trim()) : undefined,
+    cta: out.cta?.trim() ? plain(out.cta.trim()) : undefined,
+    caption: plain(out.caption.trim()),
+    hashtags: (out.hashtags ?? [])
+      .map((h) => h.trim())
+      .filter(Boolean)
+      .map((h) => (h.startsWith("#") ? h : `#${h}`)),
+    scene: plain(out.scene.trim()),
+  };
+}
+
+/**
+ * Reads save_flyer_variants input: drops any variant missing a required field,
+ * cleans the rest, and caps at `count`. Fewer than asked is fine (fewer
+ * options); none at all is the caller's retry signal, so it returns [].
+ */
+export function parseFlyerVariants(input: unknown, count: number): FlyerCopyOutput[] {
+  const raw = (input as { variants?: unknown } | null)?.variants;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((v): v is FlyerCopyOutput => {
+      const c = v as Partial<FlyerCopyOutput> | null;
+      return Boolean(c?.headline?.trim() && c.caption?.trim() && c.scene?.trim());
+    })
+    .slice(0, count)
+    .map(cleanFlyerCopy);
 }
 
 /**

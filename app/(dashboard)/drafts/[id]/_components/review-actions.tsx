@@ -289,6 +289,11 @@ export function ReviewActions({
   const hasUnsupportedSpecifics = (seoData.unsupported_specifics?.length ?? 0) > 0;
 
   const subjectVariants = initialMeta.email_copy?.subject_variants ?? [];
+  // The two angles the strategy step proposed but didn't write, offered in the
+  // reject sheet as a no-typing rewrite.
+  const alternateAngles = (initialMeta.angles?.angles ?? [])
+    .map((angle, index) => ({ angle, index }))
+    .filter(({ index }) => index !== initialMeta.angles?.chosen_index);
   const draftCostUsd = initialMeta.usage?.estimated_usd ?? 0;
   const designLabel = [
     initialMeta.email_style_variant ? STYLE_LABELS[initialMeta.email_style_variant] : null,
@@ -368,11 +373,14 @@ export function ReviewActions({
 
   function handleReject() {
     if (!feedback.trim()) return;
+    startRegenerate({ feedback });
+  }
+
+  function startRegenerate(body: { feedback?: string; angleIndex?: number }) {
     // Close the sheet and clear its state immediately, before the request
     // even resolves, so you're never trapped watching a spinner in a modal.
     // The regeneration keeps running server-side; this page just shows a
     // small non-blocking status you can ignore, watch, or navigate away from.
-    const sentFeedback = feedback;
     setShowReject(false);
     setFeedback("");
     setRejectedThisDraft(true);
@@ -385,7 +393,7 @@ export function ReviewActions({
         const res = await fetch(`/api/drafts/${draftId}/reject`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ feedback: sentFeedback }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
@@ -1355,6 +1363,33 @@ export function ReviewActions({
           </div>
         }
       >
+        {alternateAngles.length > 0 && !atCap && (
+          <div className="mb-5">
+            <p className="text-[13px] font-medium text-foreground">
+              Or try a different angle
+            </p>
+            <p className="mt-0.5 text-xs text-muted">
+              Same topic, rewritten around another idea from the strategy step.
+              Nothing to type.
+            </p>
+            <div className="mt-2 space-y-2">
+              {alternateAngles.map(({ angle, index }) => (
+                <div key={index} className="rounded-xl border border-border p-3">
+                  <p className="text-sm font-medium text-foreground">{angle.hook}</p>
+                  <p className="mt-1 text-xs text-muted">{angle.why_it_works}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => startRegenerate({ angleIndex: index })}
+                  >
+                    Try this angle
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Field
           label="What needs to change?"
           hint="Content or design, both work: tighten the copy, use bolder colors, more whitespace, a different tone, whatever you want different."

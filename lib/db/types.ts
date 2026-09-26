@@ -107,6 +107,9 @@ export interface VisualIdentity {
   fonts?: BrandFonts;
   footer?: BrandFooter;
   image_gen?: ImageGenPrefs;
+  /** Runs the Opus design critique after QA on model-designed emails. Off
+   * unless set: it's the slowest, most expensive step in email generation. */
+  design_critique?: boolean;
 }
 
 // ── Positioning: context the generation prompt reads to sharpen copy ────────
@@ -793,6 +796,17 @@ export interface FlyerCopy {
   hashtags?: string[];
 }
 
+/** One option from a multi-variant flyer generation (meta.flyer_variants). */
+export interface FlyerVariant {
+  /** Absent when an uploaded style reference drove the look. */
+  style?: FlyerStyleId;
+  copy: FlyerCopy;
+  scene: string;
+  image: ContentImage;
+  /** True once this option was re-rendered on the pro image tier. */
+  finalized?: boolean;
+}
+
 /** How a reference image is used: "style" borrows the look loosely (the
  * default, the original migration-014 flyer behavior); "recreate" rebuilds the
  * reference's actual layout/composition with our own text and brand. */
@@ -983,6 +997,15 @@ export interface DraftMeta {
   // the RESOLVED style (an explicit pick or the varied-rotation result), so
   // regenerations keep the same look instead of re-rolling.
   flyer_style?: FlyerStyleId;
+  // Every option a generation rendered (preview tier), so the reviewer can
+  // pick one without paying for another render. The picked one is mirrored
+  // into flyer_copy/flyer_image/flyer_scene/flyer_style, which is what
+  // approve, download and the drafts list read.
+  flyer_variants?: FlyerVariant[];
+  // Which flyer_variants entry is mirrored right now. Cleared when the design
+  // is replaced by an edit-sheet render or an upload, since it then matches
+  // none of them.
+  flyer_variant_index?: number;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation
   // calls assign distinct style/layout by index (rotation.length-cycle),

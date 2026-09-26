@@ -16,8 +16,10 @@ import {
 } from "@/components/ui";
 import { DownloadIcon } from "@/components/ui/icons";
 import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
+import { cn } from "@/lib/cn";
+import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
-import type { DraftMeta, FlyerAspect } from "@/lib/db/types";
+import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { FlyerSheet } from "./flyer-sheet";
 
 interface FlyerReviewActionsProps {
@@ -26,6 +28,8 @@ interface FlyerReviewActionsProps {
   state: string;
   initialMeta: DraftMeta;
   initialArchived: boolean;
+  /** Estimated cost of one pro-tier render, for the Finalize in Pro hint. */
+  proRenderUsd: number;
 }
 
 // Preview box aspect classes, keyed by meta.flyer_aspect. Static strings so
@@ -49,6 +53,7 @@ export function FlyerReviewActions({
   state: initialState,
   initialMeta,
   initialArchived,
+  proRenderUsd,
 }: FlyerReviewActionsProps) {
   const router = useRouter();
   const toast = useToast();
@@ -73,6 +78,10 @@ export function FlyerReviewActions({
   const [aspect, setAspect] = useState<FlyerAspect>(
     initialMeta.flyer_aspect ?? "1:1",
   );
+  const [variants, setVariants] = useState(initialMeta.flyer_variants ?? []);
+  const [variantIndex, setVariantIndex] = useState(initialMeta.flyer_variant_index);
+  const [picking, setPicking] = useState<number | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [captionOpen, setCaptionOpen] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
@@ -87,7 +96,12 @@ export function FlyerReviewActions({
   const atCap = version >= MAX_DRAFT_VERSIONS;
   const isActionable = state === "in_review";
   const isApproved = state === "approved";
-  const busy = approving || archiving || regenerating;
+  const busy = approving || archiving || regenerating || finalizing || picking !== null;
+  const currentVariant =
+    variantIndex !== undefined ? variants[variantIndex] : undefined;
+  // With a fixed preset every option shares one style, so its name can't
+  // tell them apart.
+  const stylesDiffer = new Set(variants.map((v) => v.style)).size > 1;
   const rejectDisabledReason = atCap
     ? `Max revisions (${MAX_DRAFT_VERSIONS}) reached.`
     : rejectedThisDraft
@@ -165,6 +179,63 @@ export function FlyerReviewActions({
         setRegenerating(false);
       }
     })();
+  }
+
+  async function postFlyer(form: FormData, failMessage: string) {
+    const res = await fetch(`/api/drafts/${draftId}/flyer`, {
+      method: "POST",
+      body: form,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      image?: ContentImage;
+      copy?: FlyerCopy;
+      error?: string;
+    };
+    if (!res.ok || !data.image) throw new Error(data.error ?? failMessage);
+    return { image: data.image, copy: data.copy };
+  }
+
+  async function handlePick(index: number) {
+    setPicking(index);
+    try {
+      const form = new FormData();
+      form.set("mode", "pick");
+      form.set("index", String(index));
+      const result = await postFlyer(form, "Couldn't switch options.");
+      setImage(result.image);
+      if (result.copy) setCopy(result.copy);
+      setVariantIndex(index);
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't switch options.");
+    } finally {
+      setPicking(null);
+    }
+  }
+
+  async function handleFinalize() {
+    if (variantIndex === undefined) return;
+    const index = variantIndex;
+    setFinalizing(true);
+    try {
+      const form = new FormData();
+      form.set("mode", "generate");
+      form.set("tier", "pro");
+      const result = await postFlyer(form, "Couldn't finalize the flyer.");
+      setImage(result.image);
+      if (result.copy) setCopy(result.copy);
+      setVariants((prev) =>
+        prev.map((v, i) =>
+          i === index ? { ...v, image: result.image, finalized: true } : v,
+        ),
+      );
+      toast.success("Finalized in Pro quality.");
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't finalize the flyer.");
+    } finally {
+      setFinalizing(false);
+    }
   }
 
   async function handleSaveCaption() {
@@ -245,7 +316,23 @@ export function FlyerReviewActions({
       {/* The flyer, at its real post shape. */}
       <Card className="p-5">
         {isActionable && (
-          <div className="mb-3 flex items-center justify-end">
+          <div className="mb-3 flex items-center justify-end gap-4">
+            {currentVariant && !currentVariant.finalized && (
+              <Tooltip
+                label={`Re-renders this option once at the highest quality, about $${proRenderUsd.toFixed(2)}.`}
+                side="top"
+              >
+                <Button
+                  variant="gradient"
+                  size="sm"
+                  loading={finalizing}
+                  disabled={busy}
+                  onClick={() => void handleFinalize()}
+                >
+                  Finalize in Pro
+                </Button>
+              </Tooltip>
+            )}
             <button
               type="button"
               onClick={() => setSheetOpen(true)}
@@ -278,6 +365,56 @@ export function FlyerReviewActions({
             </div>
           )}
         </div>
+
+        {/* The other options from this generation. Switching is free: they're
+            already rendered. */}
+        {isActionable && variants.length > 1 && (
+          <div className="mx-auto mt-4 w-full max-w-[420px]">
+            <p className="mb-2 text-[12px] text-muted">
+              {variants.length} options. Switching between them is free.
+            </p>
+            <div className="grid grid-cols-4 gap-2">
+              {variants.map((v, i) => {
+                const selected = i === variantIndex;
+                const label =
+                  (stylesDiffer &&
+                    FLYER_STYLE_CATALOG.find((s) => s.id === v.style)?.label) ||
+                  `Option ${i + 1}`;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={`Use ${label}`}
+                    disabled={busy || selected}
+                    onClick={() => void handlePick(i)}
+                    className="text-left disabled:cursor-default"
+                  >
+                    <div
+                      className={cn(
+                        ASPECT_CLASS[aspect],
+                        "w-full overflow-hidden rounded-lg border-2 bg-surface-2 transition-colors",
+                        selected ? "border-accent" : "border-border hover:border-muted",
+                        picking === i && "animate-pulse",
+                      )}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={v.image.url}
+                        alt={v.image.alt}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                    <span className="mt-1 block truncate text-[11px] text-muted">
+                      {label}
+                      {v.finalized && <span className="text-accent"> Pro</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Post caption: what gets pasted next to the image on FB/IG. */}
@@ -348,8 +485,8 @@ export function FlyerReviewActions({
           {regenerating && (
             <p className="flex items-center gap-2.5 text-sm text-muted">
               <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-              Designing the new version in the background, feel free to leave
-              this page. Usually about a minute.
+              Designing new flyer options in the background, feel free to
+              leave this page. Usually about a minute.
             </p>
           )}
           {!regenerating && newDraftId && (
@@ -517,6 +654,8 @@ export function FlyerReviewActions({
           setImage(newImage);
           setCopy(newCopy);
           setAspect(newAspect);
+          // A custom render or upload matches none of the options anymore.
+          setVariantIndex(undefined);
           router.refresh();
         }}
       />

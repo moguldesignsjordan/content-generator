@@ -91,6 +91,7 @@ export function VisualIdentityForm({
   const [brandPalette, setBrandPalette] = useState<BrandPalettePref>(
     vi.image_gen?.brand_palette ?? "auto",
   );
+  const [designCritique, setDesignCritique] = useState(vi.design_critique === true);
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,6 +147,7 @@ export function VisualIdentityForm({
               brand_palette: brandPalette,
               model: imageModel,
             },
+            design_critique: designCritique,
           },
         }),
       });
@@ -391,6 +393,26 @@ export function VisualIdentityForm({
             </Select>
           </Field>
         </div>
+      </div>
+
+      {/* Email design review */}
+      <div>
+        <Label>Email design review</Label>
+        <p className="-mt-1 mb-2 text-xs text-muted">
+          An extra pass by our most capable model that fixes layout problems
+          before you see the draft. Makes each email slower and noticeably more
+          expensive to generate.
+        </p>
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <Checkbox
+            size="sm"
+            checked={designCritique}
+            onChange={(e) => setDesignCritique(e.target.checked)}
+          />
+          <span className="text-sm text-foreground">
+            Run a deep design review on every new email
+          </span>
+        </label>
       </div>
 
       {/* Social */}

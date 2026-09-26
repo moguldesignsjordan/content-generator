@@ -70,6 +70,7 @@ import {
   resolveBrandPalette,
 } from "@/prompts/generate-image";
 import { chosenAngle, pickAngle } from "./pick-angle";
+import { switchAngle } from "@/prompts/pick-angle";
 import { critiqueDesign } from "./critique-design";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { MAX_DRAFT_VERSIONS } from "./constants";
@@ -256,17 +257,21 @@ export async function generateEmailForTopicStreamed(
     }
 
     // Last look at the finished design, after QA has settled the copy so the
-    // critique judges the markup that will actually ship.
-    const polishing = { phase: "polishing", label: "Polishing the design" };
-    await patchDraftGeneration(draftId, polishing);
-    onEvent({ type: "phase", ...polishing });
-    const critique = await critiqueDesign({
-      html: content.html,
-      designBrief,
-      designSource,
-      brandId: ctx.brand.id,
-    });
-    if (critique) content.html = critique.html;
+    // critique judges the markup that will actually ship. Opt-in per brand:
+    // it's an Opus call and the slowest step here.
+    let critique: Awaited<ReturnType<typeof critiqueDesign>> = null;
+    if (ctx.brand.visual_identity?.design_critique && designSource === "model") {
+      const polishing = { phase: "polishing", label: "Polishing the design" };
+      await patchDraftGeneration(draftId, polishing);
+      onEvent({ type: "phase", ...polishing });
+      critique = await critiqueDesign({
+        html: content.html,
+        designBrief,
+        designSource,
+        brandId: ctx.brand.id,
+      });
+      if (critique) content.html = critique.html;
+    }
 
     usageDeltas.push(...qa.usageDeltas);
     if (angleResult) usageDeltas.push(...angleResult.usageDeltas);
@@ -930,7 +935,12 @@ async function reviseForQa(args: {
 export async function regenerateEmailDraft(
   draftId: string,
   feedback: string,
-  opts: { templateOverride?: EmailTemplateId } = {},
+  opts: {
+    templateOverride?: EmailTemplateId;
+    /** Rewrite around another of the draft's stored angles (meta.angles)
+     * instead of the one it was built on. Still no fresh angle call. */
+    angleIndex?: number;
+  } = {},
 ): Promise<{ newDraftId: string } | { capped: true } | { notInReview: true }> {
   const draftCtx = await getDraftWithJobContext(draftId);
   if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
@@ -961,7 +971,11 @@ export async function regenerateEmailDraft(
   // opts.templateOverride (the reviewer picked a different layout in the UI)
   // still wins over the stored one. Only a FRESH generation rotates.
   const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
-  const storedAngle = chosenAngle(draftCtx.meta.angles);
+  const angles =
+    (opts.angleIndex !== undefined
+      ? switchAngle(draftCtx.meta.angles, opts.angleIndex)
+      : null) ?? draftCtx.meta.angles;
+  const storedAngle = chosenAngle(angles);
   const { system, user, emailType, templateId, styleId, lengthTarget } =
     buildEmailMessages(ctx, tokens, {
       brief,
@@ -1037,7 +1051,7 @@ export async function regenerateEmailDraft(
     email_design_source: designSource,
     // Carried forward so the new version remembers the strategy it was written
     // against, the same way it carries its layout and style.
-    ...(draftCtx.meta.angles ? { angles: draftCtx.meta.angles } : {}),
+    ...(angles ? { angles } : {}),
     ...(heroImage ? { hero_image: heroImage } : {}),
     usage,
   };

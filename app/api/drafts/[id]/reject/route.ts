@@ -5,6 +5,7 @@ import { regenerateFlyerDraft } from "@/lib/pipeline/generate-flyer";
 import { guardDraftAiRoute } from "@/lib/ai-guard";
 import { requireDraftInBrand } from "@/lib/draft-access";
 import type { EmailTemplateId } from "@/lib/db/types";
+import { switchAngle } from "@/prompts/pick-angle";
 import { logError } from "@/lib/log";
 
 // Regeneration runs the same write + QA + revise + critique sequence as a
@@ -27,21 +28,39 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { feedback, templateOverride } = (await req.json()) as {
+    const body = (await req.json()) as {
       feedback?: string;
       templateOverride?: string;
+      angleIndex?: number;
     };
+    const { templateOverride, angleIndex } = body;
+    let feedback = body.feedback?.trim();
 
-    if (!feedback?.trim()) {
+    const access = await requireDraftInBrand(id);
+    if (!access.ok) return access.response;
+    const draftCtx = access.draft;
+
+    // "Try this angle" (email only): the switch itself is the feedback, so
+    // none needs typing.
+    if (angleIndex !== undefined) {
+      const switched =
+        draftCtx.jobType === "email" ? switchAngle(draftCtx.meta.angles, angleIndex) : null;
+      if (!switched) {
+        return NextResponse.json(
+          { error: "That angle isn't available for this draft." },
+          { status: 400 },
+        );
+      }
+      feedback ||=
+        `Rewrite this email around a different angle: ${switched.angles[angleIndex].hook}`;
+    }
+
+    if (!feedback) {
       return NextResponse.json(
         { error: "Feedback is required to regenerate." },
         { status: 400 },
       );
     }
-
-    const access = await requireDraftInBrand(id);
-    if (!access.ok) return access.response;
-    const draftCtx = access.draft;
 
     // A regenerate is a full second generation: the most expensive metered call
     // in the app, and until now the only one with no guard in front of it.
@@ -54,12 +73,12 @@ export async function POST(
     }
 
     if (draftCtx.jobType === "blog") {
-      const result = await regenerateBlogDraft(id, feedback.trim());
+      const result = await regenerateBlogDraft(id, feedback);
       return NextResponse.json(result);
     }
 
     if (draftCtx.jobType === "social") {
-      const result = await regenerateFlyerDraft(id, feedback.trim());
+      const result = await regenerateFlyerDraft(id, feedback);
       return NextResponse.json(result);
     }
 
@@ -67,8 +86,9 @@ export async function POST(
       ? (templateOverride as EmailTemplateId)
       : undefined;
 
-    const result = await regenerateEmailDraft(id, feedback.trim(), {
+    const result = await regenerateEmailDraft(id, feedback, {
       templateOverride: override,
+      angleIndex,
     });
     return NextResponse.json(result);
   } catch (err) {

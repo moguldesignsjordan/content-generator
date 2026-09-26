@@ -8,10 +8,9 @@ export const DRAFT_MODEL = "claude-sonnet-5";
 
 /**
  * The "Opus for hard pieces" tier the architecture always specified: reserved
- * for the judgment calls, not the volume work. Choosing an angle and critiquing
- * a design are one-shot decisions that shape an entire draft, so they're worth
- * an Opus call each; drafting stays on DRAFT_MODEL, which runs on every
- * generation and every retry.
+ * for the judgment calls, not the volume work. Today that's the design
+ * critique, which only runs when a brand opts into it (Settings, "Deep design
+ * review"); drafting and angle selection stay on DRAFT_MODEL.
  */
 export const HARD_MODEL = "claude-opus-5";
 

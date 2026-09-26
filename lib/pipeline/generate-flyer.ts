@@ -29,13 +29,15 @@ import { buildBrandVoiceBlock, buildGuidelinesBlock } from "@/prompts/brand-voic
 import {
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
-  FLYER_COPY_TOOL,
+  FLYER_VARIANT_COUNT,
+  FLYER_VARIANTS_TOOL,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
-  pickVariedFlyerStyle,
+  parseFlyerVariants,
+  resolveVariantStyles,
   type FlyerCopyOutput,
 } from "@/prompts/generate-flyer";
-import { stripEmDashes, stripMarkdown } from "@/lib/text";
+import { stripEmDashes } from "@/lib/text";
 import type {
   ContentImage,
   DraftMeta,
@@ -44,6 +46,7 @@ import type {
   FlyerAspect,
   FlyerCopy,
   FlyerStyleId,
+  FlyerVariant,
   TopicContext,
 } from "@/lib/db/types";
 import { MAX_DRAFT_VERSIONS } from "./constants";
@@ -52,9 +55,11 @@ import type { GenerationEvent } from "./generate";
 import { logError, logImageUsage, logWarn } from "@/lib/log";
 
 // Social flyer generation (content_jobs.type='social'): one FAST_MODEL call
-// writes the flyer copy + scene, one Gemini call renders the designed graphic
-// (text typeset in the image), sharp fits it to the exact post shape, and the
-// result is hosted next to hero images on the content-images bucket. The
+// writes FLYER_VARIANT_COUNT alternative flyers (copy + scene, each fitted to
+// its own design direction), Gemini renders each on the cheap preview tier in
+// parallel (text typeset in the image), sharp fits them to the exact post
+// shape, and they're hosted next to hero images on the content-images bucket.
+// The reviewer picks one and can re-render just that one on the pro tier. The
 // human approval gate covers the output like every other draft kind.
 
 /**
@@ -81,12 +86,12 @@ export async function generateFlyerForTopicStreamed(
     if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
     const meta = draftCtx.meta;
     const aspect: FlyerAspect = meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT;
-    // Explicit preset → keep it; uploaded reference → no preset (the
-    // reference IS the style); neither → varied per-draft rotation, same
-    // "never the same recipe twice" default hero images got.
-    const style: FlyerStyleId | undefined =
-      meta.flyer_style ??
-      (meta.style_reference_id ? undefined : pickVariedFlyerStyle(draftId));
+    // Explicit preset → every option uses it; uploaded reference → no preset
+    // (the reference IS the style); neither → a distinct look per option.
+    const styles = resolveVariantStyles(draftId, {
+      fixedStyle: meta.flyer_style,
+      hasReference: Boolean(meta.style_reference_id),
+    });
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
     await patchDraftGeneration(draftId, writing);
@@ -106,36 +111,38 @@ export async function generateFlyerForTopicStreamed(
     }
 
     const usageDeltas: UsageDelta[] = [];
-    const copy = await generateFlyerCopy(ctx, {
+    const copies = await generateFlyerVariants(ctx, {
       aspect,
       brief: meta.flyer_brief,
-      style,
+      style: meta.flyer_style,
+      styles,
       emailCopy,
       usageDeltas,
     });
 
-    const rendering = { phase: "image", label: "Designing the flyer" };
+    const rendering = {
+      phase: "image",
+      label: `Designing ${copies.length} flyer options`,
+    };
     await patchDraftGeneration(draftId, rendering);
     onEvent({ type: "phase", ...rendering });
 
-    const flyerImage = await renderFlyer(ctx, copy, {
+    const variants = await renderFlyerVariants(ctx, copies, styles, {
       aspect,
       styleReferenceId: meta.style_reference_id,
-      style,
       draftId,
       usageDeltas,
     });
+    const first = variants[0];
 
     let usage: DraftUsage | undefined;
     for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
 
     const nextMeta: DraftMeta = {
-      flyer_copy: toFlyerCopy(copy),
-      flyer_image: flyerImage,
+      ...mirrorVariant(first),
       flyer_aspect: aspect,
-      flyer_scene: copy.scene,
-      // The RESOLVED style, so regenerations keep this look, never re-roll.
-      ...(style ? { flyer_style: style } : {}),
+      flyer_variants: variants,
+      flyer_variant_index: 0,
       usage,
     };
 
@@ -143,8 +150,8 @@ export async function generateFlyerForTopicStreamed(
       // The EmailDraftContent shape keeps every list/approve/state code path
       // working; html stays empty because a flyer has no HTML body.
       content: {
-        subject: copy.headline,
-        preheader: copy.caption.slice(0, 120),
+        subject: first.copy.headline,
+        preheader: first.copy.caption.slice(0, 120),
         html: "",
       },
       meta: nextMeta,
@@ -193,11 +200,27 @@ export async function regenerateFlyerDraft(
     emailCopy = await getEmailCopyForDraft(meta.source_draft_id).catch(() => null);
   }
 
+  // flyer_style now holds whichever option was picked, so it only means "the
+  // user chose this preset" when every option shared it (or on a draft from
+  // before variants existed, where it was always the resolved preset).
+  const priorStyles = meta.flyer_variants?.map((v) => v.style);
+  const fixedStyle = priorStyles
+    ? new Set(priorStyles).size === 1
+      ? priorStyles[0]
+      : undefined
+    : meta.flyer_style;
+  // Seeded by the next version so a rejection re-rolls the looks too.
+  const styles = resolveVariantStyles(`${draftId}:${latestVersion + 1}`, {
+    fixedStyle,
+    hasReference: Boolean(meta.style_reference_id),
+  });
+
   const usageDeltas: UsageDelta[] = [];
-  const copy = await generateFlyerCopy(ctx, {
+  const copies = await generateFlyerVariants(ctx, {
     aspect,
     brief: meta.flyer_brief,
-    style: meta.flyer_style,
+    style: fixedStyle,
+    styles,
     emailCopy,
     usageDeltas,
     rejection: {
@@ -207,13 +230,13 @@ export async function regenerateFlyerDraft(
     },
   });
 
-  const flyerImage = await renderFlyer(ctx, copy, {
+  const variants = await renderFlyerVariants(ctx, copies, styles, {
     aspect,
     styleReferenceId: meta.style_reference_id,
-    style: meta.flyer_style,
     draftId,
     usageDeltas,
   });
+  const first = variants[0];
 
   let usage: DraftUsage | undefined;
   for (const delta of usageDeltas) usage = accumulateUsage(usage, delta);
@@ -222,20 +245,19 @@ export async function regenerateFlyerDraft(
     jobId: draftCtx.jobId,
     version: latestVersion + 1,
     content: {
-      subject: copy.headline,
-      preheader: copy.caption.slice(0, 120),
+      subject: first.copy.headline,
+      preheader: first.copy.caption.slice(0, 120),
       html: "",
     },
     meta: {
-      flyer_copy: toFlyerCopy(copy),
-      flyer_image: flyerImage,
+      ...mirrorVariant(first),
       flyer_aspect: aspect,
-      flyer_scene: copy.scene,
+      flyer_variants: variants,
+      flyer_variant_index: 0,
       ...(meta.flyer_brief ? { flyer_brief: meta.flyer_brief } : {}),
       ...(meta.style_reference_id
         ? { style_reference_id: meta.style_reference_id }
         : {}),
-      ...(meta.flyer_style ? { flyer_style: meta.flyer_style } : {}),
       ...(meta.source_draft_id ? { source_draft_id: meta.source_draft_id } : {}),
       usage,
     },
@@ -264,6 +286,9 @@ export async function regenerateFlyerImage(args: {
   /** Full final prompt override, sent verbatim (plus the style directive
    * when a reference is present). */
   exactPrompt?: string;
+  /** Concrete image model id; defaults to the brand's tier. The "Finalize in
+   * Pro" action passes the pro model. */
+  model?: string;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -290,9 +315,9 @@ export async function regenerateFlyerImage(args: {
         args.style,
       );
 
-  const imageModel = resolveImageModel(
-    args.ctx.brand.visual_identity?.image_gen?.model,
-  );
+  const imageModel =
+    args.model ??
+    resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model);
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: args.aspect,
@@ -350,6 +375,8 @@ async function renderFlyer(
     style?: FlyerStyleId;
     draftId: string;
     usageDeltas: UsageDelta[];
+    /** Concrete image model id; defaults to the brand's tier. */
+    model?: string;
   },
 ): Promise<ContentImage> {
   const reference = await loadStyleReference(opts.styleReferenceId, opts.draftId);
@@ -362,9 +389,8 @@ async function renderFlyer(
     opts.style,
   );
 
-  const imageModel = resolveImageModel(
-    ctx.brand.visual_identity?.image_gen?.model,
-  );
+  const imageModel =
+    opts.model ?? resolveImageModel(ctx.brand.visual_identity?.image_gen?.model);
   const rendered = await generateGeminiImage({
     prompt: finalPrompt,
     aspectRatio: opts.aspect,
@@ -403,6 +429,64 @@ async function renderFlyer(
     height: optimized.height,
     style: "illustration",
     prompt: finalPrompt,
+  };
+}
+
+/**
+ * Renders every option in parallel on the lite (preview) tier. A failed
+ * render just means one fewer option; only all of them failing is an error.
+ * Usage is recorded per successful render, so a failure isn't billed.
+ */
+async function renderFlyerVariants(
+  ctx: TopicContext,
+  copies: FlyerCopyOutput[],
+  styles: (FlyerStyleId | undefined)[],
+  opts: {
+    aspect: FlyerAspect;
+    styleReferenceId?: string;
+    draftId: string;
+    usageDeltas: UsageDelta[];
+  },
+): Promise<FlyerVariant[]> {
+  const model = resolveImageModel("lite");
+  const results = await Promise.allSettled(
+    copies.map((copy, i) =>
+      renderFlyer(ctx, copy, { ...opts, style: styles[i], model }),
+    ),
+  );
+
+  const variants: FlyerVariant[] = [];
+  results.forEach((result, i) => {
+    if (result.status === "rejected") {
+      logError("pipeline:generate-flyer:variant-render", result.reason, {
+        draftId: opts.draftId,
+      });
+      return;
+    }
+    variants.push({
+      ...(styles[i] ? { style: styles[i] } : {}),
+      copy: toFlyerCopy(copies[i]),
+      scene: copies[i].scene,
+      image: result.value,
+    });
+  });
+
+  if (variants.length === 0) {
+    const firstFailure = results.find((r) => r.status === "rejected");
+    throw firstFailure?.status === "rejected" && firstFailure.reason instanceof Error
+      ? firstFailure.reason
+      : new Error("Couldn't render the flyer. Try again.");
+  }
+  return variants;
+}
+
+/** The meta fields approve, download and the drafts list read, from one option. */
+function mirrorVariant(variant: FlyerVariant): Partial<DraftMeta> {
+  return {
+    flyer_copy: variant.copy,
+    flyer_image: variant.image,
+    flyer_scene: variant.scene,
+    ...(variant.style ? { flyer_style: variant.style } : {}),
   };
 }
 
@@ -447,15 +531,20 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
 }
 
 /**
- * The copy + scene call: forced tool use with one retry, the same reliability
- * pattern as generateBlogCopy. Cheap (FAST_MODEL, short output).
+ * The copy + scene call for every option at once: forced tool use with one
+ * retry, the same reliability pattern as generateBlogCopy. One call instead of
+ * one per option: the brand voice/guidelines input is the bulk of the tokens,
+ * and this way it's paid once.
  */
-async function generateFlyerCopy(
+async function generateFlyerVariants(
   ctx: TopicContext,
   opts: {
     aspect: FlyerAspect;
     brief?: string;
+    /** A preset every option shares, when the user picked one. */
     style?: FlyerStyleId;
+    /** One entry per option to generate, by position. */
+    styles: (FlyerStyleId | undefined)[];
     emailCopy: EmailCopy | null;
     usageDeltas: UsageDelta[];
     rejection?: {
@@ -464,7 +553,8 @@ async function generateFlyerCopy(
       previousCaption?: string;
     };
   },
-): Promise<FlyerCopyOutput> {
+): Promise<FlyerCopyOutput[]> {
+  const count = opts.styles.length || FLYER_VARIANT_COUNT;
   const { system, user } = buildFlyerCopyMessages({
     brandName: ctx.brand.name,
     voiceBlock: buildBrandVoiceBlock(ctx.brand, ctx.primaryIcp, "social"),
@@ -475,16 +565,17 @@ async function generateFlyerCopy(
     style: opts.style,
     emailCopy: opts.emailCopy ?? undefined,
     rejection: opts.rejection,
+    variants: { count, styles: opts.styles },
   });
 
-  const call = async (label: string): Promise<FlyerCopyOutput> => {
+  const call = async (label: string): Promise<FlyerCopyOutput[]> => {
     const response = await getAnthropic().messages.create({
       model: FAST_MODEL,
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],
-      tools: [FLYER_COPY_TOOL],
-      tool_choice: { type: "tool", name: "save_flyer_copy" },
+      tools: [FLYER_VARIANTS_TOOL],
+      tool_choice: { type: "tool", name: "save_flyer_variants" },
     });
     logUsage(label, FAST_MODEL, response.usage, {
       brandId: ctx.brand.id,
@@ -494,16 +585,14 @@ async function generateFlyerCopy(
     opts.usageDeltas.push({ model: FAST_MODEL, ...response.usage });
 
     const tu = response.content.find(
-      (b) => b.type === "tool_use" && b.name === "save_flyer_copy",
+      (b) => b.type === "tool_use" && b.name === "save_flyer_variants",
     );
-    if (!tu || tu.type !== "tool_use") {
+    const variants =
+      tu && tu.type === "tool_use" ? parseFlyerVariants(tu.input, count) : [];
+    if (variants.length === 0) {
       throw new Error("Couldn't come up with flyer copy. Try again.");
     }
-    const out = tu.input as Partial<FlyerCopyOutput>;
-    if (!out.headline?.trim() || !out.caption?.trim() || !out.scene?.trim()) {
-      throw new Error("Couldn't come up with flyer copy. Try again.");
-    }
-    return cleanFlyerCopy(out as FlyerCopyOutput);
+    return variants;
   };
 
   try {
@@ -512,24 +601,6 @@ async function generateFlyerCopy(
     logError("pipeline:generate-flyer:copy", err);
     return await call("flyer-copy-retry");
   }
-}
-
-/** Em-dash stripping + trimming across every text field, like the other pipelines. */
-function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
-  // Flyer copy is painted onto an image and posted as a caption: markdown the
-  // model slipped in would render as literal asterisks either way.
-  const plain = (text: string) => stripMarkdown(stripEmDashes(text));
-  return {
-    headline: plain(out.headline.trim()),
-    subtext: out.subtext?.trim() ? plain(out.subtext.trim()) : undefined,
-    cta: out.cta?.trim() ? plain(out.cta.trim()) : undefined,
-    caption: plain(out.caption.trim()),
-    hashtags: (out.hashtags ?? [])
-      .map((h) => h.trim())
-      .filter(Boolean)
-      .map((h) => (h.startsWith("#") ? h : `#${h}`)),
-    scene: plain(out.scene.trim()),
-  };
 }
 
 /**

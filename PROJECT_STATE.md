@@ -7,7 +7,11 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-07-30 (MailerLite webhooks: performance is now push-driven,
+Last updated: 2026-09-26 (flyer options + cheaper emails + angle switching.
+Typecheck + 552 tests + build green; UNCOMMITTED, no browser click-through
+yet. See session below.)
+
+Previously: 2026-07-30 (MailerLite webhooks: performance is now push-driven,
 not pull-only. `campaign.sent` flips the publication to sent and pulls the
 first snapshot; batched `campaign.open`/`campaign.click` trigger a 15-minute
 debounced refresh. Webhooks register themselves when the MailerLite connection
@@ -34,7 +38,36 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
-## Session 2026-07-30 (latest): MailerLite webhooks
+## Session 2026-09-26 (latest): flyer options, cheaper emails, angle switch
+
+Plan: `~/.claude/plans/lets-form-a-plan-serialized-quokka.md`. Jordan found it
+hard to get a good result in one shot and wanted lower API spend.
+
+- **Flyers render 4 options per click.** One Haiku call writes 4 distinct
+  flyers (`save_flyer_variants`), each with its own style preset (a fixed
+  preset or an uploaded reference applies to all 4). All 4 render in parallel
+  on the **lite** tier; a failed render just drops that option. Stored on
+  `meta.flyer_variants` (jsonb, no migration); the picked one is mirrored into
+  `flyer_copy`/`flyer_image`/`flyer_scene`/`flyer_style` so approve/download
+  are unchanged. Switching options is free (`pick` mode on the flyer route);
+  "Finalize in Pro" re-renders only the picked option on the pro tier.
+- **Emails: no Opus by default.** The angle step moved to Sonnet at `high`
+  effort. The Opus design critique is opt-in per brand
+  (`visual_identity.design_critique`, Settings > Email design review), off
+  unless ticked. Savings not measured yet: compare `/logs` before/after.
+- **"Try another angle"** in the email reject sheet rewrites around one of the
+  two stored, unchosen angles (`angleIndex` on the reject route), no typing
+  and no new angle call.
+- **Migrations 020, 021, 026 and 028 are all applied** (verified 2026-09-26
+  against the live DB). The "NOT applied" notes in older entries below are
+  stale.
+- Still open: browser click-through. `.env.local` here came from
+  `vercel env pull --environment=production`, which can't pull Vercel
+  "Secret" values: the Supabase URL/service key, Anthropic and Gemini keys are
+  `[SENSITIVE]` placeholders until Jordan fills them in by hand.
+  `PUBLIC_APP_URL` was added to Vercel production.
+
+## Session 2026-07-30: MailerLite webhooks
 
 - Receiver at `/api/webhooks/mailerlite/[token]`. No session auth: the `token`
   path segment selects which brand's signing secret to use (you can't verify a

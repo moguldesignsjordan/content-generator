@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildChosenAngleBlock } from "./angle";
-import { buildPerformanceBlock } from "./pick-angle";
+import { buildPerformanceBlock, switchAngle } from "./pick-angle";
 import type { TopPerformingEmail } from "@/lib/db/types";
 
 const angle = {
@@ -51,5 +51,32 @@ describe("buildPerformanceBlock", () => {
 
   it("frames past winners as evidence, never as copy to reuse", () => {
     expect(buildPerformanceBlock(top)).toContain("never reuse the wording");
+  });
+});
+
+describe("switchAngle", () => {
+  const output = {
+    angles: [angle, { ...angle, hook: "Second hook" }, { ...angle, hook: "Third hook" }],
+    chosen_index: 0,
+    choice_reason: "First is sharpest.",
+  };
+
+  it("makes the requested alternative the chosen angle and keeps all three", () => {
+    const switched = switchAngle(output, 2);
+    expect(switched?.chosen_index).toBe(2);
+    expect(switched?.angles).toEqual(output.angles);
+    expect(switched?.choice_reason).toBe("Picked by the reviewer.");
+  });
+
+  it("rejects the already-chosen angle, out-of-range and non-integer indexes", () => {
+    expect(switchAngle(output, 0)).toBeNull();
+    expect(switchAngle(output, 3)).toBeNull();
+    expect(switchAngle(output, -1)).toBeNull();
+    expect(switchAngle(output, 1.5)).toBeNull();
+  });
+
+  it("returns null for a draft with no stored angles", () => {
+    expect(switchAngle(undefined, 1)).toBeNull();
+    expect(switchAngle(null, 1)).toBeNull();
   });
 });
