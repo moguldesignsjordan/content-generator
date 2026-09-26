@@ -64,7 +64,7 @@ export default async function CampaignsPage() {
         title="Campaigns"
         subtitle="Every campaign, newest first. Open one to jump into its emails."
         actions={
-          <LinkButton href="/campaigns/new" variant="gradient" size="sm">
+          <LinkButton href="/" variant="gradient" size="sm">
             New campaign
           </LinkButton>
         }

@@ -117,13 +117,10 @@ export function Chat({ brandId, initialMessages, alreadyComplete }: ChatProps) {
               Your brand profile is ready. Let&apos;s put it to work.
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <LinkButton href="/" variant="subtle" size="sm">
-                Dashboard
-              </LinkButton>
               <LinkButton href="/settings/brand-guidelines" variant="subtle" size="sm">
                 Create your brand guidelines →
               </LinkButton>
-              <LinkButton href="/campaigns/new" variant="gradient" size="sm">
+              <LinkButton href="/" variant="gradient" size="sm">
                 Generate your first email
               </LinkButton>
             </div>

@@ -7,9 +7,12 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-09-26 (flyer options + cheaper emails + angle switching.
-Typecheck + 552 tests + build green; UNCOMMITTED, no browser click-through
-yet. See session below.)
+Last updated: 2026-09-26 (simpler, connected create flow. Typecheck + 552
+tests + build green; UNCOMMITTED, no browser click-through yet. See session
+below.)
+
+Previously: 2026-09-26 (flyer options + cheaper emails + angle switching.
+Committed as 83f007b.)
 
 Previously: 2026-07-30 (MailerLite webhooks: performance is now push-driven,
 not pull-only. `campaign.sent` flips the publication to sent and pulls the
@@ -38,7 +41,32 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
-## Session 2026-09-26 (latest): flyer options, cheaper emails, angle switch
+## Session 2026-09-26 (latest): simpler, connected create flow
+
+Plan: `~/.claude/plans/i-want-to-make-zany-whale.md`. Jordan found the app
+hard to use and disconnected, and wanted simpler questions with better
+suggestions.
+
+- **One front door.** The Home chat is the only place to start content. Nav
+  "Create" now points at `/` (Home item dropped). The old Create page is now
+  **Content plan** at `/plan` (topic tree only). `/create` and
+  `/campaigns/new` redirect to `/`. The 20-field campaign form,
+  `QuickGenerate`, and `/api/campaigns/start` are deleted.
+- **Guided chat asks 3 questions, not 14.** Email: what it's about, what
+  readers should do, confirm. The agent fills audience, tone, length,
+  picture, and subject line itself and names them in the recap. Proof is
+  still never invented; the confirm step offers "Add a real result first"
+  when it's empty. Campaigns: kind, one kind-specific question, count.
+  Images: what it says, shape.
+- **Brief card**: Length and Picture are tap chips; Hook, Angle, Reader
+  belief, and Vibe sit behind "More details".
+- **Landing "Ideas for you" chips**: up to 3 queued topics plus "Another
+  like <best email>" from real open rates.
+- Still open: browser click-through (needs the real keys in `.env.local`).
+  Watch whether 3 questions gives thin drafts; if so, add back ONE question,
+  not the old list.
+
+## Session 2026-09-26: flyer options, cheaper emails, angle switch
 
 Plan: `~/.claude/plans/lets-form-a-plan-serialized-quokka.md`. Jordan found it
 hard to get a good result in one shot and wanted lower API spend.

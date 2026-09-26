@@ -1,6 +1,7 @@
 import type {
   Brand,
   CampaignBrief,
+  EmailLengthPreference,
   FunnelStage,
   Icp,
   Product,
@@ -39,6 +40,10 @@ export interface CreateBriefCard {
   hasProductPhoto: boolean;
   /** How many attached photos (brief.photo_urls) will be placed in the email. */
   photoCount: number;
+  /** Null means the brand's default length (voice_profile.email_length). */
+  length: EmailLengthPreference | null;
+  /** Null means the pipeline decides whether to add a picture. */
+  includeImage: boolean | null;
 }
 
 /**
@@ -95,6 +100,8 @@ export function buildBriefCard(args: {
     visualVibe: brief.visual_vibe ?? null,
     hasProductPhoto: Boolean(brief.product_photo_url),
     photoCount: brief.photo_urls?.length ?? 0,
+    length: brief.length ?? null,
+    includeImage: brief.include_image ?? null,
   };
 }
 

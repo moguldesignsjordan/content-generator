@@ -8,10 +8,14 @@ import {
   getBrandWithIcps,
   getLatestActiveCampaign,
   listProducts,
+  listTopPerformingEmails,
 } from "@/lib/db/queries";
 import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
 import { Card, LinkButton } from "@/components/ui";
-import { CreateAgent } from "./_components/create-agent";
+import {
+  CreateAgent,
+  type CreateAgentSuggestion,
+} from "./_components/create-agent";
 
 // Always read fresh from the DB; topics/drafts change as you work.
 export const dynamic = "force-dynamic";
@@ -66,12 +70,13 @@ export default async function DashboardPage() {
   }
 
   const { brand, pillars } = data;
-  const [withIcps, products, activeCampaign, scheduledAwaitingReview] =
+  const [withIcps, products, activeCampaign, scheduledAwaitingReview, topEmails] =
     await Promise.all([
       getBrandWithIcps(user.id).catch(() => null),
       listProducts(brand.id).catch(() => []),
       getLatestActiveCampaign(brand.id).catch(() => null),
       countScheduledAwaitingReview(brand.id).catch(() => 0),
+      listTopPerformingEmails(brand.id, 1).catch(() => []),
     ]);
   const allTopics = pillars.flatMap((p) =>
     p.clusters.flatMap((c) =>
@@ -83,6 +88,24 @@ export default async function DashboardPage() {
       })),
     ),
   );
+
+  // One-tap starters for the empty chat: the next queued topics from the
+  // content plan, plus "another like" the best-performing sent email.
+  const suggestions: CreateAgentSuggestion[] = pillars
+    .flatMap((p) => p.clusters.flatMap((c) => c.topics))
+    .filter((t) => !t.archived && t.status === "queued")
+    .slice(0, 3)
+    .map((t) => ({ label: t.title, text: `Write an email about "${t.title}"` }));
+  const best = topEmails[0];
+  if (best) {
+    suggestions.push({
+      label: `Another like "${best.subject}" (${Math.round(best.open_rate)}% opened)`,
+      text:
+        `Write a new email in the same spirit as my best performer, "${best.subject}" ` +
+        `(${Math.round(best.open_rate)}% opens, ${Math.round(best.click_rate)}% clicks). ` +
+        `It opened with: "${best.opening}". Same kind of hook, fresh topic.`,
+    });
+  }
 
   // Resume the create-agent thread on reload instead of starting blank, but
   // only when there's an actual conversation to resume.
@@ -129,7 +152,7 @@ export default async function DashboardPage() {
       {brand.onboarding_state?.completed !== true && <FinishSetupBanner />}
 
       {/* Create — the work surface. Quick actions + an animated type box. */}
-      <CreateAgent initial={createAgentInitial} />
+      <CreateAgent initial={createAgentInitial} suggestions={suggestions} />
 
       {/* Scheduled drafts awaiting review (Settings → Schedules). Never
           auto-publishes; this is just a nudge to go approve/reject. */}

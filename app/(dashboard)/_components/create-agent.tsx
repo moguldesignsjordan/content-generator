@@ -103,6 +103,8 @@ interface BriefCard {
   visualVibe: string | null;
   hasProductPhoto: boolean;
   photoCount: number;
+  length: "short" | "standard" | "long" | null;
+  includeImage: boolean | null;
 }
 
 interface Option {
@@ -148,9 +150,11 @@ export interface CreateAgentInitialState {
 export function CreateAgent({
   className,
   initial,
+  suggestions = [],
 }: {
   className?: string;
   initial?: CreateAgentInitialState;
+  suggestions?: CreateAgentSuggestion[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -527,6 +531,26 @@ export function CreateAgent({
                 className="mt-3"
               />
             )}
+            {suggestions.length > 0 && (
+              <div className="mt-5">
+                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+                  Ideas for you
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.text}
+                      type="button"
+                      onClick={() => send(s.text)}
+                      disabled={loading || generating}
+                      className="max-w-full truncate rounded-full border border-border bg-surface-2 px-3.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -577,6 +601,10 @@ export function CreateAgent({
                   }
                   if (pending.Tone) parts.push(`the tone to "${pending.Tone}"`);
                   if (pending.Vibe) parts.push(`the vibe to "${pending.Vibe}"`);
+                  if (pending.Length) parts.push(`the length to ${pending.Length.toLowerCase()}`);
+                  if (pending.Picture) {
+                    parts.push(pending.Picture === "Yes" ? "include a picture" : "no picture");
+                  }
                   if (!parts.length) return;
                   send(`Update the brief: change ${parts.join(", ")}.`);
                 }}
@@ -1087,6 +1115,21 @@ function BriefCardView({
       hint: card.proof ? undefined : "e.g. a stat, before/after, or client win",
     },
     {
+      label: "Offer",
+      value: card.offerName,
+      hint: [card.offerSummary, card.offerPrice, card.hasProductPhoto ? "photo attached" : null]
+        .filter(Boolean)
+        .join(" · ") || undefined,
+    },
+    {
+      label: "Tone",
+      value: card.tone,
+      hint: card.tone ? undefined : "brand voice",
+    },
+  ];
+
+  const moreRows: BriefRow[] = [
+    {
       label: "Hook",
       value: card.hook,
       hint: card.hook ? undefined : "how it should open",
@@ -1097,21 +1140,9 @@ function BriefCardView({
       hint: card.angle ? undefined : "the unique spin, if any",
     },
     {
-      label: "Offer",
-      value: card.offerName,
-      hint: [card.offerSummary, card.offerPrice, card.hasProductPhoto ? "photo attached" : null]
-        .filter(Boolean)
-        .join(" · ") || undefined,
-    },
-    {
       label: "Reader belief",
       value: card.readerBelief,
       hint: card.readerBelief ? undefined : "how they should feel after",
-    },
-    {
-      label: "Tone",
-      value: card.tone,
-      hint: card.tone ? undefined : "brand voice",
     },
     {
       label: "Vibe",
@@ -1119,12 +1150,29 @@ function BriefCardView({
       hint: card.visualVibe ? undefined : "visual style, e.g. punchy, sleek",
     },
   ];
+  const moreSetCount = moreRows.filter((r) => r.value).length;
+  const [showMore, setShowMore] = useState(false);
 
-  // Number of rows with a pending (uncommitted) edit, in label order.
-  const pendingLabels = rows
-    .map((r) => r.label)
-    .filter((label) => drafts[label] !== undefined);
-  const pendingCount = pendingLabels.length;
+  const pendingCount = Object.values(drafts).filter((v) => v !== undefined).length;
+
+  const lengthValue =
+    drafts.Length ??
+    (card.length ? card.length.charAt(0).toUpperCase() + card.length.slice(1) : null);
+  const pictureValue =
+    drafts.Picture ?? (card.includeImage === null ? null : card.includeImage ? "Yes" : "No");
+
+  function renderRow(row: BriefRow) {
+    return (
+      <EditableRow
+        key={row.label}
+        label={row.label}
+        value={drafts[row.label] ?? row.value}
+        hint={row.hint}
+        disabled={disabled}
+        onCommit={(value) => setDrafts((d) => ({ ...d, [row.label]: value }))}
+      />
+    );
+  }
 
   return (
     <div
@@ -1149,19 +1197,34 @@ function BriefCardView({
       </div>
 
       <div className="divide-y divide-border">
-        {rows.map((row) => (
-          <EditableRow
-            key={row.label}
-            label={row.label}
-            value={drafts[row.label] ?? row.value}
-            hint={row.hint}
-            disabled={disabled}
-            onCommit={(value) =>
-              setDrafts((d) => ({ ...d, [row.label]: value }))
-            }
-          />
-        ))}
+        {rows.map(renderRow)}
+        <ChoiceRow
+          label="Length"
+          options={["Short", "Standard", "Long"]}
+          value={lengthValue}
+          disabled={disabled}
+          onPick={(v) => setDrafts((d) => ({ ...d, Length: v }))}
+        />
+        <ChoiceRow
+          label="Picture"
+          options={["Yes", "No"]}
+          value={pictureValue}
+          disabled={disabled}
+          onPick={(v) => setDrafts((d) => ({ ...d, Picture: v }))}
+        />
+        {showMore && moreRows.map(renderRow)}
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowMore((v) => !v)}
+        aria-expanded={showMore}
+        className="mt-1 px-1 py-1 text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+      >
+        {showMore
+          ? "Fewer details"
+          : `More details${moreSetCount ? ` (${moreSetCount} set)` : ""}`}
+      </button>
 
       {card.photoCount > 0 && (
         <p className="mt-2 px-1 text-[12px] text-muted">
@@ -1452,6 +1515,48 @@ function SeriesRowStreaming({
         <AccentSpinner size={12} />
         {stream.label}
       </span>
+    </div>
+  );
+}
+
+/** A brief row with a fixed set of answers, tapped instead of typed. Nothing
+ * picked means the brand default applies. */
+function ChoiceRow({
+  label,
+  options,
+  value,
+  disabled,
+  onPick,
+}: {
+  label: string;
+  options: string[];
+  value: string | null;
+  disabled: boolean;
+  onPick: (value: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-1 py-2 text-[13.5px]">
+      <span className="w-14 shrink-0 text-muted">{label}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(opt)}
+            aria-pressed={value === opt}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[12.5px] font-medium transition-colors disabled:opacity-60",
+              value === opt
+                ? "border-accent bg-accent text-white"
+                : "border-border bg-surface text-muted hover:text-foreground",
+            )}
+          >
+            {opt}
+          </button>
+        ))}
+        {!value && <span className="text-[12px] text-muted-2">brand default</span>}
+      </div>
     </div>
   );
 }
