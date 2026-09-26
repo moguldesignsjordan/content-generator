@@ -66,16 +66,20 @@ export function switchAngle(
 export const ANGLE_TOOL: Anthropic.Tool = {
   name: "choose_angle",
   description: "Propose three angles for this piece and choose the strongest one.",
+  // Strict: without it the model once sent `angles` as a JSON string and
+  // dropped the other two fields. Strict mode can't express a 3-item array,
+  // so the count lives in the description and AngleSchema's .length(3).
+  strict: true,
   input_schema: {
     type: "object",
+    additionalProperties: false,
     properties: {
       angles: {
         type: "array",
-        minItems: 3,
-        maxItems: 3,
         description: "Exactly 3 genuinely different angles.",
         items: {
           type: "object",
+          additionalProperties: false,
           properties: {
             hook: { type: "string", description: "The angle in one sentence." },
             reader_belief: {

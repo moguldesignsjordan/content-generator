@@ -334,6 +334,10 @@ export async function POST(req: NextRequest) {
         // 2048, not 1024: a plan_series call carries up to 10 items of
         // title/angle/key_message JSON alongside the reply text.
         max_tokens: 2048,
+        // Automatic caching: moves a breakpoint onto the newest block each
+        // step, so later tool round-trips in this turn read the earlier ones
+        // from cache instead of re-paying full input for them.
+        cache_control: { type: "ephemeral" },
         system,
         messages,
         tools: CREATE_TOOLS,
