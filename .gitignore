@@ -36,3 +36,4 @@ yarn-error.log*
 
 # Playwright MCP debug snapshots/console logs
 /.playwright-mcp/
+.env*
