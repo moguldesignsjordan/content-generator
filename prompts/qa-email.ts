@@ -139,6 +139,12 @@ export function buildGroundingFactsBlock(
   // fact, so copy that states it must not come back as an invented claim.
   const guarantee = ctx.brand.visual_identity?.footer?.guarantee;
   if (guarantee) lines.push(`  Brand guarantee (real, shown in every footer): ${guarantee}`);
+  // The brand's saved differentiators reach the writer through the voice
+  // block, so a stat from them ("99+ PageSpeed Score") is real; leaving them
+  // out here flagged it as invented and forced a rewrite on every draft.
+  for (const d of ctx.brand.positioning?.differentiators ?? []) {
+    if (d.trim()) lines.push(`  Brand differentiator: ${d.trim()}`);
+  }
   if (brief?.proof) lines.push(`  Proof: ${brief.proof}`);
   if (brief?.offer_deal) lines.push(`  Offer deal: ${brief.offer_deal}`);
   if (brief?.offer_deadline) lines.push(`  Offer deadline: ${brief.offer_deadline}`);

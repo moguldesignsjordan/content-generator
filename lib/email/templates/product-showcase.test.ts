@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { removeHeroImage, spliceHeroImage } from "@/lib/email/hero-image";
 import { productShowcase } from "./product-showcase";
+import { renderEmailTemplate, withReadableText } from "./index";
 import type { BrandTokens, ShowcaseProduct } from "./types";
 import type { ContentImage, EmailCopy, EmailStyleId } from "@/lib/db/types";
 import { EMAIL_STYLE_IDS } from "@/prompts/email-styles";
@@ -130,5 +131,40 @@ describe("productShowcase", () => {
       expect(out).toContain("background:#FF9D14;border:none");
       expect(out).toContain("background:#111111;color:#FF9D14");
     });
+  });
+});
+
+describe("renderEmailTemplate readable text", () => {
+  // The real palette that shipped white body copy: secondary saved as a brand
+  // color (white) on a white card.
+  const WHITE_SECONDARY: BrandTokens = {
+    ...TOKENS,
+    colors: { ...TOKENS.colors, secondary: "#ffffff", text: "#000000", background: "#ffffff" },
+  };
+
+  it("swaps an unreadable secondary for the brand's text color", () => {
+    expect(withReadableText(WHITE_SECONDARY).colors.secondary).toBe("#000000");
+  });
+
+  it("falls back to black or white when the text color fails too", () => {
+    const allWhite = { ...WHITE_SECONDARY, colors: { ...WHITE_SECONDARY.colors, text: "#fafafa" } };
+    const out = withReadableText(allWhite).colors;
+    expect(out.text).toBe("#0B0B0F");
+    expect(out.secondary).toBe("#0B0B0F");
+  });
+
+  it("keeps a brand's secondary that already reads on its background", () => {
+    expect(withReadableText(TOKENS).colors.secondary).toBe("#4B5563");
+  });
+
+  it("never renders white copy on the white card", () => {
+    const html = renderEmailTemplate("product_showcase", {
+      copy: COPY,
+      tokens: WHITE_SECONDARY,
+      product: PRODUCT,
+      image: IMAGE,
+      styleId: "left_rule_editorial",
+    });
+    expect(html).not.toMatch(/class="em-(text|lead)"[^>]*color:#ffffff/i);
   });
 });

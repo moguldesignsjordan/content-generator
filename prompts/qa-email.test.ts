@@ -24,6 +24,20 @@ describe("buildGroundingFactsBlock", () => {
   it("still reports no facts on file when no guarantee is set", () => {
     expect(buildGroundingFactsBlock(ctxWithGuarantee(), null)).toContain("none on file");
   });
+
+  it("treats the brand's saved differentiators as real facts", () => {
+    const ctx = {
+      brand: {
+        visual_identity: {},
+        positioning: { differentiators: ["99+ Google PageSpeed Score", "0.5s average load time", " "] },
+      } as Brand,
+    } as TopicContext;
+    const block = buildGroundingFactsBlock(ctx, null);
+    expect(block).not.toContain("none on file");
+    expect(block).toContain("99+ Google PageSpeed Score");
+    expect(block).toContain("0.5s average load time");
+    expect(block.match(/Brand differentiator:/g)).toHaveLength(2);
+  });
 });
 
 describe("designQaIssues", () => {
