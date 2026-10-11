@@ -32,6 +32,12 @@ import {
 } from "@/prompts/generate-email";
 import { QA_TOOL, QaSchema, buildQaMessages } from "@/prompts/qa-email";
 import {
+  FIX_AI_TELLS_TOOL,
+  FixAiTellsSchema,
+  buildFixAiTellsMessages,
+} from "@/prompts/fix-ai-tells";
+import { applyCopyPatches } from "@/lib/email/patch";
+import {
   renderEmailTemplate,
   resolveBrandTokens,
 } from "@/lib/email/templates";
@@ -259,6 +265,10 @@ export async function generateEmailForTopicStreamed(
     });
     if (revised) {
       ({ content, copy, designSource, qa } = revised);
+    }
+    const tellFix = await fixAiTells({ ctx, copy, content, qa, lengthTarget, emailType, brief });
+    if (tellFix) {
+      ({ content, copy, qa } = tellFix);
     }
 
     // Last look at the finished design, after QA has settled the copy so the
@@ -869,6 +879,91 @@ function qaFailureReasons(seo: DraftSeoData): string[] {
 }
 
 /**
+ * Repairs the AI tells QA caught ("not just X, it's Y") without a rewrite:
+ * one FAST_MODEL call returns a replacement per flagged sentence, patched
+ * into the copy and HTML together, then QA re-runs so the review screen
+ * reflects the fixed text. Tells no longer trigger reviseForQa (too costly
+ * for a phrasing problem), so without this they shipped to the reviewer.
+ *
+ * Non-fatal: any failure keeps the draft and QA exactly as they were.
+ */
+async function fixAiTells(args: {
+  ctx: TopicContext;
+  copy: EmailCopy;
+  content: EmailDraftContent;
+  qa: QaResult;
+  lengthTarget?: EmailLengthTarget;
+  emailType?: EmailType;
+  brief?: CampaignBrief | null;
+}): Promise<{ copy: EmailCopy; content: EmailDraftContent; qa: QaResult } | null> {
+  const { ctx, qa } = args;
+  const tells = qa.seoData.ai_tells_found ?? [];
+  if (!tells.length) return null;
+
+  try {
+    const { system, user } = buildFixAiTellsMessages(args.copy, tells);
+    const response = await getAnthropic().messages.create({
+      model: FAST_MODEL,
+      max_tokens: 1024,
+      system: cacheableSystem(system),
+      messages: [{ role: "user", content: user }],
+      tools: [FIX_AI_TELLS_TOOL],
+      tool_choice: { type: "tool", name: FIX_AI_TELLS_TOOL.name },
+    });
+    logUsage("ai-tell-fix", FAST_MODEL, response.usage, {
+      brandId: ctx.brand.id,
+      metered: true,
+      requestId: response.id,
+    });
+    const fixUsage: UsageDelta = { model: FAST_MODEL, ...response.usage };
+
+    const tu = response.content.find(
+      (b) => b.type === "tool_use" && b.name === FIX_AI_TELLS_TOOL.name,
+    );
+    const parsed = tu && tu.type === "tool_use" ? FixAiTellsSchema.safeParse(tu.input) : null;
+    const edits = (parsed?.success ? parsed.data.edits : []).map((e) => ({
+      find: e.find,
+      replace: stripMarkdown(stripEmDashes(e.replace.trim())),
+    }));
+    const patched = applyCopyPatches(args.copy, args.content.html, edits);
+    if (!patched.applied.length) {
+      logWarn("pipeline:generate:ai-tell-fix", "no flagged sentence could be patched", {
+        brandId: ctx.brand.id,
+        tells: tells.length,
+      });
+      return { copy: args.copy, content: args.content, qa: { ...qa, usageDeltas: [...qa.usageDeltas, fixUsage] } };
+    }
+
+    const content: EmailDraftContent = {
+      subject: patched.copy.subject,
+      preheader: patched.copy.preheader,
+      html: patched.html,
+    };
+    const requalified = await runQaPass(
+      ctx,
+      patched.copy,
+      content.html,
+      args.lengthTarget,
+      args.emailType,
+      args.brief,
+    );
+    return {
+      copy: patched.copy,
+      content,
+      qa: {
+        meta: requalified.meta,
+        // Keep the revision record from reviseForQa, if one ran.
+        seoData: { ...requalified.seoData, qa_revision: qa.seoData.qa_revision },
+        usageDeltas: [...qa.usageDeltas, fixUsage, ...requalified.usageDeltas],
+      },
+    };
+  } catch (err) {
+    logError("pipeline:generate:ai-tell-fix", err, { topicId: ctx.topic.id });
+    return null;
+  }
+}
+
+/**
  * Closes the QA loop: when the first draft fails review, writes it ONCE more
  * with the reviewer's specific findings in the prompt, then re-runs QA on the
  * result.
@@ -1069,6 +1164,10 @@ export async function regenerateEmailDraft(
   });
   if (revised) {
     ({ content, copy, designSource, qa } = revised);
+  }
+  const tellFix = await fixAiTells({ ctx, copy, content, qa, lengthTarget, emailType, brief });
+  if (tellFix) {
+    ({ content, copy, qa } = tellFix);
   }
 
   usageDeltas.push(...qa.usageDeltas);

@@ -80,9 +80,17 @@ export const maxDuration = 300;
 const MAX_STEPS = 8;
 
 // Tools whose results never change what the model says next (they save or
-// display, and can't be refused), so a turn that already has its reply text
-// can end right after them.
-const INTERVIEW_ONLY_TOOLS = new Set(["update_brief", "suggest_options", "remember", "forget"]);
+// display), so a turn that already has its reply text can end right after
+// them. select_topic is the one that can fail (a bad id); the loop checks for
+// that before ending the turn.
+const INTERVIEW_ONLY_TOOLS = new Set([
+  "update_brief",
+  "suggest_options",
+  "remember",
+  "forget",
+  "select_topic",
+  "create_topic",
+]);
 
 interface ChatMsg {
   role: "user" | "assistant";
@@ -372,13 +380,26 @@ export async function POST(req: NextRequest) {
       if (response.stop_reason !== "tool_use") break;
 
       const toolResults: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
+      const draftBefore = state.draftId;
+      let topicLookupFailed = false;
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
         calledAnyTool = true;
         const content = await dispatchTool(block, state, dispatchCtx);
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content });
+        if (
+          block.name === "select_topic" &&
+          state.topicId !== (block.input as SelectTopicInput).topic_id
+        ) {
+          topicLookupFailed = true;
+        }
       }
       messages.push({ role: "user", content: toolResults });
+
+      // A draft now exists and the client opens it straight away, so a reply
+      // call would only produce "opening your draft" (the fallback below says
+      // exactly that).
+      if (state.draftId && state.draftId !== draftBefore) break;
 
       // The follow-up call after an interview step is nearly always an empty
       // reply (the question was already asked alongside the tool call), yet it
@@ -391,6 +412,7 @@ export async function POST(req: NextRequest) {
         response.content.every(
           (b) => b.type !== "tool_use" || INTERVIEW_ONLY_TOOLS.has(b.name),
         ) &&
+        !topicLookupFailed &&
         !state.brief.campaign_kind &&
         !(state.brief.goal && state.brief.key_message && state.topicId);
       if (waitingOnUser) break;

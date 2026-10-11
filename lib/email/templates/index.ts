@@ -57,9 +57,21 @@ export function withReadableText(tokens: BrandTokens): BrandTokens {
   const text = readableOn(tokens.colors.text, background);
   return {
     ...tokens,
-    colors: { ...tokens.colors, text, secondary: readableOn(tokens.colors.secondary, background, text) },
+    colors: {
+      ...tokens.colors,
+      text,
+      secondary: readableOn(tokens.colors.secondary, background, text),
+      // Muted is the footer's color, and the footer sits on the page tint, not
+      // the card. #EEF1F6 is the darkest page tint any template uses
+      // (shared.ts), so passing there passes on the lighter ones too.
+      muted: readableOn(tokens.colors.muted, FOOTER_BG, MUTED_FALLBACK),
+    },
   };
 }
+
+const FOOTER_BG = "#EEF1F6";
+/** A gray that still reads as secondary text: 6.8:1 on FOOTER_BG. */
+const MUTED_FALLBACK = "#4B5563";
 
 /** Renders structured copy + brand tokens into a complete HTML email. */
 export function renderEmailTemplate(

@@ -168,3 +168,15 @@ describe("renderEmailTemplate readable text", () => {
     expect(html).not.toMatch(/class="em-(text|lead)"[^>]*color:#ffffff/i);
   });
 });
+
+describe("renderEmailTemplate readable footer", () => {
+  it("darkens a muted color that can't be read on the footer tint", () => {
+    const tokens = { ...TOKENS, colors: { ...TOKENS.colors, muted: "#9ca3af" } };
+    expect(withReadableText(tokens).colors.muted).toBe("#4B5563");
+  });
+
+  it("keeps a muted color that already reads on the footer tint", () => {
+    const tokens = { ...TOKENS, colors: { ...TOKENS.colors, muted: "#4B5563" } };
+    expect(withReadableText(tokens).colors.muted).toBe("#4B5563");
+  });
+});
