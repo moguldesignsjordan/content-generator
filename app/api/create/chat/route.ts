@@ -79,6 +79,11 @@ export const maxDuration = 300;
 // continue turn without letting a confused model loop indefinitely.
 const MAX_STEPS = 8;
 
+// Tools whose results never change what the model says next (they save or
+// display, and can't be refused), so a turn that already has its reply text
+// can end right after them.
+const INTERVIEW_ONLY_TOOLS = new Set(["update_brief", "suggest_options", "remember", "forget"]);
+
 interface ChatMsg {
   role: "user" | "assistant";
   content: string;
@@ -374,6 +379,21 @@ export async function POST(req: NextRequest) {
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content });
       }
       messages.push({ role: "user", content: toolResults });
+
+      // The follow-up call after an interview step is nearly always an empty
+      // reply (the question was already asked alongside the tool call), yet it
+      // re-reads the whole ~18k-token prompt. Skip it when the turn is plainly
+      // waiting on the user. Not when the brief just became ready or a
+      // campaign is being planned: those turns chain on into generate_content
+      // or plan_series.
+      const waitingOnUser =
+        response.content.some((b) => b.type === "text" && b.text.trim()) &&
+        response.content.every(
+          (b) => b.type !== "tool_use" || INTERVIEW_ONLY_TOOLS.has(b.name),
+        ) &&
+        !state.brief.campaign_kind &&
+        !(state.brief.goal && state.brief.key_message && state.topicId);
+      if (waitingOnUser) break;
     }
 
     // Stall recovery: brief was already ready going into this turn but

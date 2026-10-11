@@ -74,7 +74,7 @@ import { chosenAngle, pickAngle } from "./pick-angle";
 import { switchAngle } from "@/prompts/pick-angle";
 import { critiqueDesign } from "./critique-design";
 import { accumulateUsage, type UsageDelta } from "./cost";
-import { MAX_DRAFT_VERSIONS } from "./constants";
+import { LENGTH_RETRY_TOLERANCE, MAX_DRAFT_VERSIONS } from "./constants";
 import { logError, logWarn } from "@/lib/log";
 
 /** Phase-by-phase events emitted while a draft shell is being filled in. */
@@ -577,11 +577,13 @@ async function generateEmailCopy(
   // word count, hand the model its actual word count and the target and try
   // once more (reusing the cached system prompt). One retry only, matching the
   // existing retry posture; a still-short result is still surfaced as a QA
-  // issue by runQaPass so the reviewer sees it.
+  // issue by runQaPass so the reviewer sees it. Only retries when meaningfully
+  // short: a full rewrite to recover a handful of words (66 of 70) costs a
+  // whole Sonnet call and ~30s for no visible gain.
   const { lengthTarget, emailType } = opts;
   if (lengthTarget) {
     const words = countEmailWords(parsed);
-    if (words < lengthTarget.words[0]) {
+    if (words < lengthTarget.words[0] * LENGTH_RETRY_TOLERANCE) {
       logWarn(
         "pipeline:generate:length-check",
         `email too short (${words} < ${lengthTarget.words[0]} for ${emailType ?? "this type"}); retrying once`,
@@ -905,6 +907,13 @@ async function reviseForQa(args: {
 } | null> {
   const { qa, ctx } = args;
   if (qa.seoData.qa_pass !== false) return null;
+  // A full rewrite is a Sonnet call plus a re-QA, so it's spent only on
+  // findings that are risky to send: invented facts and banned terms. AI-tell
+  // phrasing and keyword misses stay on the review screen for the human.
+  const risky =
+    (qa.seoData.unsupported_specifics?.length ?? 0) > 0 ||
+    (qa.seoData.banned_terms_found?.length ?? 0) > 0;
+  if (!risky) return null;
 
   const nudge = buildQaRevisionNudge(qa.seoData);
   // qa_pass can be false on findings that carry no actionable text (a contrast

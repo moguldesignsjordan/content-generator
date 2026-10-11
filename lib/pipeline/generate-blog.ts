@@ -45,7 +45,7 @@ import type {
   DraftUsage,
   TopicContext,
 } from "@/lib/db/types";
-import { MAX_DRAFT_VERSIONS } from "./constants";
+import { LENGTH_RETRY_TOLERANCE, MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
 import { chosenAngle, pickAngle } from "./pick-angle";
@@ -368,11 +368,12 @@ async function generateBlogCopy(
   // Length enforcement: if the post came in under this format's minimum word
   // count, hand the model its actual count and the target and try once more
   // (reusing the cached system prompt). One retry only; a still-short result is
-  // still surfaced as a QA issue by runBlogChecks. Mirrors the email path.
+  // still surfaced as a QA issue by runBlogChecks. Mirrors the email path,
+  // including its tolerance: only meaningfully short posts get a full rewrite.
   const { lengthTarget, blogType } = opts;
   if (lengthTarget) {
     const words = countBlogWords(parsed);
-    if (words < lengthTarget.words[0]) {
+    if (words < lengthTarget.words[0] * LENGTH_RETRY_TOLERANCE) {
       logWarn(
         "pipeline:generate-blog:length-check",
         `post too short (${words} < ${lengthTarget.words[0]} for ${blogType ?? "this type"}); retrying once`,
@@ -455,7 +456,12 @@ async function qaBlogWithRevision(args: {
 
   const first = await audit(copy, html);
   const nudge = buildQaRevisionNudge(first.seoData, "blog post");
-  if (first.seoData.qa_pass !== false || !nudge) {
+  // Same rule as the email path: rewrite only for invented facts or banned
+  // terms. AI-tell phrasing and keyword misses stay on the review screen.
+  const risky =
+    (first.seoData.unsupported_specifics?.length ?? 0) > 0 ||
+    (first.seoData.banned_terms_found?.length ?? 0) > 0;
+  if (first.seoData.qa_pass !== false || !nudge || !risky) {
     return { copy, html, seoData: first.seoData, usageDeltas: first.usageDeltas };
   }
 
