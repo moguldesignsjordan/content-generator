@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ListGroup, ListRow, Sheet } from "@/components/ui";
+import { useEffect, useState } from "react";
+import { ListGroup, ListRow, Sheet, useToast } from "@/components/ui";
 import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
 import type {
@@ -48,10 +48,27 @@ export interface ConnectionStatus {
   kind: ContentJobType;
   configHint: string;
   fields: ProviderField[];
+  oauthStartPath?: string;
   state: ConnectionState;
   values: Record<string, string | string[]>;
   secretIsSet: Record<string, boolean>;
 }
+
+// Where Connect with Facebook lands (?meta=<status>), shown once as a toast.
+const META_RESULTS: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: "Facebook and Instagram connected." },
+  "connected-no-instagram": {
+    ok: true,
+    text: "Facebook connected. That Page has no Instagram account linked.",
+  },
+  cancelled: { ok: false, text: "Facebook connection cancelled." },
+  "no-page": { ok: false, text: "No Page was shared. Reconnect and tick your Page." },
+  "not-configured": {
+    ok: false,
+    text: "Facebook login isn't set up: add META_APP_ID, META_APP_SECRET, and META_LOGIN_CONFIG_ID.",
+  },
+  error: { ok: false, text: "Couldn't connect Facebook. Try again." },
+};
 
 export function SettingsClient({
   brand,
@@ -73,6 +90,17 @@ export function SettingsClient({
   // adding a provider needs no enum change here).
   const [openConnection, setOpenConnection] = useState<string | null>(null);
   const close = () => setOpen(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = META_RESULTS[url.searchParams.get("meta") ?? ""];
+    if (!result) return;
+    if (result.ok) toast.success(result.text);
+    else toast.error(result.text);
+    url.searchParams.delete("meta");
+    window.history.replaceState(null, "", url.pathname + url.search);
+  }, [toast]);
 
   return (
     <div>
@@ -352,13 +380,18 @@ export function SettingsClient({
           open={openConnection === c.id}
           onClose={() => setOpenConnection(null)}
           title={c.label}
-          description="Connect your own account. Credentials are encrypted; server env vars stay as a fallback."
+          description={
+            c.oauthStartPath
+              ? "One Facebook login connects your Page and its linked Instagram account."
+              : "Connect your own account. Credentials are encrypted; server env vars stay as a fallback."
+          }
           size="lg"
         >
           <ConnectionForm
             brandId={brand.id}
             providerId={c.id}
             fields={c.fields}
+            oauthStartPath={c.oauthStartPath}
             initial={{
               state: c.state,
               values: c.values,
@@ -372,7 +405,8 @@ export function SettingsClient({
 }
 
 function connectionSubtitle(c: ConnectionStatus): string {
-  const what = c.kind === "blog" ? "blog posts" : "emails";
+  const what =
+    c.kind === "blog" ? "blog posts" : c.kind === "social" ? "social posts" : "emails";
   if (c.state === "account") return `Connected · publishes ${what}`;
   if (c.state === "env") return `Using server default · publishes ${what}`;
   return "Not connected · tap to set up";

@@ -43,6 +43,11 @@ export const BlogDraftSchema = z.object({
   conclusion: z.string().min(1),
   cta_text: z.string().min(1),
   cta_url: z.string().optional(),
+  // Optional so drafts saved before FAQs existed still validate on edit.
+  faq: z
+    .array(z.object({ question: z.string().min(1), answer: z.string().min(1) }))
+    .max(6)
+    .optional(),
 });
 
 export type BlogDraftOutput = z.infer<typeof BlogDraftSchema>;
@@ -104,6 +109,19 @@ export const BLOG_TOOL: Anthropic.Tool = {
         type: "string",
         description: "Where the CTA links, if a product/offer URL is available.",
       },
+      faq: {
+        type: "array",
+        description:
+          "3 to 5 questions a searcher would actually type about this topic, each answered in 2 to 3 plain sentences. Plain text, no markdown.",
+        items: {
+          type: "object",
+          properties: {
+            question: { type: "string", description: "Phrased the way people search, ending with a question mark." },
+            answer: { type: "string", description: "A direct answer first, then one supporting sentence. Plain text." },
+          },
+          required: ["question", "answer"],
+        },
+      },
     },
     required: [
       "title",
@@ -114,6 +132,7 @@ export const BLOG_TOOL: Anthropic.Tool = {
       "sections",
       "conclusion",
       "cta_text",
+      "faq",
     ],
   },
 };
@@ -297,6 +316,10 @@ export function buildBlogMessages(
     "- meta_title under 60 characters, keyword near the front. meta_description",
     "  140 to 160 characters with the keyword and a reason to click.",
     "- Slug: short, lowercase, hyphenated, keyword-bearing.",
+    "- faq: 3 to 5 questions people really search about this topic (People Also Ask",
+    "  style), each answered directly in the first sentence. No question the body",
+    "  already answers word for word, and the same grounding rules apply: no",
+    "  invented numbers.",
     "- Weave the provided INTERNAL LINKS into the body as [anchor text](url)",
     "  markdown links where they genuinely help the reader; skip any that don't fit.",
     "",

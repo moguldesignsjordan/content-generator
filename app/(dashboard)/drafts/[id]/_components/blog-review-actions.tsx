@@ -314,7 +314,7 @@ export function BlogReviewActions({
       toast.success(
         data.alreadyPublished
           ? "Already in Sanity, nothing sent twice."
-          : "Sent to Sanity as a draft document.",
+          : "Published to your site.",
       );
       router.refresh();
     } catch (e) {
@@ -531,7 +531,10 @@ export function BlogReviewActions({
           {publication?.external_id ? (
             <>
               <p className="text-sm text-foreground">
-                In Sanity as a draft document
+                {/* Posts sent before publishing went live are drafts.* docs. */}
+                {publication.external_id.startsWith("drafts.")
+                  ? "In Sanity as a draft document"
+                  : "Live on your site"}
                 <span className="ml-2 font-mono text-[12px] text-muted">
                   {publication.external_id}
                 </span>
@@ -543,18 +546,17 @@ export function BlogReviewActions({
                   rel="noreferrer"
                   className="text-[13px] font-medium text-accent hover:text-accent-press"
                 >
-                  Open Sanity →
+                  View post →
                 </a>
               )}
             </>
           ) : sanityConfigured ? (
             <>
               <p className="text-sm text-muted">
-                Publishes as a DRAFT document in your Sanity studio; you make it
-                live there.
+                Publishes the post live to your site through Sanity.
               </p>
               <Button variant="gradient" loading={publishing} onClick={handlePublish}>
-                Send to Sanity
+                Publish to site
               </Button>
             </>
           ) : (

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDueSchedules } from "@/lib/db/queries";
 import { runDueSchedule } from "@/lib/pipeline/run-schedule";
+import { publishDueSocialPosts } from "@/lib/pipeline/publish";
 
 // Sequential per-schedule generation. Each draft is now a multi-call run
 // (angle, write, QA + possible revision, design critique) taking 2 to 3
@@ -24,6 +25,10 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Post first: today's approved social posts shouldn't wait behind a long
+  // generation run that could hit the time limit.
+  const social = await publishDueSocialPosts();
+
   const due = await getDueSchedules();
   let generated = 0;
   let skipped = 0;
@@ -36,7 +41,7 @@ async function handle(req: NextRequest) {
     else failed++;
   }
 
-  return NextResponse.json({ processed: due.length, generated, skipped, failed });
+  return NextResponse.json({ processed: due.length, generated, skipped, failed, social });
 }
 
 export const GET = handle;

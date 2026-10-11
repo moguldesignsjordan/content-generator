@@ -253,7 +253,7 @@
   create table content_schedules (
     id            uuid primary key default gen_random_uuid(),
     brand_id      uuid not null references brands(id) on delete cascade,
-    channel       text not null check (channel in ('email', 'blog')),
+    channel       text not null check (channel in ('email', 'blog', 'social')),
     cadence       text not null check (cadence in ('daily', 'weekly', 'biweekly', 'monthly')),
     email_type    text check (email_type in ('newsletter', 'product', 'service', 'promotional', 'announcement')),
     blog_type     text check (blog_type in ('pillar', 'how_to', 'listicle', 'case_study', 'thought_leadership', 'landing')),

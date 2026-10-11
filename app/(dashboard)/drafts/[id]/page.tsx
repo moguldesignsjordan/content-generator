@@ -5,10 +5,13 @@ import {
   getBrandIntegration,
   getDraftForReview,
   getDraftSubject,
+  getBrandIntegrations,
   getFlyerDraftFromEmail,
   getPublicationForDraft,
   getSingleBrand,
+  listPublicationsForDraft,
 } from "@/lib/db/queries";
+import { providersForKind } from "@/lib/publishing/registry";
 import { getSessionUser } from "@/lib/supabase/server";
 import { updateDraftContent } from "@/lib/db/queries";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
@@ -22,7 +25,7 @@ import { ScreenHeader } from "../../_components/screen-header";
 import { DraftStateBadge } from "../../_components/topic-badges";
 import { ReviewActions } from "./_components/review-actions";
 import { BlogReviewActions } from "./_components/blog-review-actions";
-import { FlyerReviewActions } from "./_components/flyer-review-actions";
+import { FlyerReviewActions, type SocialTarget } from "./_components/flyer-review-actions";
 import { GenerationProgress } from "./_components/generation-progress";
 
 export const dynamic = "force-dynamic";
@@ -88,8 +91,21 @@ export default async function DraftReviewPage({
   // AND a sender identity (name + verified email). That mirrors the provider's
   // own preflight so the button never offers a path that would just throw.
   let mailerliteConfigured = false;
+  // Flyers post to whichever social networks Connect with Facebook set up.
+  let socialTargets: SocialTarget[] = [];
+  let socialPosts: Record<string, { url: string | null }> = {};
   if (isFlyer) {
-    // Flyers publish by download in v1; no provider config to probe.
+    const [integrations, publications] = await Promise.all([
+      getBrandIntegrations(brand.id).catch(() => []),
+      listPublicationsForDraft(id).catch(() => []),
+    ]);
+    socialTargets = providersForKind("social").flatMap((p) => {
+      const integration = integrations.find((i) => i.provider_id === p.id) ?? null;
+      if (!p.isConfigured(brand, integration)) return [];
+      const account = integration?.config?.pageName ?? integration?.config?.igUsername;
+      return [{ id: p.id, label: p.label, account: typeof account === "string" ? account : undefined }];
+    });
+    socialPosts = Object.fromEntries(publications.map((p) => [p.target, { url: p.url }]));
   } else if (isBlog) {
     const brand = await getSingleBrand(user.id).catch(() => null);
     const integration = brand
@@ -155,6 +171,8 @@ export default async function DraftReviewPage({
           initialMeta={draft.meta}
           initialArchived={draft.archived}
           proRenderUsd={imageCostUsd(resolveImageModel("pro"))}
+          socialTargets={socialTargets}
+          initialPosts={socialPosts}
         />
       ) : isBlog ? (
         <BlogReviewActions

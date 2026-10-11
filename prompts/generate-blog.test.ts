@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BLOG_LENGTH_TARGETS,
+  BLOG_TOOL,
+  BlogDraftSchema,
   countBlogWords,
   resolveBlogType,
 } from "./generate-blog";
@@ -107,5 +109,35 @@ describe("BLOG_LENGTH_TARGETS", () => {
     expect(BLOG_LENGTH_TARGETS.pillar.words[0]).toBeGreaterThan(
       BLOG_LENGTH_TARGETS.thought_leadership.words[1],
     );
+  });
+});
+
+describe("blog FAQ", () => {
+  const base = {
+    title: "T",
+    slug: "t",
+    meta_title: "T",
+    meta_description: "D",
+    intro: "I",
+    sections: [
+      { heading: "A", body: "a" },
+      { heading: "B", body: "b" },
+    ],
+    conclusion: "C",
+    cta_text: "Go",
+  };
+
+  it("requires the model to write an FAQ", () => {
+    expect(BLOG_TOOL.input_schema.required).toContain("faq");
+  });
+
+  it("still accepts a saved post from before FAQs existed", () => {
+    expect(BlogDraftSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("keeps the FAQ through validation, so an edit can't drop it", () => {
+    const faq = [{ question: "Why?", answer: "Because." }];
+    const parsed = BlogDraftSchema.parse({ ...base, faq });
+    expect(parsed.faq).toEqual(faq);
   });
 });

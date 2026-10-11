@@ -2,6 +2,7 @@ import "server-only";
 import { getAdminClient } from "./client";
 import { isMissingColumnError, isMissingTableError } from "./table-guard";
 import { logError, logWarn } from "@/lib/log";
+import { buildInternalLinkTargets, type LinkCandidate } from "@/lib/blog/internal-links";
 import type {
   AppLog,
   AppLogLevel,
@@ -227,13 +228,21 @@ export async function getTopicContext(
   // The reference email library steers every email's style, and the email
   // design library steers its layout. A pre-migration-015/016 DB just means an
   // empty library, never a broken generation.
-  const [referenceEmails, emailDesignRefs] = await Promise.all([
+  const [referenceEmails, emailDesignRefs, linkCandidates] = await Promise.all([
     listReferenceEmails(brand.id),
     listStyleReferences(brand.id, "email"),
+    listPublishedPillarTopics(pillar.id),
   ]);
 
   return {
-    topic: topic as Topic,
+    topic: {
+      ...(topic as Topic),
+      internal_link_targets: buildInternalLinkTargets(
+        topic as Topic,
+        linkCandidates,
+        (brand as Brand).visual_identity?.footer?.website,
+      ),
+    },
     brand: brand as Brand,
     strategy: strategy as Strategy,
     pillar: (pillar as Pillar) ?? null,
@@ -244,6 +253,25 @@ export async function getTopicContext(
     referenceEmails,
     emailDesignRefs,
   };
+}
+
+/** Topics already live on the site anywhere in this pillar, for internal links. */
+async function listPublishedPillarTopics(pillarId: string): Promise<LinkCandidate[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("topics")
+    .select("id, title, cluster_id, published_url, clusters!inner(pillar_id)")
+    .eq("clusters.pillar_id", pillarId)
+    .eq("status", "published")
+    .eq("archived", false)
+    .not("published_url", "is", null);
+  if (error) throw error;
+  return (data ?? []).map(({ id, title, cluster_id, published_url }) => ({
+    id,
+    title,
+    cluster_id,
+    published_url,
+  }));
 }
 
 /**
@@ -289,6 +317,8 @@ export async function createDraftShell(args: {
   flyerBrief?: string;
   styleReferenceId?: string;
   flyerStyle?: FlyerStyleId;
+  /** Social only: the day the weekly schedule plans to post it. */
+  plannedPublishAt?: string;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -305,6 +335,7 @@ export async function createDraftShell(args: {
     flyerBrief,
     styleReferenceId,
     flyerStyle,
+    plannedPublishAt,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -341,6 +372,7 @@ export async function createDraftShell(args: {
     ...(flyerBrief ? { flyer_brief: flyerBrief } : {}),
     ...(styleReferenceId ? { style_reference_id: styleReferenceId } : {}),
     ...(flyerStyle ? { flyer_style: flyerStyle } : {}),
+    ...(plannedPublishAt ? { planned_publish_at: plannedPublishAt } : {}),
   };
 
   const { data: draft, error: draftErr } = await db
@@ -356,11 +388,15 @@ export async function createDraftShell(args: {
     .single();
   if (draftErr) throw draftErr;
 
-  const { error: topicErr } = await db
-    .from("topics")
-    .update({ status: "in_progress" })
-    .eq("id", ctx.topic.id);
-  if (topicErr) throw topicErr;
+  // A flyer promotes a topic; it isn't the topic's piece. Leaving the status
+  // alone keeps social posts from using up the backlog emails and blogs draw from.
+  if (type !== "social") {
+    const { error: topicErr } = await db
+      .from("topics")
+      .update({ status: "in_progress" })
+      .eq("id", ctx.topic.id);
+    if (topicErr) throw topicErr;
+  }
 
   return draft.id as string;
 }
@@ -669,6 +705,26 @@ export async function isJobPublished(jobId: string): Promise<boolean> {
 }
 
 /** The most recent publication for the job a draft belongs to (review screen). */
+/** Every destination a draft's job went to (a flyer posts to Facebook AND Instagram). */
+export async function listPublicationsForDraft(draftId: string): Promise<PublicationRecord[]> {
+  const db = getAdminClient();
+  const { data: draft, error: draftErr } = await db
+    .from("drafts")
+    .select("job_id")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (draftErr) throw draftErr;
+  if (!draft) return [];
+
+  const { data, error } = await db
+    .from("publications")
+    .select("*")
+    .eq("job_id", draft.job_id as string)
+    .order("published_at", { ascending: true });
+  if (error) throw error;
+  return (data as PublicationRecord[]) ?? [];
+}
+
 export async function getPublicationForDraft(
   draftId: string,
 ): Promise<PublicationRecord | null> {
@@ -2950,6 +3006,105 @@ export async function deleteContentSchedule(id: string): Promise<void> {
 }
 
 /** Rows where the daily cron should run: active and due. */
+/**
+ * Topics for the weekly social batch: ones that have never had a flyer,
+ * already-published ones first (posts promote what's live), then ideas oldest
+ * first.
+ */
+export async function listSocialTopicCandidates(
+  brandId: string,
+  limit: number,
+): Promise<string[]> {
+  const db = getAdminClient();
+  const [{ data: topics, error: topicErr }, { data: flyered, error: jobErr }] =
+    await Promise.all([
+      db
+        .from("topics")
+        .select("id, status, created_at, clusters!inner(pillars!inner(strategies!inner(brand_id)))")
+        .eq("clusters.pillars.strategies.brand_id", brandId)
+        .in("status", ["published", "idea"])
+        .eq("archived", false)
+        .order("created_at", { ascending: true }),
+      db.from("content_jobs").select("topic_id").eq("brand_id", brandId).eq("type", "social"),
+    ]);
+  if (topicErr) throw topicErr;
+  if (jobErr) throw jobErr;
+
+  const used = new Set((flyered ?? []).map((j) => j.topic_id as string));
+  const fresh = (topics ?? []).filter((t) => !used.has(t.id as string));
+  return [
+    ...fresh.filter((t) => t.status === "published"),
+    ...fresh.filter((t) => t.status === "idea"),
+  ]
+    .slice(0, limit)
+    .map((t) => t.id as string);
+}
+
+/**
+ * Approved social drafts whose planned day has come, for the daily cron. A
+ * week's lookback lets a missed tick catch up without retrying forever.
+ */
+export async function listDueSocialDraftIds(today: string, since: string): Promise<string[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("id, content_jobs!inner(type)")
+    .eq("content_jobs.type", "social")
+    .eq("state", "approved")
+    .eq("archived", false)
+    .lte("meta->>planned_publish_at", today)
+    .gte("meta->>planned_publish_at", since);
+  if (error) throw error;
+  return (data ?? []).map((d) => d.id as string);
+}
+
+export interface ScheduledSocialPost {
+  id: string;
+  state: string;
+  plannedAt: string;
+  generating: boolean;
+  imageUrl?: string;
+  aspect?: FlyerAspect;
+  caption?: string;
+  posts: { target: string; url: string | null }[];
+}
+
+/** The weekly queue: dated social drafts from `since` on, earliest first. */
+export async function listScheduledSocialPosts(
+  brandId: string,
+  since: string,
+): Promise<ScheduledSocialPost[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("id, state, meta, content_jobs!inner(brand_id, type, publications(target, url))")
+    .eq("content_jobs.brand_id", brandId)
+    .eq("content_jobs.type", "social")
+    .in("state", ["in_review", "approved"])
+    .eq("archived", false)
+    .gte("meta->>planned_publish_at", since);
+  if (error) throw error;
+
+  return (data ?? [])
+    .map((row) => {
+      const meta = row.meta as DraftMeta;
+      const job = row.content_jobs as unknown as {
+        publications?: { target: string; url: string | null }[];
+      };
+      return {
+        id: row.id as string,
+        state: row.state as string,
+        plannedAt: meta.planned_publish_at as string,
+        generating: meta.generation ? meta.generation.status !== "ready" : false,
+        imageUrl: meta.flyer_image?.url,
+        aspect: meta.flyer_aspect,
+        caption: meta.flyer_copy?.caption,
+        posts: job.publications ?? [],
+      };
+    })
+    .sort((a, b) => a.plannedAt.localeCompare(b.plannedAt));
+}
+
 export async function getDueSchedules(): Promise<ContentSchedule[]> {
   const db = getAdminClient();
   const { data, error } = await db

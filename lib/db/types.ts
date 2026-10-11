@@ -748,6 +748,12 @@ export interface BlogSection {
   body: string; // markdown
 }
 
+/** One FAQ entry. Plain text, rendered as an FAQ section plus FAQPage JSON-LD on the site. */
+export interface BlogFaqItem {
+  question: string;
+  answer: string;
+}
+
 export interface BlogCopy {
   title: string;
   slug: string;
@@ -758,6 +764,8 @@ export interface BlogCopy {
   conclusion: string; // markdown
   cta_text: string;
   cta_url?: string;
+  /** Absent on posts generated before FAQs existed. */
+  faq?: BlogFaqItem[];
 }
 
 // ── Social flyer drafts ──────────────────────────────────────────────────────
@@ -1007,6 +1015,9 @@ export interface DraftMeta {
   // is replaced by an edit-sheet render or an upload, since it then matches
   // none of them.
   flyer_variant_index?: number;
+  /** "YYYY-MM-DD" (UTC) a scheduled social post goes out once approved. Set by
+   * the weekly social schedule; the daily cron posts it on that day. */
+  planned_publish_at?: string;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation
   // calls assign distinct style/layout by index (rotation.length-cycle),

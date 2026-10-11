@@ -419,6 +419,10 @@ function cleanBlogCopy(parsed: BlogDraftOutput): BlogCopy {
     conclusion: stripEmDashes(parsed.conclusion.trim()),
     cta_text: stripEmDashes(parsed.cta_text.trim()),
     cta_url: parsed.cta_url?.trim() || undefined,
+    faq: parsed.faq?.map((item) => ({
+      question: stripEmDashes(item.question.trim()),
+      answer: stripEmDashes(item.answer.trim()),
+    })),
   };
 }
 
@@ -507,6 +511,7 @@ function blogPlainText(copy: BlogCopy): string {
     ...copy.sections.map((s) => `${s.heading}\n${s.body}`),
     copy.conclusion,
     copy.cta_text,
+    ...(copy.faq ?? []).map((f) => `${f.question}\n${f.answer}`),
   ].join("\n\n");
 }
 

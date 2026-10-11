@@ -41,6 +41,69 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-11: Facebook + Instagram publishing (phase 2)
+
+Plan: `~/.claude/plans/how-can-we-connect-robust-hare.md`. Built; typecheck +
+630 tests + build green; the new queries were run read-only against the live
+DB. UNCOMMITTED. Nothing has posted yet: it needs the Meta app (below).
+
+- **Connect with Facebook** (Settings → Connections): OAuth via a Facebook
+  Login for Business config (`META_APP_ID`, `META_APP_SECRET`,
+  `META_LOGIN_CONFIG_ID`). Stores the Page token encrypted on two connection
+  rows, `facebook` and `instagram`. Page tokens read with a long-lived user
+  token don't expire.
+- **Post now** on an approved flyer posts to every connected network, each
+  reported separately. Instagram refuses 9:16 (not a feed size).
+- **Weekly batch:** a "Social posts" schedule writes 3 flyers (4:5) dated
+  Mon/Wed/Fri at least 2 days out (`meta.planned_publish_at`). The /social
+  page approves them in one click; the existing daily cron (13:00 UTC) posts
+  due ones first, then runs generation. Migration **029** (allows
+  channel 'social') must be applied first.
+- **Behavior changes:** flyers no longer mark their topic in_progress (a
+  flyer promotes a topic, it shouldn't use up the email/blog backlog); the
+  scheduled batch picks topics without a flyer yet, published ones first.
+  Only blog publishes now write `topics.published_url`.
+- **Production was already broken, found via the CLI:** `CRON_SECRET` was never
+  set in Vercel, so `/api/cron/run-schedules` has returned 503 every day and
+  scheduled drafts have never run in production. `INTEGRATION_ENCRYPTION_KEY`
+  is also missing in Vercel (it must match local: one shared DB), so saving
+  any connection in production fails.
+- **Meta visibility:** while the Meta app is in Development mode, API posts are
+  visible only to app-role users. Public posting needs App Review (Advanced
+  Access for pages_manage_posts, instagram_content_publish, etc.), likely
+  plus Business Verification.
+- Not done: live OAuth/post test (blocked on the Meta app), adding the META_*
+  vars to `.env.example`.
+## Session 2026-10-11: SEO foundation (phase 1 of the centralization plan)
+
+Plan: `~/.claude/plans/how-can-we-connect-robust-hare.md` (SEO first, then
+Facebook/Instagram publishing with one-click weekly approval, then a
+"content week" batch modeled on the Higgsfield content-factory skill, images
+only; video deferred). Ran alongside the Ad Library session, so
+`lib/db/types.ts` and `lib/db/queries.ts` hold hunks from both: split
+carefully when committing.
+
+- **Decision changed:** approved blogs now publish LIVE to Sanity (doc id
+  `content-engine-<jobId>`, no `drafts.` prefix) with `publishedAt` set. The
+  in-app Approve + Publish clicks are the human gate, same reasoning as the
+  2026-07-05 MailerLite one-click send. Jordan approved this in the plan.
+- `topics.published_url` for blogs is now the real post URL, built from
+  Settings' footer website (no website set means no URL recorded).
+- Blogs carry a 3-5 item FAQ (grounding QA covers it), rendered in the
+  preview and written to Sanity `faq`.
+- Internal links: `getTopicContext` feeds published posts from the same
+  cluster, then pillar, into `internal_link_targets`, filtered to URLs on the
+  brand's own site (published_url also holds MailerLite dashboard links).
+- mdawebsite (separate repo, UNCOMMITTED): pages now server-render (the i18n
+  wrapper rendered null until mount, so crawlers got empty HTML), plus
+  sitemap.xml, robots.txt, metadataBase, canonicals, BlogPosting/Breadcrumb/
+  FAQPage JSON-LD, and the post schema gained metaTitle/metaDescription/
+  image alt/faq.
+- Typecheck + 615 tests + build green here; mdawebsite typecheck + lint (0
+  errors) + build green and verified against a local production server.
+- Still open: deploy mdawebsite BEFORE publishing a blog from here; then
+  publish one real blog and confirm it's live with FAQ; submit the sitemap in
+  Search Console; redirect www to the apex in Vercel (both return 200 today).
 ## Session 2026-09-26 (latest): simpler, connected create flow
 
 Plan: `~/.claude/plans/i-want-to-make-zany-whale.md`. Jordan found the app
@@ -473,7 +536,8 @@ all green. **Not yet committed.**
   time), so there's no second manual step inside MailerLite's own dashboard,
   by Jordan's explicit call on 2026-07-05 (still one explicit human act, just
   not a second one in a different system). Sanity/blog publishing has no
-  scheduling concept and still just creates a draft doc.
+  scheduling concept; since 2026-10-11 it publishes the post live (was a
+  draft doc).
 
 ## Current state (as of `3259d95`, pushed to `origin/feat/dashboard-create-agent`)
 

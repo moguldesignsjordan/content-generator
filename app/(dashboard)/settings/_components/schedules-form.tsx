@@ -52,6 +52,7 @@ function typeLabel(schedule: ContentSchedule): string | null {
 }
 
 function scheduleTitle(schedule: ContentSchedule): string {
+  if (schedule.channel === "social") return "Social posts · Mon, Wed, Fri";
   const channel = schedule.channel === "email" ? "Email" : "Blog post";
   const type = typeLabel(schedule);
   return `${channel} · ${cadenceLabel(schedule.cadence)}${type ? ` · ${type}` : ""}`;
@@ -159,7 +160,8 @@ export function SchedulesForm({
         body: JSON.stringify({
           brandId,
           channel,
-          cadence,
+          // A social batch is always one week of Mon/Wed/Fri posts.
+          cadence: channel === "social" ? "weekly" : cadence,
           emailType: channel === "email" && emailType ? emailType : undefined,
           blogType: channel === "blog" && blogType ? blogType : undefined,
         }),
@@ -242,17 +244,26 @@ export function SchedulesForm({
             >
               <option value="email">Email</option>
               <option value="blog">Blog post</option>
+              <option value="social">Social posts</option>
             </Select>
           </Field>
-          <Field label="Cadence">
-            <Select value={cadence} onChange={(e) => setCadence(e.target.value as Cadence)}>
-              {CADENCE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {channel === "social" ? (
+            <Field label="Cadence">
+              <p className="py-2 text-sm text-muted">
+                Weekly: 3 posts (Mon, Wed, Fri), reviewed together on the Social page.
+              </p>
+            </Field>
+          ) : (
+            <Field label="Cadence">
+              <Select value={cadence} onChange={(e) => setCadence(e.target.value as Cadence)}>
+                {CADENCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
         </div>
 
         {channel === "email" ? (
@@ -266,7 +277,7 @@ export function SchedulesForm({
               ))}
             </Select>
           </Field>
-        ) : (
+        ) : channel === "blog" ? (
           <Field label="Blog format" hint="Optional. Left unset, generation derives it from the topic.">
             <Select value={blogType} onChange={(e) => setBlogType(e.target.value as BlogType | "")}>
               <option value="">Auto format</option>
@@ -277,7 +288,7 @@ export function SchedulesForm({
               ))}
             </Select>
           </Field>
-        )}
+        ) : null}
 
         <Button variant="gradient" size="sm" loading={creating} onClick={() => void handleCreate()}>
           Add schedule

@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
           kind: p.kind,
           configHint: p.configHint,
           fields: p.fields,
+          oauthStartPath: p.oauthStartPath,
           ...describeConnection(p, brand, integration),
         };
       }),

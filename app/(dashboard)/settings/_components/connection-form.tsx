@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, ConfirmDialog, Field, Input, useToast } from "@/components/ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Field,
+  Input,
+  buttonClasses,
+  useToast,
+} from "@/components/ui";
 import { ListInput } from "./list-input";
 import type { ProviderField } from "@/lib/publishing/provider";
 import type { ConnectionState } from "@/lib/publishing/connections";
@@ -25,6 +33,8 @@ interface ConnectionFormProps {
   providerId: string;
   fields: ProviderField[];
   initial: ConnectionInitial;
+  /** Login-based providers (Facebook/Instagram) connect here instead of fields. */
+  oauthStartPath?: string;
 }
 
 export function ConnectionForm({
@@ -32,6 +42,7 @@ export function ConnectionForm({
   providerId,
   fields,
   initial,
+  oauthStartPath,
 }: ConnectionFormProps) {
   const [values, setValues] = useState<Record<string, string | string[]>>(
     initial.values,
@@ -107,6 +118,60 @@ export function ConnectionForm({
     }
   }
 
+  const disconnectDialog = (
+    <ConfirmDialog
+      open={confirmOpen}
+      onClose={() => setConfirmOpen(false)}
+      onConfirm={handleDisconnect}
+      loading={disconnecting}
+      title="Disconnect this connection?"
+      description={
+        oauthStartPath
+          ? "Posting here stops until you connect again."
+          : "Your saved credentials for this provider will be removed. It falls back to its server env vars, if any are set."
+      }
+      confirmLabel="Disconnect"
+      tone="danger"
+    />
+  );
+
+  if (oauthStartPath) {
+    // The login stored the account name in a plain field; show it, never the token.
+    const account = fields
+      .filter((f) => !f.secret)
+      .map((f) => values[f.key])
+      .find((v): v is string => typeof v === "string" && v.trim() !== "");
+    const connected = state === "account";
+    return (
+      <Card className="space-y-5 p-5">
+        <p className="rounded-[var(--radius-md)] bg-surface-2 px-3.5 py-2.5 text-[13px] text-foreground/90">
+          {connected
+            ? `Connected${account ? `: ${account}` : ""}.`
+            : "Not connected. Log in with Facebook and pick the Page to post to."}
+        </p>
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {/* A plain link: this is a full-page redirect to Facebook, not an app route. */}
+          <a
+            href={oauthStartPath}
+            className={buttonClasses({ variant: connected ? "ghost" : "gradient" })}
+          >
+            {connected ? "Reconnect" : "Connect with Facebook"}
+          </a>
+          {connected && (
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmOpen(true)}
+              className="text-danger"
+            >
+              Disconnect
+            </Button>
+          )}
+        </div>
+        {disconnectDialog}
+      </Card>
+    );
+  }
+
   return (
     <Card className="space-y-5 p-5">
       <Banner state={state} />
@@ -163,16 +228,7 @@ export function ConnectionForm({
         )}
       </div>
 
-      <ConfirmDialog
-        open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={handleDisconnect}
-        loading={disconnecting}
-        title="Disconnect this connection?"
-        description="Your saved credentials for this provider will be removed. It falls back to its server env vars, if any are set."
-        confirmLabel="Disconnect"
-        tone="danger"
-      />
+      {disconnectDialog}
     </Card>
   );
 }

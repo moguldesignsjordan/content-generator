@@ -4,6 +4,7 @@ import {
   getDraftWithJobContext,
   getPublication,
   getBrandByDraftId,
+  listDueSocialDraftIds,
   markJobPublished,
   recordPublication,
   updatePublicationDelivery,
@@ -11,6 +12,8 @@ import {
 import type { BrandIntegration } from "@/lib/db/types";
 import { getProvider, providersForKind } from "@/lib/publishing/registry";
 import type { PublishSchedule } from "@/lib/publishing/provider";
+import { utcDate } from "@/lib/scheduling/cadence";
+import { logError } from "@/lib/log";
 
 export interface PublishOutcome {
   target: string;
@@ -254,7 +257,9 @@ export async function publishDraft(
     scheduledFor: result.scheduledFor,
   });
 
-  await markJobPublished(draft.jobId, result.url);
+  // Only a blog's URL is the topic's public page (internal linking reads it).
+  // An email's dashboard link or a social post would overwrite it.
+  await markJobPublished(draft.jobId, provider.kind === "blog" ? result.url : undefined);
 
   return {
     target: provider.id,
@@ -265,4 +270,74 @@ export async function publishDraft(
     scheduledFor: row.scheduled_for ?? undefined,
     scheduleError: result.scheduleError,
   };
+}
+
+export interface SocialPublishResult {
+  target: string;
+  ok: boolean;
+  outcome?: PublishOutcome;
+  error?: string;
+}
+
+/**
+ * Posts an approved flyer to every connected social network. Each target runs
+ * on its own, so Instagram failing never stops the Facebook post (or the other
+ * way round), and the per-target publications row keeps a retry from posting
+ * twice where it already went out.
+ */
+export async function publishToSocial(draftId: string): Promise<SocialPublishResult[]> {
+  const brand = await getBrandByDraftId(draftId);
+  if (!brand) throw new Error("No brand found.");
+  const integrations = await getBrandIntegrations(brand.id);
+  const targets = providersForKind("social").filter((p) =>
+    p.isConfigured(brand, integrations.find((i) => i.provider_id === p.id) ?? null),
+  );
+  if (!targets.length) {
+    throw new Error("No social account is connected. Connect Facebook in Settings → Connections.");
+  }
+
+  const results: SocialPublishResult[] = [];
+  for (const p of targets) {
+    try {
+      results.push({ target: p.id, ok: true, outcome: await publishDraft(draftId, p.id) });
+    } catch (err) {
+      results.push({
+        target: p.id,
+        ok: false,
+        error: err instanceof Error ? err.message : "Posting failed.",
+      });
+    }
+  }
+  return results;
+}
+
+/**
+ * The daily cron's posting step: every approved social draft whose planned
+ * day has arrived goes to its connected networks. Already-posted targets are
+ * no-ops (publishDraft's publications check), so a rerun never double-posts.
+ */
+export async function publishDueSocialPosts(
+  now = new Date(),
+): Promise<{ posted: number; failed: number }> {
+  const since = utcDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+  const draftIds = await listDueSocialDraftIds(utcDate(now), since);
+  let posted = 0;
+  let failed = 0;
+  for (const draftId of draftIds) {
+    try {
+      const results = await publishToSocial(draftId);
+      for (const r of results) {
+        if (!r.ok) {
+          failed++;
+          logError("cron:publish-social", new Error(r.error), { draftId, target: r.target });
+        } else if (!r.outcome?.alreadyPublished) {
+          posted++;
+        }
+      }
+    } catch (err) {
+      failed++;
+      logError("cron:publish-social", err, { draftId });
+    }
+  }
+  return { posted, failed };
 }

@@ -46,6 +46,18 @@ export function renderBlogPreviewHtml(
       : `**${copy.cta_text}**`
     : "";
 
+  // Mirrors the site's FAQ section. Not click-editable: no data-field marker.
+  const faqHtml = copy.faq?.length
+    ? [
+        "<section class=\"faq\">",
+        "<h2>Frequently asked questions</h2>",
+        ...copy.faq.map(
+          (f) => `<h3>${escapeHtml(f.question)}</h3><p>${escapeHtml(f.answer)}</p>`,
+        ),
+        "</section>",
+      ].join("\n")
+    : "";
+
   return [
     "<!DOCTYPE html>",
     '<html lang="en">',
@@ -62,6 +74,7 @@ export function renderBlogPreviewHtml(
     `h1, h2, h3 { font-family: ${heading}; color: ${primary}; line-height: 1.25; }`,
     "h1 { font-size: 34px; margin: 0 0 12px; }",
     "h2 { font-size: 24px; margin: 40px 0 12px; }",
+    "h3 { font-size: 19px; margin: 24px 0 8px; }",
     "p { margin: 0 0 18px; font-size: 17px; }",
     "ul, ol { margin: 0 0 18px; padding-left: 24px; }",
     "li { margin: 0 0 8px; font-size: 17px; }",
@@ -91,6 +104,7 @@ export function renderBlogPreviewHtml(
     sectionsHtml,
     `<div data-field="conclusion">${renderMarkdown(copy.conclusion)}</div>`,
     ctaMarkdown ? `<div data-field="cta">${renderMarkdown(ctaMarkdown)}</div>` : "",
+    faqHtml,
     "</article>",
     "</body>",
     "</html>",

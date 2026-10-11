@@ -10,6 +10,7 @@ import {
   MegaphoneIcon,
   PlusIcon,
   QrCodeIcon,
+  SendIcon,
   TerminalIcon,
   type IconProps,
 } from "@/components/ui/icons";
@@ -90,6 +91,13 @@ export const NAV: NavItem[] = [
     label: "Flyers",
     Icon: FlyerIcon,
     match: (p) => p.startsWith("/flyers"),
+    group: "content",
+  },
+  {
+    href: "/social",
+    label: "Social",
+    Icon: SendIcon,
+    match: (p) => p.startsWith("/social"),
     group: "content",
   },
   {

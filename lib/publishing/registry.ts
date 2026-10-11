@@ -3,11 +3,18 @@ import type { ContentJobType } from "@/lib/db/types";
 import type { PublishProvider } from "./provider";
 import { mailerliteProvider } from "./providers/mailerlite";
 import { sanityProvider } from "./providers/sanity";
+import { facebookProvider } from "./providers/facebook";
+import { instagramProvider } from "./providers/instagram";
 
 // Adding a destination = one adapter file + one line here. The Connections
 // settings surface and the publish pipeline both read this list, so a new
 // provider appears everywhere with no other code change.
-const PROVIDERS: PublishProvider[] = [mailerliteProvider, sanityProvider];
+const PROVIDERS: PublishProvider[] = [
+  mailerliteProvider,
+  sanityProvider,
+  facebookProvider,
+  instagramProvider,
+];
 
 export function listProviders(): PublishProvider[] {
   return PROVIDERS;

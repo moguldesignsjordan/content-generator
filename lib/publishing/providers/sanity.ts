@@ -2,7 +2,7 @@ import "server-only";
 import type { SanityClient } from "@sanity/client";
 import { getSanity, resolveSanityConfig } from "@/lib/clients/sanity";
 import { blogCopyToPortableText } from "@/lib/blog/to-portable-text";
-import type { ContentImage } from "@/lib/db/types";
+import type { BlogCopy, Brand, ContentImage } from "@/lib/db/types";
 import type {
   ProviderField,
   PublishInput,
@@ -72,12 +72,62 @@ async function uploadMainImage(
   };
 }
 
+type MainImage = Awaited<ReturnType<typeof uploadMainImage>>;
+
 /**
- * Publishes an approved blog draft as a Sanity DRAFT document (drafts. id
- * prefix), so the final "make it live" click stays in the studio where the
- * site team works. Doubly idempotent: the pipeline checks the publications
- * row first, and the document _id is deterministic per job with
- * createIfNotExists, so even a raced retry can never produce a second doc.
+ * The post document as the site reads it. Published, not a drafts.* doc: the
+ * in-app Approve and Publish clicks are the human gate, so a second "make it
+ * live" step in the studio only delayed posts (and left publishedAt unset).
+ */
+export function buildPostDocument(args: {
+  jobId: string;
+  postType: string;
+  copy: BlogCopy;
+  mainImage?: MainImage;
+  publishedAt: string;
+}) {
+  const { copy } = args;
+  return {
+    _id: `content-engine-${args.jobId}`,
+    _type: args.postType,
+    title: copy.title,
+    slug: { _type: "slug", current: copy.slug },
+    publishedAt: args.publishedAt,
+    metaTitle: copy.meta_title,
+    metaDescription: copy.meta_description,
+    excerpt: copy.meta_description,
+    ...(args.mainImage ? { mainImage: args.mainImage } : {}),
+    ...(copy.faq?.length
+      ? {
+          faq: copy.faq.map((item, i) => ({
+            _key: `faq-${i}`,
+            _type: "faqItem",
+            question: item.question,
+            answer: item.answer,
+          })),
+        }
+      : {}),
+    body: blogCopyToPortableText(copy),
+  };
+}
+
+/**
+ * The public post URL, from the brand's website in Settings. Stored as the
+ * topic's published_url, which is what internal linking reads back. Null when
+ * no website is set, so a wrong URL is never recorded.
+ */
+export function livePostUrl(brand: Brand, slug: string): string | null {
+  const site = brand.visual_identity?.footer?.website?.trim();
+  if (!site) return null;
+  const origin = /^https?:\/\//i.test(site) ? site : `https://${site}`;
+  return `${origin.replace(/\/+$/, "")}/blog/${slug}`;
+}
+
+/**
+ * Publishes an approved blog draft live to Sanity. Doubly idempotent: the
+ * pipeline checks the publications row first, and the document _id is
+ * deterministic per job with createIfNotExists, so even a raced retry can
+ * never produce a second doc.
  */
 export const sanityProvider: PublishProvider = {
   id: "sanity",
@@ -105,26 +155,19 @@ export const sanityProvider: PublishProvider = {
     const hero = input.meta.hero_image;
     const mainImage = hero ? await uploadMainImage(client, hero) : undefined;
 
-    const documentId = `drafts.content-engine-${input.jobId}`;
-    const doc = {
-      _id: documentId,
-      _type: config.postType,
-      title: copy.title,
-      slug: { _type: "slug", current: copy.slug },
-      // Studio schemas vary; extra fields are harmless at the API layer and
-      // useful where the schema has them.
-      metaTitle: copy.meta_title,
-      metaDescription: copy.meta_description,
-      excerpt: copy.meta_description,
-      ...(mainImage ? { mainImage } : {}),
-      body: blogCopyToPortableText(copy),
-    };
+    const doc = buildPostDocument({
+      jobId: input.jobId,
+      postType: config.postType,
+      copy,
+      mainImage,
+      publishedAt: new Date().toISOString(),
+    });
 
     const created = await client.createIfNotExists(doc);
 
     return {
       externalId: created._id,
-      url: `https://www.sanity.io/manage/project/${config.projectId}`,
+      url: livePostUrl(input.brand, copy.slug) ?? undefined,
     };
   },
 };

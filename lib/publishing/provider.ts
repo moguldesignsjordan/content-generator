@@ -171,6 +171,12 @@ export interface PublishProvider {
   /** Connection fields this provider needs (the Connections form contract). */
   fields: ProviderField[];
   /**
+   * Set when the connection comes from an OAuth login instead of typed fields
+   * (Facebook/Instagram). The Connections form shows a Connect button pointing
+   * here, and `fields` only describe what the login stored.
+   */
+  oauthStartPath?: string;
+  /**
    * True when credentials are present from EITHER the brand's connection OR
    * the env-var fallback. Never throws. Per-field env fallback is deliberate
    * graceful degradation (a connected provider with one blank secret still

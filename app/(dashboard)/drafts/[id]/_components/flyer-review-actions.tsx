@@ -22,6 +22,14 @@ import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { FlyerSheet } from "./flyer-sheet";
 
+/** A connected network this flyer can post to (see lib/publishing/providers). */
+export interface SocialTarget {
+  id: string;
+  label: string;
+  /** Page name or @handle from Connect with Facebook. */
+  account?: string;
+}
+
 interface FlyerReviewActionsProps {
   draftId: string;
   version: number;
@@ -30,6 +38,9 @@ interface FlyerReviewActionsProps {
   initialArchived: boolean;
   /** Estimated cost of one pro-tier render, for the Finalize in Pro hint. */
   proRenderUsd: number;
+  socialTargets: SocialTarget[];
+  /** Where this flyer already went, keyed by provider id. */
+  initialPosts: Record<string, { url: string | null }>;
 }
 
 // Preview box aspect classes, keyed by meta.flyer_aspect. Static strings so
@@ -54,6 +65,8 @@ export function FlyerReviewActions({
   initialMeta,
   initialArchived,
   proRenderUsd,
+  socialTargets,
+  initialPosts,
 }: FlyerReviewActionsProps) {
   const router = useRouter();
   const toast = useToast();
@@ -87,6 +100,8 @@ export function FlyerReviewActions({
   const [captionDraft, setCaptionDraft] = useState("");
   const [hashtagsDraft, setHashtagsDraft] = useState("");
   const [savingCaption, setSavingCaption] = useState(false);
+  const [posts, setPosts] = useState(initialPosts);
+  const [posting, setPosting] = useState(false);
 
   const caption = [copy?.caption, copy?.hashtags?.join(" ")]
     .filter(Boolean)
@@ -96,7 +111,9 @@ export function FlyerReviewActions({
   const atCap = version >= MAX_DRAFT_VERSIONS;
   const isActionable = state === "in_review";
   const isApproved = state === "approved";
-  const busy = approving || archiving || regenerating || finalizing || picking !== null;
+  const busy =
+    approving || archiving || regenerating || finalizing || posting || picking !== null;
+  const unposted = socialTargets.filter((t) => !posts[t.id]);
   const currentVariant =
     variantIndex !== undefined ? variants[variantIndex] : undefined;
   // With a fixed preset every option shares one style, so its name can't
@@ -107,6 +124,26 @@ export function FlyerReviewActions({
     : rejectedThisDraft
       ? "Already rejected. Check for the new version above."
       : null;
+
+  async function handlePostNow() {
+    setPosting(true);
+    for (const t of unposted) {
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/publish`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: t.id }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+        if (!res.ok) throw new Error(data.error ?? `Couldn't post to ${t.label}.`);
+        setPosts((p) => ({ ...p, [t.id]: { url: data.url ?? null } }));
+        toast.success(`Posted to ${t.label}.`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : `Couldn't post to ${t.label}.`);
+      }
+    }
+    setPosting(false);
+  }
 
   async function handleApprove() {
     setApproving(true);
@@ -121,7 +158,11 @@ export function FlyerReviewActions({
         throw new Error(data.error ?? "Failed to approve.");
       }
       setState("approved");
-      toast.success("Approved. Download the flyer below and post it.");
+      toast.success(
+        socialTargets.length
+          ? "Approved. Post it below, or download it."
+          : "Approved. Download the flyer below and post it.",
+      );
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to approve.");
@@ -452,7 +493,57 @@ export function FlyerReviewActions({
         </Card>
       )}
 
-      {/* Download (v1 "publish"): unlocks after approval. */}
+      {/* Post now: one publish call per connected network, each reported on its
+          own so a failure on one never hides a success on the other. */}
+      {isApproved && (
+        <Card className="space-y-3 p-4">
+          {socialTargets.length === 0 ? (
+            <p className="text-sm text-muted">
+              Connect Facebook in{" "}
+              <a href="/settings" className="font-medium text-accent hover:text-accent-press">
+                Settings
+              </a>{" "}
+              to post this from here.
+            </p>
+          ) : (
+            <>
+              <ul className="space-y-2">
+                {socialTargets.map((t) => (
+                  <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-foreground">
+                      {t.label}
+                      {t.account && <span className="ml-1.5 text-muted">{t.account}</span>}
+                    </span>
+                    {posts[t.id] ? (
+                      posts[t.id].url ? (
+                        <a
+                          href={posts[t.id].url ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[13px] font-medium text-accent hover:text-accent-press"
+                        >
+                          Posted · View →
+                        </a>
+                      ) : (
+                        <span className="text-[13px] text-muted">Posted</span>
+                      )
+                    ) : (
+                      <span className="text-[13px] text-muted">Not posted</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {unposted.length > 0 && (
+                <Button variant="gradient" loading={posting} disabled={busy} onClick={handlePostNow}>
+                  Post now
+                </Button>
+              )}
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* Download: unlocks after approval. */}
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         {isApproved ? (
           <>

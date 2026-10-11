@@ -259,6 +259,8 @@ export async function regenerateFlyerDraft(
         ? { style_reference_id: meta.style_reference_id }
         : {}),
       ...(meta.source_draft_id ? { source_draft_id: meta.source_draft_id } : {}),
+      // A rejected scheduled post keeps its day in the weekly queue.
+      ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
       usage,
     },
   });

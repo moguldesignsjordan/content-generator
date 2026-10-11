@@ -91,6 +91,7 @@ export default async function SettingsPage() {
             kind: p.kind,
             configHint: p.configHint,
             fields: p.fields,
+            oauthStartPath: p.oauthStartPath,
             ...describeConnection(p, brand, integration),
           };
         })}
