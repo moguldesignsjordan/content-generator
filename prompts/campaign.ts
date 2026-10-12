@@ -369,10 +369,12 @@ export interface SuggestOptionsInput {
 export const SUGGEST_OPTIONS_TOOL: Anthropic.Tool = {
   name: "suggest_options",
   description:
-    "Offer the user tappable quick-reply options instead of making them retype a " +
-    "title. Call this whenever you have fitting topics to suggest from the TOPICS " +
-    "list, or a clear next-step action to offer. Always pair it with a normal " +
-    "conversational message in the same turn, never a bare tool call.",
+    "Offer the user tappable quick-reply options so they don't have to type. " +
+    "Call this whenever real choices exist. Write every chip for this exact " +
+    "moment, from what the user just said, and never repeat a set already " +
+    "shown in this conversation. Use kind \"topic\" only for an exact id from " +
+    "the TOPICS list. Always pair it with a normal conversational message in " +
+    "the same turn, never a bare tool call.",
   input_schema: {
     type: "object",
     properties: {

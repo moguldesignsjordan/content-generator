@@ -272,9 +272,11 @@ export async function POST(req: NextRequest) {
     );
 
     // Cache the prefix through the end of the prior turn so each new message
-    // only pays full price on the small bit that's actually new.
+    // only pays full price on the small bit that's actually new. 20, not 10:
+    // a campaign thread passes 10 messages by its build step, and dropping
+    // its opening made a follow-up "ok" restart as a brand-new email.
     const priorTurns: Anthropic.MessageParam[] = (history ?? [])
-      .slice(-10)
+      .slice(-20)
       .map((m) => ({
         role: m.role,
         content:
