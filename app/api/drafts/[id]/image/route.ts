@@ -12,7 +12,11 @@ import {
 } from "@/lib/pipeline/generate-image";
 import { renderBlogPreviewHtml } from "@/lib/blog/render-preview";
 import { prepareReferenceImage } from "@/lib/images/optimize";
-import { IMAGE_STYLE_LABELS, resolveBrandPalette } from "@/prompts/generate-image";
+import {
+  buildImageBrandContext,
+  IMAGE_STYLE_LABELS,
+  resolveBrandPalette,
+} from "@/prompts/generate-image";
 import type {
   BrandPaletteMode,
   ContentImage,
@@ -31,7 +35,7 @@ import { guardAiRoute } from "@/lib/ai-guard";
 
 // A Gemini render + Haiku prompt-craft + optimize + upload usually lands in
 // 10-25s, but leave headroom for retries and cold storage buckets.
-export const maxDuration = 120;
+export const maxDuration = 240;
 
 const STYLES = Object.keys(IMAGE_STYLE_LABELS) as ContentImageStyle[];
 const REFERENCE_USES: ReferenceUse[] = ["style", "subject", "both"];
@@ -270,6 +274,9 @@ export async function POST(
         referenceUse,
         brandPalette,
         modelTier,
+        brandContext: buildImageBrandContext(topicCtx.brand, topicCtx.primaryIcp),
+        keyMessage: draftCtx.meta.series_brief?.key_message,
+        kind: isBlog ? "blog" : "email",
       });
       image = {
         ...generated.image,

@@ -19,7 +19,12 @@ type NonTextField =
   | "competitor_reference_id"
   // Written by the create-chat route from the transcript, never by a model
   // tool call, so it has no place in the model-facing allowlist.
-  | "conversation_notes";
+  | "conversation_notes"
+  // Written by the factory launch route from the plan and research, never by
+  // a chat tool call, for the same reason.
+  | "research_notes"
+  | "angle_locked"
+  | "image_subject";
 
 type ExpectedTextField = Exclude<keyof CampaignBrief, NonTextField>;
 type ListedField = (typeof CAMPAIGN_BRIEF_TEXT_FIELDS)[number];

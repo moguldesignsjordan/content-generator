@@ -125,8 +125,11 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
             const series = c.chat_state?.series ?? [];
             const isOpen = expanded === c.id;
             const title = c.brief.goal?.trim() || "Untitled campaign";
+            const factory = c.chat_state?.factory;
             const subtitleParts = [
-              `${c.emails} email${c.emails === 1 ? "" : "s"}`,
+              factory
+                ? `${factory.plan?.length ?? 0} pieces`
+                : `${c.emails} email${c.emails === 1 ? "" : "s"}`,
               c.sent > 0 ? `${c.sent} sent` : null,
               c.scheduled > 0 ? `${c.scheduled} scheduled` : null,
               new Date(c.updated_at).toLocaleDateString(),
@@ -177,7 +180,14 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
 
                 {isOpen && (
                   <div className="border-t border-border bg-surface-2/40 px-4 py-2">
-                    {series.length > 0 ? (
+                    {factory ? (
+                      <Link
+                        href={`/campaigns/${c.id}`}
+                        className="block py-2 text-[13.5px] font-medium text-accent hover:text-accent-press"
+                      >
+                        Open the plan and pieces
+                      </Link>
+                    ) : series.length > 0 ? (
                       <div className="divide-y divide-border">
                         {series.map((item, i) => (
                           <Link

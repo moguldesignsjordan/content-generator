@@ -163,6 +163,11 @@ export function buildGroundingFactsBlock(
       brief.conversation_notes,
     );
   }
+  // A factory piece's research: the business facts came from its own site
+  // and are real, so a draft that states one must not be sent back as invented.
+  if (brief?.research_notes) {
+    lines.push("  From the campaign research (sourced; real):", brief.research_notes);
+  }
   if (!lines.length) {
     return "GROUNDING FACTS: none on file. Any number, statistic, date, price, or named claim in the copy is unsupported.";
   }

@@ -21,6 +21,14 @@ describe("buildGroundingFactsBlock", () => {
     expect(block).toContain("Money-back guarantee on every print run.");
   });
 
+  it("treats a factory piece's research facts as real, so QA won't strip them", () => {
+    const block = buildGroundingFactsBlock(ctxWithGuarantee(), {
+      research_notes: "Real facts about this business:\n- Plans start at $49 a month",
+    });
+    expect(block).not.toContain("none on file");
+    expect(block).toContain("Plans start at $49 a month");
+  });
+
   it("still reports no facts on file when no guarantee is set", () => {
     expect(buildGroundingFactsBlock(ctxWithGuarantee(), null)).toContain("none on file");
   });

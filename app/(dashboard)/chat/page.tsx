@@ -15,12 +15,12 @@ import { Card, LinkButton } from "@/components/ui";
 import {
   CreateAgent,
   type CreateAgentSuggestion,
-} from "./_components/create-agent";
+} from "../_components/create-agent";
 
 // Always read fresh from the DB; topics/drafts change as you work.
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function ChatPage() {
   if (!isSupabaseConfigured()) {
     return (
       <SetupNotice

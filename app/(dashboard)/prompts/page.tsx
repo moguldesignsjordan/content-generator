@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 const PROVIDER_TONE: Record<PromptProvider, BadgeTone> = {
   anthropic: "violet",
   gemini: "cyan",
+  openai: "amber",
 };
 
 function formatTime(iso: string): string {

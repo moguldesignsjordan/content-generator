@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Brand, Icp } from "@/lib/db/types";
 import type { ContentImageStyle, VisualVibe } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import {
@@ -7,6 +8,7 @@ import {
   VARIED_STYLE_POOL,
   VISUAL_VIBE_IMAGE_STYLE,
   buildFinalImagePrompt,
+  buildImageBrandContext,
   buildImagePromptMessages,
   pickVariedImageStyle,
   resolveBrandPalette,
@@ -156,5 +158,60 @@ describe("buildImagePromptMessages", () => {
     expect(user).not.toContain("EMAIL TYPE:");
     expect(user).not.toContain("TONE:");
     expect(user).not.toContain("VIBE:");
+  });
+});
+
+describe("hero scenes know the business", () => {
+  const brand = {
+    name: "Mogul",
+    positioning: { business_description: "Websites and brand design for local service businesses" },
+  } as unknown as Brand;
+  const icp = { label: "Home-service owners", profile: { demographics: "35-55, run 3-20 person crews" } } as Icp;
+
+  it("states what the business does and who it serves", () => {
+    const ctx = buildImageBrandContext(brand, icp);
+    expect(ctx).toContain("WHAT THE BUSINESS DOES: Websites and brand design");
+    expect(ctx).toContain("WHO IT SERVES: Home-service owners, 35-55");
+    expect(buildImageBrandContext({ name: "x" } as Brand, null)).toBe("");
+  });
+
+  it("passes the context and key message, and bans stock metaphors", () => {
+    const { system, user } = buildImagePromptMessages({
+      brandName: "Mogul",
+      topicTitle: "Care plans",
+      style: "photo",
+      brandContext: buildImageBrandContext(brand, icp),
+      keyMessage: "Your site is watched 24/7",
+    });
+    expect(user).toContain("WHAT THE BUSINESS DOES");
+    expect(user).toContain("THE POINT IT MAKES: Your site is watched 24/7");
+    expect(system).toContain("Never a stock metaphor");
+  });
+
+  it("labels a blog post as a blog post, not an email", () => {
+    const { user } = buildImagePromptMessages({
+      brandName: "Mogul",
+      topicTitle: "How to pick a web designer",
+      headline: "Seven questions",
+      style: "photo",
+      kind: "blog",
+    });
+    expect(user).toContain("BLOG POST TOPIC: How to pick a web designer");
+    expect(user).toContain("BLOG POST HEADLINE: Seven questions");
+    expect(user).not.toContain("EMAIL TOPIC");
+  });
+});
+
+describe("pickVariedImageStyle consistency", () => {
+  it("gives a brand one style when seeded by the brand id", () => {
+    const brandId = "brand-123";
+    const picks = new Set(Array.from({ length: 10 }, () => pickVariedImageStyle(brandId)));
+    expect(picks.size).toBe(1);
+  });
+
+  it("rotates only within the house styles", () => {
+    for (let i = 0; i < 30; i++) {
+      expect(["photo", "duotone"]).toContain(pickVariedImageStyle(`draft-${i}`, ["photo", "duotone"]));
+    }
   });
 });

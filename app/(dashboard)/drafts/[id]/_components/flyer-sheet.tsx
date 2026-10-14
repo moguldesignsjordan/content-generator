@@ -12,6 +12,7 @@ import {
   useToast,
 } from "@/components/ui";
 import type { ContentImage, FlyerAspect, FlyerCopy } from "@/lib/db/types";
+import { useImageModelOptions } from "../../../_components/image-models-context";
 
 const ASPECT_OPTIONS: { value: FlyerAspect; label: string }[] = [
   { value: "1:1", label: "Square 1:1" },
@@ -68,6 +69,9 @@ export function FlyerSheet({
   const [exactPrompt, setExactPrompt] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  // "" = the brand's default model (Settings).
+  const imageModelOptions = useImageModelOptions();
+  const [model, setModel] = useState("");
   const fetchedStyles = useRef(false);
 
   // Re-seed the fields each time the sheet opens (the draft may have changed).
@@ -122,6 +126,7 @@ export function FlyerSheet({
     form.set("cta", cta);
     form.set("aspect", aspect);
     form.set("styleReferenceId", styleId || "none");
+    if (model) form.set("model", model);
     if (showPrompt && exactPrompt.trim()) {
       form.set("exactPrompt", exactPrompt.trim());
     }
@@ -215,6 +220,19 @@ export function FlyerSheet({
                 options={ASPECT_OPTIONS}
                 size="sm"
               />
+            </Field>
+            <Field
+              label="Image model"
+              hint={imageModelOptions.find((m) => m.id === model)?.description ?? "Uses the model picked in Settings."}
+            >
+              <Select value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+                <option value="">My default</option>
+                {imageModelOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
             </Field>
             {styles.length > 0 && (
               <Field label="Style">

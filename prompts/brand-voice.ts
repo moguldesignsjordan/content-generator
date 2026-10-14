@@ -474,6 +474,15 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
   }
   if (brief.audience_notes) lines.push(`  Audience notes: ${brief.audience_notes}`);
   if (brief.angle) lines.push(`  Angle: ${brief.angle}`);
+  if (brief.research_notes) {
+    lines.push(
+      "  RESEARCH (the facts here are real and checkable; state them as true where they help. The trends are context, not facts about this business):",
+      brief.research_notes
+        .split("\n")
+        .map((line) => `    ${line}`)
+        .join("\n"),
+    );
+  }
   if (brief.constraints) lines.push(`  Constraints: ${brief.constraints}`);
   if (brief.tone)
     lines.push(

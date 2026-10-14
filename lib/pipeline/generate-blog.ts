@@ -62,7 +62,7 @@ import { logError, logWarn } from "@/lib/log";
 export async function generateBlogForTopicStreamed(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string; blogTypeOverride?: BlogType },
+  opts: { campaignId?: string; blogTypeOverride?: BlogType; briefOverride?: CampaignBrief },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
   try {
@@ -70,14 +70,22 @@ export async function generateBlogForTopicStreamed(
     await patchDraftGeneration(draftId, writing);
     onEvent({ type: "phase", ...writing });
 
-    const brief = await loadBrief(opts.campaignId);
+    // A per-piece brief (series or factory, meta.series_brief) wins over the
+    // shared campaign brief, the same precedence regenerateBlogDraft uses.
+    const brief = opts.briefOverride ?? (await loadBrief(opts.campaignId));
 
     // Decide what the post should argue before writing it. Non-fatal: a null
     // angle leaves the prompt exactly as it was before this step existed.
-    const strategizing = { phase: "strategizing", label: "Choosing the angle" };
-    await patchDraftGeneration(draftId, strategizing);
-    onEvent({ type: "phase", ...strategizing });
-    const angleResult = await pickAngle(ctx, { brief, channel: "blog" });
+    // A locked angle (a factory plan row) was already chosen by the owner, so
+    // there's nothing to propose: skipping saves a call and keeps the piece on
+    // the idea that was approved.
+    let angleResult: Awaited<ReturnType<typeof pickAngle>> = null;
+    if (!brief?.angle_locked) {
+      const strategizing = { phase: "strategizing", label: "Choosing the angle" };
+      await patchDraftGeneration(draftId, strategizing);
+      onEvent({ type: "phase", ...strategizing });
+      angleResult = await pickAngle(ctx, { brief, channel: "blog" });
+    }
     const angle = chosenAngle(angleResult?.angle);
 
     await patchDraftGeneration(draftId, writing);
@@ -104,10 +112,18 @@ export async function generateBlogForTopicStreamed(
     // Brand-level opt-in: auto-create the post's hero image (first
     // generation only; non-fatal, the draft ships without one on failure).
     // Blog heroes have no placement choice; they render under the title.
-    const heroImage = await maybeAutoHeroImage(ctx, copy.title, usageDeltas, {
-      draftId,
-      onEvent,
-    });
+    const heroImage = await maybeAutoHeroImage(
+      ctx,
+      copy.title,
+      usageDeltas,
+      { draftId, onEvent },
+      {
+        kind: "blog",
+        ...(brief?.product_photo_url ? { productPhotoUrl: brief.product_photo_url } : {}),
+        ...(brief?.image_subject ? { subject: brief.image_subject } : {}),
+        ...(brief?.key_message ? { keyMessage: brief.key_message } : {}),
+      },
+    );
     const render = (output: BlogDraftOutput) => {
       const revised = cleanBlogCopy(output);
       return { copy: revised, html: renderBlogPreviewHtml(revised, ctx.brand, heroImage) };

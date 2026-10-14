@@ -15,7 +15,8 @@ import {
   isFlyerAspect,
   isFlyerStyle,
 } from "@/prompts/generate-flyer";
-import type { FlyerAspect, FlyerFormat, FlyerStyleId } from "@/lib/db/types";
+import type { FlyerAspect, FlyerFormat, FlyerStyleId, ImageModelTier } from "@/lib/db/types";
+import { isImageModelTier } from "@/lib/image-models";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
   let competitorReferenceId: string | undefined;
   let flyerFormat: FlyerFormat = "post";
   let campaignId: string | undefined;
+  let flyerModel: ImageModelTier | undefined;
   try {
     const body = await request.json();
     topicId = body?.topicId || undefined;
@@ -83,6 +85,9 @@ export async function POST(request: Request) {
         : undefined;
     if (body?.format === "ad") flyerFormat = "ad";
     campaignId = body?.campaignId || undefined;
+    // A model this deployment can't render (GPT without a key) falls back
+    // at render time, so any known choice is safe to store.
+    if (isImageModelTier(body?.model)) flyerModel = body.model;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -133,6 +138,7 @@ export async function POST(request: Request) {
       flyerStyle,
       competitorReferenceId,
       flyerFormat,
+      ...(flyerModel ? { flyerModel } : {}),
     });
     return NextResponse.json({ draftId });
   } catch (err) {

@@ -7,9 +7,14 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-10-11 (Ad Library import, flyers learn from competitor
-ads, FB/IG ad copy mode: all 3 slices built. Typecheck + 636 tests + build
-green; UNCOMMITTED, no browser click-through. See session below.)
+Last updated: 2026-10-14 (Image model upgrade + hero prompt fixes on top of the
+campaign factory, 694 tests green. Campaign factory: Home is now one sentence ->
+research -> editable plan -> quote -> batch -> review. Flyers now get code-set
+text over text-free art. Typecheck + 676 tests + build green; UNCOMMITTED, no
+logged-in click-through yet. See session below.)
+
+Previously: 2026-10-11 (Ad Library import, flyers learn from competitor
+ads, FB/IG ad copy mode: committed as 9e152bd, not pushed.)
 
 Previously: 2026-09-26 (simpler, connected create flow. Typecheck + 552
 tests + build green; UNCOMMITTED, no browser click-through yet.)
@@ -43,6 +48,70 @@ swipe-file library built AND live-verified — see session below; still open:
 the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
+
+## Session 2026-10-14 (later): image models and hero prompts
+
+- **Default image model is Nano Banana 2.1** (`gemini-nano-banana-2.1`,
+  released 2026-10-06): better and cheaper than 3.1 Flash. Heroes render 1K
+  (they're shrunk to 1200px), flyer options 2K. Pro is Nano Banana Pro at 2K.
+  Old saved "lite" prefs render as standard. Prices in `lib/pipeline/cost.ts`
+  were understated before (lite $0.02 vs real $0.0336, standard $0.045 vs
+  $0.067); now match Google's pricing page.
+- **Model picker everywhere images are made** (Settings default, hero image
+  sheet, new flyer form, flyer edit sheet, flyer Finalize). Optional GPT Image
+  2.5 (Sunburst high ~$0.21, Flare medium ~$0.05) appears only when
+  `OPENAI_API_KEY` is set; plain fetch, no SDK. A GPT pref without a key
+  falls back to Nano Banana 2.1.
+- **Hero prompts:** the scene writer now gets what the business does, who it
+  serves, and the piece's key message, plus a ban on stock metaphors. No
+  style set = one consistent style per brand (was a new style per draft);
+  optional "house styles" in Settings rotate within 1-2 picks. Factory plan
+  rows' picture idea is the hero subject. Blog scenes labeled as blog posts.
+- **Done after:** removed `GEMINI_IMAGE_MODEL` from Vercel (Prod + Preview;
+  it pinned the old model, takes effect next deploy). Migration **030**
+  applied via the Supabase CLI (`supabase db query --linked --project-ref
+  stujpgjxhyivsqvnhdfs --file ...`; CLI installed and logged in 2026-10-14).
+  Checked live: migrations 020, 021, 026, 028, 029 are all applied too, so
+  older "NOT applied" notes below are stale. `/api/settings/visual-identity`
+  now checks the brand belongs to the signed-in user.
+- **Security fix:** every settings write route that took a brand or strategy
+  id from the body (brand-basics, brand-voice, positioning, products,
+  funnel, guidelines, visual-identity) now checks it's the signed-in user's
+  own (`lib/brand-access.ts`); product delete checks the product's brand.
+- **Open:** add `OPENAI_API_KEY` (local + Vercel) to use GPT Image.
+
+## Session 2026-10-14: Campaign factory (workflow modeled on the Higgsfield skills)
+
+Plan: `~/.claude/plans/eager-swinging-unicorn.md`. Jordan found the app
+complicated and the output generic (copy and visuals both). Decisions he made:
+factory flow as Home, all four kinds (social, ads, email, blog), start from
+just a sentence, live web research, workflow only (Gemini stays, no
+Higgsfield in the app), hide rather than delete old screens, and code-set
+flyer text.
+
+- **Flow:** one sentence -> Sonnet research turn with web search/fetch
+  (cited; sources the search didn't return are dropped) -> Sonnet plan (each
+  row its own format, hook, and core idea; flags rows that need a real detail)
+  -> quote from this brand's real per-kind draft costs -> "Test 3 first" or
+  "Make all" -> pieces generate 3 at a time over the normal generate-stream
+  route -> approve-all -> social posts go out on their day via the daily cron,
+  emails get "Schedule all", blogs publish one by one, ads never get a posting
+  date (the cron would post them organically).
+- **No migration:** factory state lives in `campaigns.chat_state.factory`.
+- **Flyers changed for every path, not just the factory:** art is text-free
+  and code composes headline/subtext/CTA/logo in the brand's Google font
+  (4 layouts, one per option). Product photo (factory upload or the topic's
+  product) is a reference; with one, options render on standard, not lite.
+  The edit sheet's exact-prompt path is unchanged (no overlay).
+- **Copy:** factory pieces lock their planned angle (skip the angle call),
+  carry research facts in the brief, and QA grounding counts those facts as
+  real so they aren't rewritten away. Fresh blogs now honor a per-piece brief
+  (was a bug for series blogs too).
+- **Nav:** Create / Campaigns / Review / Library + collapsed "More tools".
+  The old chat lives at /chat.
+- Still open: logged-in click-through (research + Test 3 spends real credits,
+  roughly $0.15-0.40 for planning plus the pieces); check composed flyers on a
+  brand whose font isn't on Google Fonts (falls back to Inter); commit.
 
 ## Session 2026-10-11: Facebook + Instagram publishing (phase 2)
 

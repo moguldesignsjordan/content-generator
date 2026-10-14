@@ -17,10 +17,10 @@ import { stripEmDashes, stripMarkdown } from "@/lib/text";
 
 // Flyer prompt assembly: one FAST_MODEL call produces several alternative
 // flyers, each with its copy AND a scene concept (save_flyer_variants), then
-// buildFlyerImagePrompt turns each into a render prompt. Unlike the hero-image scaffolds
-// (prompts/generate-image.ts), which forbid text, a flyer is a DESIGNED
-// GRAPHIC: the render prompt passes the exact headline/subtext/CTA strings for
-// the image model to typeset, plus the brand palette and font direction.
+// buildFlyerImagePrompt turns each into a text-free ARTWORK prompt. The
+// headline, supporting line, CTA, and logo are composed on top in code with
+// the brand's real fonts (lib/flyer/compose.tsx), so spelling and type are
+// always exact and on-brand.
 
 /** Post-shape presets. Width/height are the export targets (IG-native sizes). */
 export const FLYER_ASPECTS: Record<
@@ -44,18 +44,18 @@ export function isFlyerAspect(value: unknown): value is FlyerAspect {
 // preset is ignored entirely (the reference IS the style).
 export const FLYER_STYLE_DIRECTIONS: Record<FlyerStyleId, string> = {
   bold_type:
-    "Style direction: a bold typographic poster. The headline is the hero at " +
-    "massive scale, high-contrast solid color blocks, minimal supporting " +
-    "imagery, a confident grid.",
+    "Style direction: a bold graphic poster look. High-contrast solid color " +
+    "blocks and big simple shapes, minimal imagery, a confident grid with a " +
+    "large open area where the headline will sit.",
   minimal:
     "Style direction: sleek and minimal. Generous empty space, one small " +
     "focal element, restrained palette, hairline details, quiet premium feel.",
   photo_backdrop:
-    "Style direction: a full-bleed photographic backdrop drawn from the scene, " +
-    "with a subtle dark or light overlay so every word stays highly legible.",
+    "Style direction: a full-bleed photograph drawn from the scene, naturally " +
+    "lit, with calm, simple areas where text can sit.",
   illustrated:
     "Style direction: flat vector illustration. Friendly geometric shapes, " +
-    "clean edges, generous negative space around the text.",
+    "clean edges, generous negative space.",
   collage:
     "Style direction: an editorial paper-cutout collage. Layered elements " +
     "with subtle real shadows, tactile, magazine-cover energy.",
@@ -64,10 +64,10 @@ export const FLYER_STYLE_DIRECTIONS: Record<FlyerStyleId, string> = {
     "slightly misregistered ink layers, subtle halftone grain and paper texture.",
   gradient_glow:
     "Style direction: smooth flowing brand-color gradients with a soft glow, " +
-    "modern tech-launch energy, crisp type floating on top.",
+    "modern tech-launch energy.",
   elegant:
-    "Style direction: premium and elegant. Refined serif-led typography, " +
-    "luxurious spacing, delicate rules and details, understated color.",
+    "Style direction: premium and elegant. Refined materials, luxurious " +
+    "spacing, delicate details, understated color.",
 };
 
 export function isFlyerStyle(value: unknown): value is FlyerStyleId {
@@ -448,9 +448,17 @@ export function parseFlyerVariants(
     .map(cleanFlyerCopy);
 }
 
+/** Where the text panel lands on the composed flyer, so the art keeps that
+ * part of the frame calm (see lib/flyer/layout.ts). */
+export type FlyerQuietZone = "top" | "bottom" | "none";
+
 /**
- * Builds the final render prompt: exact text to typeset, brand palette and
- * font direction, the scene, and (optionally) the style-reference directive.
+ * Builds the render prompt for the flyer's ARTWORK only. The headline,
+ * supporting line, CTA, and logo are set on top afterwards in code with the
+ * brand's real fonts and colors (lib/flyer/compose.tsx), so the model is told
+ * to draw no text at all: image models misspell and off-brand type, code
+ * doesn't. Reference images, when attached, come in this order: the product
+ * photo (kept exactly as it is), then a style reference.
  */
 export function buildFlyerImagePrompt(
   copy: FlyerCopyOutput,
@@ -458,39 +466,39 @@ export function buildFlyerImagePrompt(
   aspect: FlyerAspect,
   hasReference: boolean,
   style?: FlyerStyleId,
+  opts: { hasProduct?: boolean; quietZone?: FlyerQuietZone } = {},
 ): string {
   const c = tokens.colors;
   const palette = [c.primary, c.accent, c.secondary, c.background]
     .filter(Boolean)
     .join(", ");
-
-  const textLines = [
-    `the headline "${copy.headline}"`,
-    copy.subtext ? `the supporting line "${copy.subtext}"` : "",
-    copy.cta ? `a call-to-action button or banner reading "${copy.cta}"` : "",
-  ].filter(Boolean);
+  const quiet =
+    opts.quietZone === "bottom"
+      ? "Keep the lower 45% of the frame calm and uncluttered (soft background, no key subjects): a text panel goes there."
+      : opts.quietZone === "top"
+        ? "Keep the upper 40% of the frame calm and uncluttered (soft background, no key subjects): a text panel goes there."
+        : "";
 
   const parts = [
-    `Design a polished social media flyer, ${FLYER_ASPECTS[aspect].label.toLowerCase()}.`,
-    `Typeset EXACTLY this text and nothing else: ${textLines.join(", ")}.`,
-    "Every word spelled exactly as given, no extra words, labels, or filler text.",
-    "Strong typographic hierarchy: headline dominant, supporting text clearly smaller.",
-    `Brand palette (use these colors for backgrounds, accents, and the CTA): ${palette}.`,
-    `Typography in the spirit of ${tokens.fonts.heading} for headings and ${tokens.fonts.body} for supporting text.`,
-    `Imagery and composition: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    `Create the artwork for a social media post, ${FLYER_ASPECTS[aspect].label.toLowerCase()}.`,
+    `Scene: ${copy.scene.trim().replace(/\.$/, "")}.`,
     // The uploaded reference IS the style; a preset direction would fight it.
     ...(style && !hasReference ? [FLYER_STYLE_DIRECTIONS[style]] : []),
-    "Clean margins, high contrast between text and background, professional agency quality.",
-    "No watermarks, no logos, no borders, no fake UI.",
-  ];
-
-  if (hasReference) {
-    parts.push(
-      "A reference image is attached: match its visual style, layout language, " +
-        "color treatment, and mood, but keep the text content exactly as " +
-        "specified above.",
-    );
-  }
+    `Build the color mood around the brand palette: ${palette}.`,
+    ...(opts.hasProduct
+      ? [
+          "The first attached image is the real product: show this exact product, unchanged (same shape, colors, label, and proportions), as the clear hero of the scene. Do not redesign it or add other products.",
+        ]
+      : []),
+    ...(hasReference
+      ? [
+          `${opts.hasProduct ? "The last" : "An"} attached image is a style reference: match its visual style, color treatment, and mood, not its content.`,
+        ]
+      : []),
+    quiet,
+    "Absolutely no text anywhere: no words, letters, numbers, logos, signs, labels, captions, or watermarks (the product's own printed label is the only exception).",
+    "Specific and crafted, never generic stock imagery: no handshakes, no people pointing at laptops, no lightbulbs.",
+  ].filter(Boolean);
 
   return parts.join(" ");
 }

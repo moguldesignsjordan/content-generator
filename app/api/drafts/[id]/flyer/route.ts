@@ -8,7 +8,8 @@ import {
 import { requireDraftInBrand } from "@/lib/draft-access";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
 import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
-import { resolveImageModel } from "@/lib/clients/gemini-image";
+import { resolveImageModel } from "@/lib/clients/image-render";
+import { isImageModelTier } from "@/lib/image-models";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
 import {
@@ -24,7 +25,7 @@ import { guardAiRoute } from "@/lib/ai-guard";
 
 // A Gemini render + optimize + upload usually lands in 10-25s; headroom for
 // retries and cold buckets, same as the hero-image route.
-export const maxDuration = 120;
+export const maxDuration = 240;
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -34,8 +35,9 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
  *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt? }.
  *    Copy fields default to the stored flyer_copy; exactPrompt sends the full
  *    prompt verbatim (the tweak-and-regenerate path). Zero Claude tokens
- *    either way, one Gemini render. { tier: "pro" } is "Finalize in Pro":
- *    the current option re-rendered on the pro image model.
+ *    either way, one image render. { tier } (any image model choice) is
+ *    "Finalize": the current option re-rendered on that model, upgrading it
+ *    in place.
  *  - "upload": { file } replaces the design with the user's own image,
  *    cover-fitted to the flyer's post shape. No AI.
  *  - "caption": { caption, hashtags? } edits the post caption only. No AI,
@@ -160,6 +162,7 @@ export async function POST(
           flyer_image: variant.image,
           flyer_scene: variant.scene,
           flyer_style: variant.style,
+          flyer_layout: variant.layout,
           flyer_variant_index: index,
         },
       );
@@ -302,7 +305,13 @@ export async function POST(
 
     const exactPrompt =
       (form.get("exactPrompt") as string | null)?.trim().slice(0, 2000) || undefined;
-    const finalize = form.get("tier") === "pro";
+    const rawTier = form.get("tier");
+    const finalizeTier = isImageModelTier(rawTier) ? rawTier : null;
+    const finalize = finalizeTier !== null;
+    // A plain model choice from the edit sheet: renders on that model without
+    // the finalize-in-place upgrade.
+    const rawModel = form.get("model");
+    const renderTier = finalizeTier ?? (isImageModelTier(rawModel) ? rawModel : null);
     const variantIndex = meta.flyer_variant_index;
 
     const copyForRender = { headline, subtext, cta, caption: currentCopy?.caption ?? "", hashtags: currentCopy?.hashtags, scene };
@@ -314,7 +323,9 @@ export async function POST(
       style: meta.flyer_style,
       reference,
       exactPrompt,
-      ...(finalize ? { model: resolveImageModel("pro") } : {}),
+      ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
+      ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
+      ...(meta.product_photo_url ? { productPhotoUrl: meta.product_photo_url } : {}),
       draftId: id,
     });
 

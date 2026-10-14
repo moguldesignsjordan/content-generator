@@ -37,3 +37,6 @@ yarn-error.log*
 # Playwright MCP debug snapshots/console logs
 /.playwright-mcp/
 .env*
+
+# Supabase CLI local cache (linked project, version check)
+supabase/.temp/

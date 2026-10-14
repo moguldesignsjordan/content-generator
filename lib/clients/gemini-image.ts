@@ -12,31 +12,22 @@ import { logPrompt } from "@/lib/log";
 // the live docs (2026-07): the Interactions API returns the generated image
 // as base64 on interaction.output_image.data, never a URL to fetch.
 //
-// Models: three quality tiers, all on the same Interactions API (verified
-// against the live model docs 2026-07): gemini-3.1-flash-lite-image (fastest,
-// 1K only), gemini-3.1-flash-image (the recommended workhorse, today's
-// default), gemini-3-pro-image (premium, ~3x per-render cost). Each id stays
-// overridable via env without a code change.
+// Which model and size each quality choice maps to lives in
+// lib/clients/image-render.ts (it also dispatches to the optional OpenAI
+// engine). Model keys here are "model@size", e.g. "gemini-nano-banana-2.1@1K";
+// a bare id renders 1K.
 // ─────────────────────────────────────────────────────────────────────────────
-
-import type { ImageModelTier } from "@/lib/db/types";
-import { DEFAULT_IMAGE_MODEL_TIER } from "@/lib/image-models";
 
 const apiKey = process.env.GEMINI_API_KEY;
 
-export const IMAGE_MODELS: Record<ImageModelTier, string> = {
-  lite: process.env.GEMINI_IMAGE_MODEL_LITE ?? "gemini-3.1-flash-lite-image",
-  standard: process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image",
-  pro: process.env.GEMINI_IMAGE_MODEL_PRO ?? "gemini-3-pro-image",
-};
+export type ImageSize = "1K" | "2K" | "4K";
 
-/** The default (standard-tier) model; kept for existing imports/logs. */
-export const IMAGE_MODEL = IMAGE_MODELS[DEFAULT_IMAGE_MODEL_TIER];
-
-/** Tier → concrete model id, defaulting to the standard workhorse. */
-export function resolveImageModel(tier?: ImageModelTier): string {
-  return IMAGE_MODELS[tier ?? DEFAULT_IMAGE_MODEL_TIER];
+/** "gemini-nano-banana-2.1@2K" → its id and output size; a bare id is 1K. */
+export function splitImageModel(key: string): { id: string; size: ImageSize } {
+  const [id, size] = key.split("@");
+  return { id, size: size === "2K" || size === "4K" ? size : "1K" };
 }
+
 
 export function isGeminiConfigured(): boolean {
   return Boolean(apiKey);
@@ -83,6 +74,9 @@ export interface GeminiImageArgs {
    * the model can hold palette/style consistency across a set.
    */
   reference?: { data: string; mimeType: string };
+  /** More reference images, sent after `reference` in order (e.g. a product
+   * photo, then a style reference). The prompt says which is which. */
+  references?: { data: string; mimeType: string }[];
   /** Concrete model id (from resolveImageModel); defaults to the standard
    * workhorse so existing callers behave unchanged. */
   model?: string;
@@ -95,16 +89,20 @@ export interface GeminiImageArgs {
 export async function generateGeminiImage(
   args: GeminiImageArgs,
 ): Promise<{ data: Buffer; mimeType: string }> {
-  const { prompt, aspectRatio = "16:9", reference, model = IMAGE_MODEL } = args;
+  const { prompt, aspectRatio = "16:9", reference, model = "gemini-nano-banana-2.1@1K" } = args;
+  const { id: modelId, size } = splitImageModel(model);
+  const refs = [...(reference ? [reference] : []), ...(args.references ?? [])];
 
-  const input = reference
+  // One text part, then one image part per reference (the live docs' shape
+  // for multi-reference requests on the Interactions API).
+  const input = refs.length
     ? [
         { type: "text" as const, text: prompt },
-        {
+        ...refs.map((r) => ({
           type: "image" as const,
-          data: reference.data,
-          mime_type: reference.mimeType,
-        },
+          data: r.data,
+          mime_type: r.mimeType,
+        })),
       ]
     : prompt;
 
@@ -120,9 +118,11 @@ export async function generateGeminiImage(
       model,
       prompt,
       aspect_ratio: aspectRatio,
-      ...(reference
+      ...(refs.length
         ? {
-            reference: `[${Math.round((reference.data.length * 3) / 4 / 1024)} KB ${reference.mimeType} omitted]`,
+            reference: refs
+              .map((r) => `[${Math.round((r.data.length * 3) / 4 / 1024)} KB ${r.mimeType} omitted]`)
+              .join(" "),
           }
         : {}),
     },
@@ -130,7 +130,7 @@ export async function generateGeminiImage(
 
   const interaction = await withTransientRetry(() =>
     getGenAI().interactions.create({
-      model,
+      model: modelId,
       input,
       // Don't retain requests/responses server-side; we host the result ourselves.
       store: false,
@@ -138,7 +138,7 @@ export async function generateGeminiImage(
         type: "image",
         mime_type: "image/jpeg",
         aspect_ratio: aspectRatio,
-        image_size: "1K",
+        image_size: size,
       },
     }),
   );

@@ -10,7 +10,7 @@ import type {
   MediaAsset,
 } from "@/lib/db/types";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
-import { IMAGE_MODEL_CATALOG } from "@/lib/image-models";
+import { useImageModelOptions } from "../../../_components/image-models-context";
 
 // The one image tool for a draft: generate an on-brand hero (optionally
 // steered by a reference image), upload your own, move it, or remove it.
@@ -187,7 +187,8 @@ export function ImageSheet({
   const [tab, setTab] = useState<"generate" | "upload" | "library">("generate");
   const [libraryAssets, setLibraryAssets] = useState<MediaAsset[] | null>(null);
   const [style, setStyle] = useState<string>("illustration");
-  // "" = the brand's stored default tier; a tap overrides for this render only.
+  // "" = the brand's stored default model; a tap overrides for this render only.
+  const imageModelOptions = useImageModelOptions();
   const [modelTier, setModelTier] = useState<string>("");
   // null = follow the style's default (photos natural, graphic styles branded).
   const [brandColors, setBrandColors] = useState<BrandPaletteMode | null>(null);
@@ -447,7 +448,7 @@ export function ImageSheet({
             </p>
           </div>
           <div className="mt-3">
-            <p className="text-xs font-medium text-muted">Quality</p>
+            <p className="text-xs font-medium text-muted">Model</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Chip
                 active={modelTier === ""}
@@ -456,7 +457,7 @@ export function ImageSheet({
               >
                 My default
               </Chip>
-              {IMAGE_MODEL_CATALOG.map((m) => (
+              {imageModelOptions.map((m) => (
                 <Chip
                   key={m.id}
                   active={modelTier === m.id}
@@ -469,8 +470,8 @@ export function ImageSheet({
             </div>
             <p className="mt-1.5 text-[11px] text-muted">
               {modelTier
-                ? IMAGE_MODEL_CATALOG.find((m) => m.id === modelTier)?.description
-                : "Uses the model picked in Settings, Standard unless you changed it."}
+                ? imageModelOptions.find((m) => m.id === modelTier)?.description
+                : "Uses the model picked in Settings, Nano Banana 2.1 unless you changed it."}
             </p>
           </div>
           <div className="mt-3">

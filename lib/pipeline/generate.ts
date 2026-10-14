@@ -72,7 +72,9 @@ import {
   useProductPhotoAsHero,
 } from "./generate-image";
 import {
+  IMAGE_STYLE_LABELS as STYLE_LABELS,
   VISUAL_VIBE_IMAGE_STYLE,
+  buildImageBrandContext,
   pickVariedImageStyle,
   resolveBrandPalette,
 } from "@/prompts/generate-image";
@@ -137,10 +139,16 @@ export async function generateEmailForTopicStreamed(
 
     // Decide WHAT to argue before writing it. Non-fatal: a null angle means
     // the drafting prompt is exactly what it was before this step existed.
-    const strategizing = { phase: "strategizing", label: "Choosing the angle" };
-    await patchDraftGeneration(draftId, strategizing);
-    onEvent({ type: "phase", ...strategizing });
-    const angleResult = await pickAngle(ctx, { brief, channel: "email" });
+    // A locked angle (a factory plan row) was already chosen by the owner, so
+    // there's nothing to propose: skipping saves a call and keeps the piece on
+    // the idea that was approved.
+    let angleResult: Awaited<ReturnType<typeof pickAngle>> = null;
+    if (!brief?.angle_locked) {
+      const strategizing = { phase: "strategizing", label: "Choosing the angle" };
+      await patchDraftGeneration(draftId, strategizing);
+      onEvent({ type: "phase", ...strategizing });
+      angleResult = await pickAngle(ctx, { brief, channel: "email" });
+    }
     const angle = chosenAngle(angleResult?.angle);
 
     await patchDraftGeneration(draftId, writing);
@@ -233,6 +241,9 @@ export async function generateEmailForTopicStreamed(
           tone: brief?.tone,
           vibe: brief?.visual_vibe,
           imageStyle: brief?.image_style,
+          subject: brief?.image_subject,
+          keyMessage: brief?.key_message,
+          kind: "email",
         },
       );
     }
@@ -397,6 +408,16 @@ export async function maybeAutoHeroImage(
     /** The piece's explicit art-style choice (brief.image_style): wins over
      * the vibe mapping, the brand default, and the varied rotation. */
     imageStyle?: ContentImageStyle;
+    /** A real product photo for this piece (brief.product_photo_url). With
+     * the topic's own product photo as fallback, it becomes the render's
+     * subject reference so the hero shows the actual product. */
+    productPhotoUrl?: string;
+    /** What the picture should show (a factory plan row's picture idea,
+     * brief.image_subject): the scene writer keeps every element of it. */
+    subject?: string;
+    /** The piece's key message, so the scene supports the actual point. */
+    keyMessage?: string;
+    kind?: "email" | "blog";
   },
 ): Promise<ContentImage | undefined> {
   const prefs = ctx.brand.visual_identity?.image_gen;
@@ -413,15 +434,22 @@ export async function maybeAutoHeroImage(
   try {
     // Style precedence: the piece's explicit choice (the campaign form's
     // "what kind of picture" answer) → the per-piece vibe's mapped style →
-    // the brand's stored default → a per-draft varied rotation. The rotation
-    // replaced a hardcoded "illustration" fallback that made every no-
-    // preference email hero look the same.
+    // the brand's stored default → a rotation within the brand's house
+    // styles → one style seeded by the brand, so a brand with no preference
+    // still looks like one company across every email and post.
     const vibe = emailContext?.vibe;
+    // Saved prefs aren't validated on save; keep only real styles.
+    const houseStyles = (prefs?.house_styles ?? []).filter((st) => st in STYLE_LABELS);
     const style =
       emailContext?.imageStyle ||
       (vibe && VISUAL_VIBE_IMAGE_STYLE[vibe]) ||
       prefs?.style ||
-      pickVariedImageStyle(progress?.draftId);
+      (houseStyles.length
+        ? pickVariedImageStyle(progress?.draftId, houseStyles)
+        : pickVariedImageStyle(ctx.brand.id));
+    const productPhoto = await loadSubjectReference(
+      emailContext?.productPhotoUrl ?? ctx.product?.image_url ?? undefined,
+    );
     const generated = await generateContentImage({
       tokens: resolveBrandTokens(ctx.brand),
       brandId: ctx.brand.id,
@@ -435,12 +463,35 @@ export async function maybeAutoHeroImage(
       tone: emailContext?.tone,
       vibe,
       modelTier: prefs?.model,
+      brandContext: buildImageBrandContext(ctx.brand, ctx.primaryIcp),
+      ...(emailContext?.subject ? { subject: emailContext.subject } : {}),
+      ...(emailContext?.keyMessage ? { keyMessage: emailContext.keyMessage } : {}),
+      kind: emailContext?.kind ?? "email",
+      ...(productPhoto ? { reference: productPhoto, referenceUse: "subject" as const } : {}),
     });
     usageDeltas.push(...generated.usage);
     return { ...generated.image, placement: "top" };
   } catch (err) {
     logError("pipeline:generate:auto-hero-image", err);
     return undefined;
+  }
+}
+
+/** A product photo as an image-model reference; null (logged) on any failure,
+ * so the hero still renders from the scene alone. */
+async function loadSubjectReference(
+  url: string | undefined,
+): Promise<{ data: string; mimeType: string } | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    return await prepareReferenceImage(Buffer.from(await res.arrayBuffer()));
+  } catch (err) {
+    logWarn("pipeline:generate:product-reference", err instanceof Error ? err.message : String(err), {
+      url,
+    });
+    return null;
   }
 }
 

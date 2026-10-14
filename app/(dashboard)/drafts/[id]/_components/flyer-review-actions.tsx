@@ -9,6 +9,7 @@ import {
   Field,
   Input,
   LinkButton,
+  Select,
   Sheet,
   Textarea,
   Tooltip,
@@ -22,6 +23,7 @@ import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { FlyerSheet } from "./flyer-sheet";
 import { AdCopyCard } from "./ad-copy-card";
+import { useImageModelOptions } from "../../../_components/image-models-context";
 
 /** A connected network this flyer can post to (see lib/publishing/providers). */
 export interface SocialTarget {
@@ -37,8 +39,6 @@ interface FlyerReviewActionsProps {
   state: string;
   initialMeta: DraftMeta;
   initialArchived: boolean;
-  /** Estimated cost of one pro-tier render, for the Finalize in Pro hint. */
-  proRenderUsd: number;
   socialTargets: SocialTarget[];
   /** Where this flyer already went, keyed by provider id. */
   initialPosts: Record<string, { url: string | null }>;
@@ -65,7 +65,6 @@ export function FlyerReviewActions({
   state: initialState,
   initialMeta,
   initialArchived,
-  proRenderUsd,
   socialTargets,
   initialPosts,
 }: FlyerReviewActionsProps) {
@@ -255,6 +254,11 @@ export function FlyerReviewActions({
     }
   }
 
+  // Finalizing re-renders the picked option once on the chosen model.
+  const imageModelOptions = useImageModelOptions();
+  const [finalizeModel, setFinalizeModel] = useState<string>("pro");
+  const finalizeOption = imageModelOptions.find((m) => m.id === finalizeModel);
+
   async function handleFinalize() {
     if (variantIndex === undefined) return;
     const index = variantIndex;
@@ -262,7 +266,7 @@ export function FlyerReviewActions({
     try {
       const form = new FormData();
       form.set("mode", "generate");
-      form.set("tier", "pro");
+      form.set("tier", finalizeModel);
       const result = await postFlyer(form, "Couldn't finalize the flyer.");
       setImage(result.image);
       if (result.copy) setCopy(result.copy);
@@ -271,7 +275,7 @@ export function FlyerReviewActions({
           i === index ? { ...v, image: result.image, finalized: true } : v,
         ),
       );
-      toast.success("Finalized in Pro quality.");
+      toast.success(`Finalized with ${finalizeOption?.label ?? "the chosen model"}.`);
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't finalize the flyer.");
@@ -360,20 +364,35 @@ export function FlyerReviewActions({
         {isActionable && (
           <div className="mb-3 flex items-center justify-end gap-4">
             {currentVariant && !currentVariant.finalized && (
-              <Tooltip
-                label={`Re-renders this option once at the highest quality, about $${proRenderUsd.toFixed(2)}.`}
-                side="top"
-              >
-                <Button
-                  variant="gradient"
-                  size="sm"
-                  loading={finalizing}
-                  disabled={busy}
-                  onClick={() => void handleFinalize()}
+              <div className="flex items-center gap-2">
+                <Select
+                  aria-label="Model to finalize with"
+                  value={finalizeModel}
+                  disabled={busy || finalizing}
+                  onChange={(e) => setFinalizeModel(e.target.value)}
+                  className="h-8 text-[12px]"
                 >
-                  Finalize in Pro
-                </Button>
-              </Tooltip>
+                  {imageModelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </Select>
+                <Tooltip
+                  label={`Re-renders this option once. ${finalizeOption?.description ?? ""}`}
+                  side="top"
+                >
+                  <Button
+                    variant="gradient"
+                    size="sm"
+                    loading={finalizing}
+                    disabled={busy}
+                    onClick={() => void handleFinalize()}
+                  >
+                    Finalize
+                  </Button>
+                </Tooltip>
+              </div>
             )}
             <button
               type="button"

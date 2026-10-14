@@ -62,35 +62,37 @@ describe("isFlyerAspect", () => {
 });
 
 describe("buildFlyerImagePrompt", () => {
-  it("passes every text string verbatim and the brand palette", () => {
+  it("keeps the copy out of the art prompt and forbids drawn text", () => {
     const prompt = buildFlyerImagePrompt(copy, tokens, "4:5", false);
-    expect(prompt).toContain('"Your website is losing you clients"');
-    expect(prompt).toContain('"We fix that in 14 days"');
-    expect(prompt).toContain('"Book a call"');
+    // Text is composed in code afterwards, so no copy string reaches the model.
+    expect(prompt).not.toContain("Your website is losing you clients");
+    expect(prompt).not.toContain("We fix that in 14 days");
+    expect(prompt).not.toContain("Book a call");
+    expect(prompt).toContain("Absolutely no text anywhere");
     expect(prompt).toContain("#111827");
     expect(prompt).toContain("#7C3AED");
-    expect(prompt).toContain("Sora, sans-serif");
     expect(prompt).toContain("portrait post (4:5)");
     expect(prompt).toContain(copy.scene.replace(/\.$/, ""));
-    expect(prompt).not.toContain("reference image");
+    expect(prompt).not.toContain("attached");
   });
 
-  it("omits subtext and cta clauses when absent", () => {
-    const prompt = buildFlyerImagePrompt(
-      { headline: "Hello", caption: "c", scene: "a plain desk" },
-      tokens,
-      "1:1",
-      false,
-    );
-    expect(prompt).toContain('"Hello"');
-    expect(prompt).not.toContain("supporting line \"");
-    expect(prompt).not.toContain("call-to-action button or banner reading");
+  it("asks for a calm zone where the text panel goes", () => {
+    const bottom = buildFlyerImagePrompt(copy, tokens, "1:1", false, undefined, { quietZone: "bottom" });
+    expect(bottom).toContain("lower 45% of the frame calm");
+    const none = buildFlyerImagePrompt(copy, tokens, "1:1", false, undefined, { quietZone: "none" });
+    expect(none).not.toContain("of the frame calm");
+  });
+
+  it("locks the product when its photo is attached, and orders the references", () => {
+    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", true, undefined, { hasProduct: true });
+    expect(prompt).toContain("first attached image is the real product");
+    expect(prompt).toContain("unchanged");
+    expect(prompt).toContain("The last attached image is a style reference");
   });
 
   it("appends the style-transfer directive only when a reference is attached", () => {
     const withRef = buildFlyerImagePrompt(copy, tokens, "1:1", true);
-    expect(withRef).toContain("reference image is attached");
-    expect(withRef).toContain("keep the text content exactly as specified");
+    expect(withRef).toContain("An attached image is a style reference");
   });
 
   it("splices the design-direction preset when one is chosen", () => {
@@ -101,7 +103,13 @@ describe("buildFlyerImagePrompt", () => {
   it("drops the preset when a reference is attached (the reference IS the style)", () => {
     const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", true, "retro_print");
     expect(prompt).not.toContain(FLYER_STYLE_DIRECTIONS.retro_print);
-    expect(prompt).toContain("reference image is attached");
+    expect(prompt).toContain("style reference");
+  });
+
+  it("no preset direction asks the model to draw a headline", () => {
+    for (const direction of Object.values(FLYER_STYLE_DIRECTIONS)) {
+      expect(direction.toLowerCase()).not.toMatch(/typograph|headline is|every word|crisp type/);
+    }
   });
 });
 

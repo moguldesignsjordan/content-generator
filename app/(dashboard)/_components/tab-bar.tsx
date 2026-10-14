@@ -28,7 +28,7 @@ export function TabBar({
   const overflow = items.filter((item) => !item.core);
   const overflowActive = overflow.some((item) => item.match(pathname));
 
-  const groups = (["content", "media", "account", "admin"] as NavGroup[])
+  const groups = (["more", "account", "admin"] as NavGroup[])
     .map((group) => ({
       group,
       items: overflow.filter((item) => item.group === group),

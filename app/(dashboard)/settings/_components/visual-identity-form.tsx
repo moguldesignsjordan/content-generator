@@ -20,10 +20,12 @@ import type {
   VisualIdentity,
 } from "@/lib/db/types";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
+import { cn } from "@/lib/cn";
 import {
   DEFAULT_IMAGE_MODEL_TIER,
-  IMAGE_MODEL_CATALOG,
+  displayImageTier,
 } from "@/lib/image-models";
+import { useImageModelOptions } from "../../_components/image-models-context";
 
 const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
   { value: "auto", label: "Auto (photos stay natural, everything else gets accents)" },
@@ -31,10 +33,11 @@ const BRAND_PALETTE_OPTIONS: { value: BrandPalettePref; label: string }[] = [
   { value: "never", label: "Never force brand colors" },
 ];
 
-// "" = no pinned style: each draft rotates through varied styles (see
+// "" = no pinned style: images rotate within the brand's house styles, or
+// with none picked, keep one consistent style for the brand (see
 // pickVariedImageStyle). A concrete value pins every auto image to one style.
 const IMAGE_STYLE_OPTIONS: { value: ContentImageStyle | ""; label: string }[] = [
-  { value: "", label: "Auto (a different style each time)" },
+  { value: "", label: "Auto (your house styles, or one consistent style)" },
   ...IMAGE_STYLE_CATALOG.map((s) => ({ value: s.id, label: s.label })),
 ];
 
@@ -82,11 +85,15 @@ export function VisualIdentityForm({
   // Auto image generation is on by default (see maybeAutoHeroImage); only an
   // explicit false in saved settings turns it off.
   const [autoImages, setAutoImages] = useState(vi.image_gen?.auto !== false);
+  const [houseStyles, setHouseStyles] = useState<ContentImageStyle[]>(
+    vi.image_gen?.house_styles ?? [],
+  );
   const [imageStyle, setImageStyle] = useState<ContentImageStyle | "">(
     vi.image_gen?.style ?? "",
   );
+  const imageModelOptions = useImageModelOptions();
   const [imageModel, setImageModel] = useState<ImageModelTier>(
-    vi.image_gen?.model ?? DEFAULT_IMAGE_MODEL_TIER,
+    displayImageTier(vi.image_gen?.model),
   );
   const [brandPalette, setBrandPalette] = useState<BrandPalettePref>(
     vi.image_gen?.brand_palette ?? "auto",
@@ -144,6 +151,7 @@ export function VisualIdentityForm({
               // "" (Auto) saves no style at all, which is what lets each
               // draft rotate through varied styles instead of pinning one.
               style: imageStyle || undefined,
+              house_styles: houseStyles.length ? houseStyles : undefined,
               brand_palette: brandPalette,
               model: imageModel,
             },
@@ -339,7 +347,7 @@ export function VisualIdentityForm({
           <div className="mt-3 max-w-xs">
             <Field
               label="Default style"
-              hint="Auto keeps your emails from all looking the same; pick a style to lock every image to it."
+              hint="Pick one to lock every image to it, or leave Auto and choose house styles below."
             >
               <Select
                 value={imageStyle}
@@ -356,18 +364,55 @@ export function VisualIdentityForm({
             </Field>
           </div>
         )}
+        {autoImages && !imageStyle && (
+          <div className="mt-3">
+            <p className="text-[13px] font-medium text-foreground">House styles</p>
+            <p className="mt-0.5 text-xs text-muted">
+              Pick one or two so every email and post looks like the same brand. With none
+              picked, one style is chosen for you and kept.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {IMAGE_STYLE_CATALOG.map((s) => {
+                const on = houseStyles.includes(s.id);
+                const full = !on && houseStyles.length >= 2;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={full}
+                    onClick={() =>
+                      setHouseStyles((cur) =>
+                        on ? cur.filter((x) => x !== s.id) : [...cur, s.id],
+                      )
+                    }
+                    className={cn(
+                      "h-8 rounded-full border px-3 text-[12px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40",
+                      on
+                        ? "border-accent/40 bg-accent/[0.12] text-foreground"
+                        : "border-border text-muted hover:text-foreground",
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="mt-3 max-w-xs">
           <Field
-            label="Image quality"
+            label="Image model"
             hint={
-              IMAGE_MODEL_CATALOG.find((m) => m.id === imageModel)?.description
+              imageModelOptions.find((m) => m.id === imageModel)?.description ??
+              "This model isn't available right now, so images use Nano Banana 2.1."
             }
           >
             <Select
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value as ImageModelTier)}
             >
-              {IMAGE_MODEL_CATALOG.map((m) => (
+              {imageModelOptions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                   {m.id === DEFAULT_IMAGE_MODEL_TIER ? " (default)" : ""}

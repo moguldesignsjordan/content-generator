@@ -20,16 +20,28 @@ const RATES: Record<string, ModelRates> = {
   [FAST_MODEL]: { inputPerMTok: 1, outputPerMTok: 5 },
 };
 
-// Per-render estimates by image model (Gemini pricing, 2026-07). Image usage
-// deltas carry the IMAGE model id in `model` (tokens are always 0 on those
-// deltas, so the Claude token rates never misfire on them).
+// Per-render prices by model key (see lib/clients/image-render.ts),
+// from the Gemini API pricing page (checked 2026-10). Image usage deltas carry
+// that key in `model` (tokens are always 0 on those deltas, so the Claude
+// token rates never misfire on them). Bare ids are legacy 1K rows in logs.
 export const IMAGE_COSTS_USD: Record<string, number> = {
-  "gemini-3.1-flash-lite-image": 0.02,
-  "gemini-3.1-flash-image": 0.045,
+  "gemini-nano-banana-2.1@1K": 0.0336,
+  "gemini-nano-banana-2.1@2K": 0.0504,
+  "gemini-nano-banana-2.1@4K": 0.113,
+  "gemini-3-pro-image@1K": 0.134,
+  "gemini-3-pro-image@2K": 0.134,
+  "gemini-3-pro-image@4K": 0.24,
+  // GPT Image 2.5 bills per token ($30/M output, $8/M image input); these are
+  // OpenAI's published per-image figures at 1024px (high ~$0.21, medium
+  // ~$0.053). Reference images add input tokens on top, not counted here.
+  "openai:gpt-image-2.5-sunburst@high": 0.211,
+  "openai:gpt-image-2.5-flare@medium": 0.053,
+  "gemini-3.1-flash-lite-image": 0.0336,
+  "gemini-3.1-flash-image": 0.067,
   "gemini-3-pro-image": 0.134,
 };
 
-export const IMAGE_COST_USD = 0.045; // fallback for unknown/legacy image models
+export const IMAGE_COST_USD = 0.067; // fallback for unknown image models
 
 export function imageCostUsd(model?: string): number {
   return (model && IMAGE_COSTS_USD[model]) || IMAGE_COST_USD;
@@ -41,8 +53,14 @@ export interface UsageDelta {
   output_tokens?: number | null;
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
+  /** Present on calls that used the server-side web search tool; each search
+   * bills separately from tokens (WEB_SEARCH_COST_USD). */
+  server_tool_use?: { web_search_requests?: number | null } | null;
   images?: number;
 }
+
+/** Anthropic's web search tool: $10 per 1,000 searches, on top of tokens. */
+export const WEB_SEARCH_COST_USD = 0.01;
 
 export function emptyUsage(): DraftUsage {
   return {
@@ -62,7 +80,11 @@ export function priceUsage(
   model: string,
   usage: Pick<
     UsageDelta,
-    "input_tokens" | "output_tokens" | "cache_read_input_tokens" | "cache_creation_input_tokens"
+    | "input_tokens"
+    | "output_tokens"
+    | "cache_read_input_tokens"
+    | "cache_creation_input_tokens"
+    | "server_tool_use"
   >,
 ): number {
   const rates = RATES[model] ?? RATES[DRAFT_MODEL];
@@ -70,12 +92,14 @@ export function priceUsage(
   const output = usage.output_tokens ?? 0;
   const cacheRead = usage.cache_read_input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const searches = usage.server_tool_use?.web_search_requests ?? 0;
 
   return (
     (input / 1e6) * rates.inputPerMTok +
     (cacheRead / 1e6) * rates.inputPerMTok * 0.1 +
     (cacheWrite / 1e6) * rates.inputPerMTok * 1.25 +
-    (output / 1e6) * rates.outputPerMTok
+    (output / 1e6) * rates.outputPerMTok +
+    searches * WEB_SEARCH_COST_USD
   );
 }
 

@@ -4,7 +4,7 @@ import {
   accumulateUsage,
   imageCostUsd,
 } from "./cost";
-import { IMAGE_MODELS, resolveImageModel } from "@/lib/clients/gemini-image";
+import { IMAGE_MODELS, resolveImageModel } from "@/lib/clients/image-render";
 import { IMAGE_MODEL_CATALOG, isImageModelTier } from "@/lib/image-models";
 
 describe("imageCostUsd", () => {
@@ -16,9 +16,9 @@ describe("imageCostUsd", () => {
     }
   });
 
-  it("charges pro renders more than lite renders", () => {
+  it("charges pro renders more than standard renders", () => {
     expect(imageCostUsd(IMAGE_MODELS.pro)).toBeGreaterThan(
-      imageCostUsd(IMAGE_MODELS.lite),
+      imageCostUsd(IMAGE_MODELS.standard),
     );
   });
 
@@ -31,21 +31,21 @@ describe("imageCostUsd", () => {
 describe("accumulateUsage image pricing", () => {
   it("prices an image delta at its own model's rate", () => {
     const pro = accumulateUsage(undefined, { model: IMAGE_MODELS.pro, images: 1 });
-    const lite = accumulateUsage(undefined, { model: IMAGE_MODELS.lite, images: 1 });
+    const standard = accumulateUsage(undefined, { model: IMAGE_MODELS.standard, images: 1 });
     expect(pro.images).toBe(1);
-    expect(pro.estimated_usd).toBeGreaterThan(lite.estimated_usd);
+    expect(pro.estimated_usd).toBeGreaterThan(standard.estimated_usd);
     expect(pro.estimated_usd).toBeCloseTo(imageCostUsd(IMAGE_MODELS.pro), 4);
   });
 
-  it("sums a flyer's lite option renders and its pro finalize by model", () => {
+  it("sums a flyer's option renders and its pro finalize by model", () => {
     let usage = undefined;
     for (let i = 0; i < 4; i++) {
-      usage = accumulateUsage(usage, { model: IMAGE_MODELS.lite, images: 1 });
+      usage = accumulateUsage(usage, { model: IMAGE_MODELS.standard, images: 1 });
     }
     usage = accumulateUsage(usage, { model: IMAGE_MODELS.pro, images: 1 });
     expect(usage.images).toBe(5);
     expect(usage.estimated_usd).toBeCloseTo(
-      4 * imageCostUsd(IMAGE_MODELS.lite) + imageCostUsd(IMAGE_MODELS.pro),
+      4 * imageCostUsd(IMAGE_MODELS.standard) + imageCostUsd(IMAGE_MODELS.pro),
       4,
     );
   });
@@ -54,9 +54,15 @@ describe("accumulateUsage image pricing", () => {
 describe("image model tiers", () => {
   it("resolveImageModel maps every catalog tier and defaults to standard", () => {
     for (const { id: tier } of IMAGE_MODEL_CATALOG) {
-      expect(resolveImageModel(tier)).toBe(IMAGE_MODELS[tier]);
+      // GPT choices fall back to standard while no OpenAI key is set (tests).
+      const expected = IMAGE_MODELS[tier].startsWith("openai:") && !process.env.OPENAI_API_KEY
+        ? IMAGE_MODELS.standard
+        : IMAGE_MODELS[tier];
+      expect(resolveImageModel(tier)).toBe(expected);
     }
     expect(resolveImageModel(undefined)).toBe(IMAGE_MODELS.standard);
+    // A saved pre-2.1 "lite" preference renders as standard.
+    expect(resolveImageModel("lite")).toBe(IMAGE_MODELS.standard);
   });
 
   it("isImageModelTier accepts catalog ids and rejects junk", () => {

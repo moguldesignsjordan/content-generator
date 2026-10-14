@@ -1,8 +1,10 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
+  Brand,
   BrandPaletteMode,
   BrandPalettePref,
   ContentImageStyle,
+  Icp,
   ReferenceUse,
   VisualVibe,
 } from "@/lib/db/types";
@@ -51,21 +53,44 @@ export const VARIED_STYLE_POOL: ContentImageStyle[] = [
 ];
 
 /**
- * The "no one chose a style" default: a per-draft rotation through the varied
- * pool instead of a hardcoded single style (which made every email hero the
- * same illustration). Deterministic for a given seed (the draft id) so
- * retries of one draft re-render in the same style; different drafts land on
- * different styles.
+ * The "no one chose a style" pick, deterministic for a given seed so retries
+ * re-render in the same style. Callers decide the seed: the BRAND id when the
+ * brand has no house styles (so every hero it makes shares one look instead of
+ * a different style per draft, which read as several different companies),
+ * or the draft id to rotate within the brand's own house styles.
  */
-export function pickVariedImageStyle(seed?: string): ContentImageStyle {
+export function pickVariedImageStyle(
+  seed?: string,
+  pool: ContentImageStyle[] = VARIED_STYLE_POOL,
+): ContentImageStyle {
+  const choices = pool.length ? pool : VARIED_STYLE_POOL;
   if (!seed) {
-    return VARIED_STYLE_POOL[Math.floor(Math.random() * VARIED_STYLE_POOL.length)];
+    return choices[Math.floor(Math.random() * choices.length)];
   }
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return VARIED_STYLE_POOL[hash % VARIED_STYLE_POOL.length];
+  return choices[hash % choices.length];
+}
+
+/**
+ * What the scene writer needs to know about the business so a hero shows
+ * THIS company's world (its work, its customers' situations) instead of a
+ * stock metaphor: what it does and who it serves. Empty when nothing's on file.
+ */
+export function buildImageBrandContext(brand: Brand, icp: Icp | null): string {
+  const p = brand.positioning ?? {};
+  const does = p.business_description?.trim() || p.tagline?.trim();
+  const who = icp
+    ? [icp.label, icp.profile?.demographics].filter((x) => x?.trim()).join(", ")
+    : "";
+  return [
+    does ? `WHAT THE BUSINESS DOES: ${does}` : "",
+    who ? `WHO IT SERVES: ${who}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 // The deterministic halves of each prompt. {SCENE} is the model-crafted
@@ -249,7 +274,7 @@ export const IMAGE_PROMPT_TOOL: Anthropic.Tool = {
         type: "string",
         description:
           "One or two sentences describing the concrete subject/scene that " +
-          "visualizes this email's core idea. Concrete nouns and actions, no " +
+          "visualizes this piece's core idea. Concrete nouns and actions, no " +
           "abstractions like 'success' or 'growth' by themselves, no style or " +
           "color words, no text elements.",
       },
@@ -305,9 +330,16 @@ export function buildImagePromptMessages(args: {
   emailType?: string;
   tone?: string;
   vibe?: VisualVibe;
+  /** buildImageBrandContext's lines: what the business does, who it serves. */
+  brandContext?: string;
+  /** The piece's key message: the point the picture should support. */
+  keyMessage?: string;
+  /** Labels the piece correctly; defaults to email. */
+  kind?: "email" | "blog";
 }): { system: string; user: string } {
   const { brandName, topicTitle, headline, style, subject, referenceUse, emailType, tone, vibe } =
     args;
+  const piece = args.kind === "blog" ? "BLOG POST" : "EMAIL";
 
   const system = [
     "You write scene descriptions for marketing hero images (emails and blog",
@@ -318,7 +350,11 @@ export function buildImagePromptMessages(args: {
     "  You may add composition detail around their elements, but never remove,",
     "  replace, or reinterpret them into something else.",
     "- Concrete and specific: objects, settings, actions. Never abstract nouns alone.",
-    "- Match the email's energy (given below, when known): a punchy or playful",
+    "- Show THIS business's world: its real work, its setting, or a moment its",
+    "  customers would recognize from their own day. Never a stock metaphor that",
+    "  could illustrate any company (handshakes, lightbulbs, rockets, puzzle",
+    "  pieces, chess pieces, people pointing at laptops, generic office smiles).",
+    "- Match the piece's energy (given below, when known): a punchy or playful",
     "  piece wants a scene with movement, a moment, or a bit of surprise; a",
     "  sleek or premium piece wants one still, considered object with lots of",
     "  breathing room. Energy shows up in WHAT the scene depicts, never in",
@@ -345,8 +381,10 @@ export function buildImagePromptMessages(args: {
 
   const user = [
     `BRAND: ${brandName}`,
-    `EMAIL TOPIC: ${topicTitle}`,
-    headline ? `EMAIL HEADLINE: ${headline}` : "",
+    args.brandContext ?? "",
+    `${piece} TOPIC: ${topicTitle}`,
+    headline ? `${piece} HEADLINE: ${headline}` : "",
+    args.keyMessage ? `THE POINT IT MAKES: ${args.keyMessage}` : "",
     `CHOSEN STYLE: ${style}`,
     emailType ? `EMAIL TYPE: ${emailType}` : "",
     tone ? `TONE: ${tone}` : "",

@@ -1,12 +1,11 @@
 import {
   ActivityIcon,
-  BlogIcon,
+  ArchiveIcon,
+  BoltIcon,
+  CheckIcon,
   CreditIcon,
-  FlyerIcon,
   GearIcon,
-  ImageIcon,
   LightbulbIcon,
-  MailIcon,
   MegaphoneIcon,
   PlusIcon,
   QrCodeIcon,
@@ -15,11 +14,10 @@ import {
   type IconProps,
 } from "@/components/ui/icons";
 
-export type NavGroup = "content" | "media" | "account" | "admin";
+export type NavGroup = "more" | "account" | "admin";
 
 export const NAV_GROUP_LABEL: Record<NavGroup, string> = {
-  content: "Content",
-  media: "Media",
+  more: "More tools",
   account: "Account",
   admin: "Admin",
 };
@@ -29,7 +27,7 @@ export interface NavItem {
   label: string;
   Icon: (props: IconProps) => React.ReactElement;
   match: (pathname: string) => boolean;
-  /** Undefined = top-level (Home), rendered above the labeled sections. */
+  /** Undefined = top-level, rendered above the labeled sections. */
   group?: NavGroup;
   /** The app's primary action. Desktop sidebar renders it as a pinned CTA
    *  under the logo instead of a plain nav row. Ignored by the mobile tab bar. */
@@ -40,10 +38,13 @@ export interface NavItem {
   adminOnly?: boolean;
 }
 
+/** The kind lists the Library page opens; Library stays lit on all of them. */
+const LIBRARY_PATHS = ["/library", "/emails", "/blogs", "/flyers", "/media"];
+
 /**
- * One ordered list drives every surface. Order within a group is the order it
- * renders; group order is fixed by the consumers (Sidebar / TabBar split
- * content+media into the main nav and account+admin into the bottom cluster).
+ * One ordered list drives every surface. Four top-level destinations carry the
+ * main loop (make a campaign, follow it, approve, find past work); the
+ * occasional tools sit under "More tools" so they never crowd it.
  */
 export const NAV: NavItem[] = [
   {
@@ -55,65 +56,54 @@ export const NAV: NavItem[] = [
     core: true,
   },
   {
-    href: "/plan",
-    label: "Content plan",
-    Icon: LightbulbIcon,
-    match: (p) => p.startsWith("/plan"),
-    group: "content",
-  },
-  {
-    href: "/emails",
-    label: "Emails",
-    Icon: MailIcon,
-    // Draft review pages (/drafts/[id]) can be either kind, and the pathname
-    // alone can't tell which — so neither Emails nor Blogs claims /drafts. The
-    // review screen's own back-link orients you instead.
-    match: (p) => p.startsWith("/emails"),
-    group: "content",
-    core: true,
-  },
-  {
-    href: "/blogs",
-    label: "Blogs",
-    Icon: BlogIcon,
-    match: (p) => p.startsWith("/blogs"),
-    group: "content",
-  },
-  {
     href: "/campaigns",
     label: "Campaigns",
     Icon: MegaphoneIcon,
     match: (p) => p.startsWith("/campaigns"),
-    group: "content",
+    core: true,
   },
   {
-    href: "/flyers",
-    label: "Flyers",
-    Icon: FlyerIcon,
-    match: (p) => p.startsWith("/flyers"),
-    group: "content",
+    href: "/review",
+    label: "Review",
+    Icon: CheckIcon,
+    // Draft review pages (/drafts/[id]) are where Review leads.
+    match: (p) => p.startsWith("/review") || p.startsWith("/drafts"),
+    core: true,
+  },
+  {
+    href: "/library",
+    label: "Library",
+    Icon: ArchiveIcon,
+    match: (p) => LIBRARY_PATHS.some((path) => p.startsWith(path)),
+    core: true,
+  },
+  {
+    href: "/plan",
+    label: "Content plan",
+    Icon: LightbulbIcon,
+    match: (p) => p.startsWith("/plan"),
+    group: "more",
+  },
+  {
+    href: "/chat",
+    label: "Quick chat",
+    Icon: BoltIcon,
+    match: (p) => p.startsWith("/chat"),
+    group: "more",
   },
   {
     href: "/social",
-    label: "Social",
+    label: "Social calendar",
     Icon: SendIcon,
     match: (p) => p.startsWith("/social"),
-    group: "content",
-  },
-  {
-    href: "/media",
-    label: "Media",
-    Icon: ImageIcon,
-    match: (p) => p.startsWith("/media"),
-    group: "media",
-    core: true,
+    group: "more",
   },
   {
     href: "/qrcode",
     label: "QR Code",
     Icon: QrCodeIcon,
     match: (p) => p.startsWith("/qrcode"),
-    group: "media",
+    group: "more",
   },
   {
     href: "/settings",

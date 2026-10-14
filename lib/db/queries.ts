@@ -29,6 +29,8 @@ import type {
   DraftJobContext,
   DraftListRow,
   DraftMeta,
+  FactoryKind,
+  ImageModelTier,
   DraftSeoData,
   EmailCopy,
   EmailDraftContent,
@@ -322,6 +324,11 @@ export async function createDraftShell(args: {
   flyerFormat?: FlyerFormat;
   /** Social only: the day the weekly schedule plans to post it. */
   plannedPublishAt?: string;
+  /** Social only: a real, already-hosted product photo the art is built
+   * around (meta.product_photo_url). */
+  productPhotoUrl?: string;
+  /** Social only: the image model picked for the options (meta.flyer_model). */
+  flyerModel?: ImageModelTier;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -341,6 +348,8 @@ export async function createDraftShell(args: {
     competitorReferenceId,
     flyerFormat,
     plannedPublishAt,
+    productPhotoUrl,
+    flyerModel,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -380,6 +389,8 @@ export async function createDraftShell(args: {
     ...(competitorReferenceId ? { competitor_reference_id: competitorReferenceId } : {}),
     ...(flyerFormat === "ad" ? { flyer_format: flyerFormat } : {}),
     ...(plannedPublishAt ? { planned_publish_at: plannedPublishAt } : {}),
+    ...(productPhotoUrl ? { product_photo_url: productPhotoUrl } : {}),
+    ...(flyerModel ? { flyer_model: flyerModel } : {}),
   };
 
   const { data: draft, error: draftErr } = await db
@@ -2241,6 +2252,8 @@ export async function getLatestActiveCampaign(
     .select("*")
     .eq("brand_id", brandId)
     .neq("status", "done")
+    // Factory campaigns run on their own page, never in the chat thread.
+    .is("chat_state->factory", null)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -2349,6 +2362,110 @@ export async function updateCampaign(
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", campaignId);
   if (error) throw error;
+}
+
+/**
+ * What a finished piece has really cost this brand, per factory kind: the
+ * average meta.usage.estimated_usd over its 20 most recent costed drafts of
+ * that kind. Feeds the factory's quote; kinds with no history are absent and
+ * the caller falls back to its defaults. Social drafts split into "ad" and
+ * "social" by meta.flyer_format.
+ */
+export async function getAverageDraftCostByKind(
+  brandId: string,
+): Promise<Partial<Record<FactoryKind, number>>> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("meta, content_jobs!inner ( type, brand_id )")
+    .eq("content_jobs.brand_id", brandId)
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (error) throw error;
+
+  const costs: Record<FactoryKind, number[]> = { social: [], ad: [], email: [], blog: [] };
+  for (const row of (data ?? []) as {
+    meta: DraftMeta | null;
+    content_jobs: { type?: string } | null;
+  }[]) {
+    const usd = row.meta?.usage?.estimated_usd;
+    if (typeof usd !== "number" || usd <= 0) continue;
+    const type = row.content_jobs?.type;
+    const kind: FactoryKind | null =
+      type === "email" || type === "blog"
+        ? type
+        : type === "social"
+          ? row.meta?.flyer_format === "ad"
+            ? "ad"
+            : "social"
+          : null;
+    if (kind && costs[kind].length < 20) costs[kind].push(usd);
+  }
+
+  const out: Partial<Record<FactoryKind, number>> = {};
+  for (const kind of Object.keys(costs) as FactoryKind[]) {
+    const list = costs[kind];
+    if (list.length) out[kind] = list.reduce((a, b) => a + b, 0) / list.length;
+  }
+  return out;
+}
+
+/** Where one draft stands, for card grids (a factory campaign's pieces, the
+ * Review page). */
+export interface DraftStatusSummary {
+  id: string;
+  kind: FactoryKind;
+  state: string;
+  generation: "generating" | "ready" | "error";
+  error?: string;
+  imageUrl: string | null;
+  subject: string;
+  qaIssues: number;
+  estimatedUsd: number;
+}
+
+/** Card status for a set of drafts, keyed by draft id. Only drafts belonging
+ * to `brandId` are returned. */
+export async function getDraftStatuses(
+  brandId: string,
+  draftIds: string[],
+): Promise<Record<string, DraftStatusSummary>> {
+  if (!draftIds.length) return {};
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("id, state, content, meta, seo_data, content_jobs!inner ( brand_id, type )")
+    .in("id", draftIds)
+    .eq("content_jobs.brand_id", brandId);
+  if (error) throw error;
+
+  const out: Record<string, DraftStatusSummary> = {};
+  for (const row of (data ?? []) as {
+    id: string;
+    state: string;
+    content: EmailDraftContent | null;
+    meta: DraftMeta | null;
+    seo_data: DraftSeoData | null;
+    content_jobs: { type?: string } | null;
+  }[]) {
+    const meta = row.meta ?? {};
+    const type = row.content_jobs?.type;
+    const generation =
+      meta.generation?.status ?? (row.content?.html || meta.flyer_image ? "ready" : "generating");
+    out[row.id] = {
+      id: row.id,
+      kind:
+        type === "blog" ? "blog" : type === "social" ? (meta.flyer_format === "ad" ? "ad" : "social") : "email",
+      state: row.state,
+      generation,
+      ...(meta.generation?.error ? { error: meta.generation.error } : {}),
+      imageUrl: meta.flyer_image?.url ?? meta.hero_image?.url ?? null,
+      subject: meta.flyer_copy?.headline ?? row.content?.subject ?? "",
+      qaIssues: row.seo_data?.issues?.length ?? 0,
+      estimatedUsd: meta.usage?.estimated_usd ?? 0,
+    };
+  }
+  return out;
 }
 
 // ── Flat list queries (dashboard Emails/Blogs tabs + assistant context) ───────

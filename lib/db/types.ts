@@ -89,7 +89,9 @@ export type BrandPalettePref = "auto" | "always" | "never";
 /** Which Gemini image model renders generated images: a quality/cost tier,
  * not a raw model id (ids live in lib/clients/gemini-image.ts and stay
  * swappable without touching stored prefs). "standard" is today's model. */
-export type ImageModelTier = "lite" | "standard" | "pro";
+/** A model choice for image renders; "lite" is a pre-Nano-Banana-2.1 saved
+ * preference that now renders as standard (see lib/clients/image-render.ts). */
+export type ImageModelTier = "lite" | "standard" | "pro" | "gpt" | "gpt_fast";
 
 export interface ImageGenPrefs {
   auto?: boolean;
@@ -98,6 +100,9 @@ export interface ImageGenPrefs {
   /** Brand-default render model tier; unset = "standard". A per-image choice
    * in the image sheet overrides it for that render only. */
   model?: ImageModelTier;
+  /** The brand's house image styles (one or two). Auto images rotate only
+   * among these; unset means one consistent style per brand. */
+  house_styles?: ContentImageStyle[];
 }
 
 export interface VisualIdentity {
@@ -428,6 +433,18 @@ export interface CampaignBrief {
    * who asked for it. Written by the create-chat route each turn (never by
    * the model, so it stays out of CAMPAIGN_BRIEF_TEXT_FIELDS) and capped. */
   conversation_notes?: string;
+  /** Factory pieces: real facts about the business (from its own site) and
+   * what's working in the niche right now, from the campaign's research.
+   * Written by the launch route, never by a model in chat, so it stays out of
+   * CAMPAIGN_BRIEF_TEXT_FIELDS. */
+  research_notes?: string;
+  /** True when the hook and angle were decided upstream (a factory plan row),
+   * so generation skips its own angle-proposal step instead of drifting from
+   * the idea the owner approved. */
+  angle_locked?: boolean;
+  /** What the hero picture should show (a factory plan row's picture idea).
+   * Set by the launch route, never by a chat model. */
+  image_subject?: string;
 }
 
 /** Cap on the stored conversation digest: enough for a full interview, small
@@ -477,6 +494,89 @@ export interface CampaignChatState {
   messages?: OnboardingMessage[];
   series?: SeriesDraftRef[];
   auto?: boolean;
+  /** Set on campaigns started from the factory (Home): one sentence, then
+   * research, a plan table, a quote, and a batch. Chat campaigns never have it. */
+  factory?: FactoryState;
+}
+
+// ── Campaign factory ─────────────────────────────────────────────────────────
+
+/** The four kinds of piece a factory campaign makes. "ad" is a social flyer in
+ * paid-ad mode (content_jobs.type='social', meta.flyer_format='ad'). */
+export type FactoryKind = "social" | "ad" | "email" | "blog";
+
+/** One research finding with the URLs it came from (only URLs the search
+ * actually returned, or the brand's own site, ever survive validation). */
+export interface FactoryFinding {
+  point: string;
+  sources: string[];
+}
+
+export interface FactoryResearch {
+  summary: string;
+  trends: FactoryFinding[];
+  competitor_patterns: FactoryFinding[];
+  hook_patterns: string[];
+  /** Real, checkable facts about this business, from its own site. */
+  brand_facts: FactoryFinding[];
+  sources: { url: string; title: string }[];
+}
+
+/** One row of the plan table. Becomes one draft when launched. */
+export interface FactoryPlanItem {
+  /** Stable row id for edits and removal. */
+  id: string;
+  kind: FactoryKind;
+  /** A CampaignFormatId from prompts/campaign-formats.ts. */
+  format: string;
+  title: string;
+  hook: string;
+  /** The one idea this piece is built on (the skills' "trick"). */
+  core_idea: string;
+  key_message: string;
+  /** What the picture shows (social, ads, and hero images). */
+  visual?: string;
+  /** Subject line for emails and blogs, caption opener for social and ads. */
+  preview: string;
+  cta?: string;
+  /** "YYYY-MM-DD", assigned in code so formats alternate day to day. */
+  date: string;
+  inspired_by?: string;
+  /** True when the piece leans on proof (a number, result, or story) that
+   * nobody has supplied yet. */
+  needs_detail: boolean;
+  /** What to ask the user for when needs_detail is set, e.g. "How many sites
+   * did you launch this year?" */
+  detail_prompt?: string;
+  /** The real detail the user typed into the plan table. Wins over invention. */
+  detail?: string;
+  offer_slug?: string;
+  /** Set once launched. */
+  draft_id?: string;
+}
+
+export interface FactoryQuote {
+  /** Estimated USD per finished piece, by kind. */
+  unit_usd: Record<FactoryKind, number>;
+  /** Which kinds' estimates came from this brand's real recent drafts. */
+  from_history: Record<FactoryKind, boolean>;
+  all: { usd: number; credits: number; count: number };
+  test: { usd: number; credits: number; count: number };
+}
+
+export interface FactoryState {
+  sentence: string;
+  kinds: FactoryKind[];
+  size: number;
+  days: number;
+  photo_url?: string;
+  /** Matched saved product, when the sentence is about one. */
+  offer_slug?: string;
+  research?: FactoryResearch;
+  plan?: FactoryPlanItem[];
+  quote?: FactoryQuote;
+  /** What research + planning actually cost. */
+  planning_usd?: number;
 }
 
 export interface Campaign {
@@ -844,12 +944,18 @@ export interface FlyerCopy {
 }
 
 /** One option from a multi-variant flyer generation (meta.flyer_variants). */
+/** How the code-set text sits on a composed flyer (see lib/flyer/layout.ts). */
+export type FlyerLayout = "band_bottom" | "band_top" | "gradient" | "card";
+
 export interface FlyerVariant {
   /** Absent when an uploaded style reference drove the look. */
   style?: FlyerStyleId;
   copy: FlyerCopy;
   scene: string;
   image: ContentImage;
+  /** The text layout this option was composed with; absent on flyers made
+   * before composition (their text was drawn by the image model). */
+  layout?: FlyerLayout;
   /** True once this option was re-rendered on the pro image tier. */
   finalized?: boolean;
 }
@@ -1064,6 +1170,15 @@ export interface DraftMeta {
   /** "YYYY-MM-DD" (UTC) a scheduled social post goes out once approved. Set by
    * the weekly social schedule; the daily cron posts it on that day. */
   planned_publish_at?: string;
+  /** Social only: a real, already-hosted product photo the flyer art is built
+   * around (factory upload, or the promoted product's own photo). */
+  product_photo_url?: string;
+  /** The image model the flyer's options were made with (picked on the
+   * create form). Unset means the brand's default. */
+  flyer_model?: ImageModelTier;
+  /** The picked option's text layout, mirrored like flyer_style, so an
+   * image-only re-render (edit sheet, Finalize in Pro) keeps it. */
+  flyer_layout?: FlyerLayout;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation
   // calls assign distinct style/layout by index (rotation.length-cycle),
@@ -1320,7 +1435,7 @@ export interface AppLog {
 // full sanitized body and can be megabytes, so list reads use PromptLogSummary
 // (everything except `request`) and only the /prompts/[id] detail page pulls
 // the full row.
-export type PromptProvider = "anthropic" | "gemini";
+export type PromptProvider = "anthropic" | "gemini" | "openai";
 
 export interface PromptLogSummary {
   id: string;

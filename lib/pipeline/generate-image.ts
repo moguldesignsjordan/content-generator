@@ -6,11 +6,8 @@ import {
   getAnthropic,
   logUsage,
 } from "@/lib/clients/anthropic";
-import {
-  generateGeminiImage,
-  isGeminiConfigured,
-  resolveImageModel,
-} from "@/lib/clients/gemini-image";
+import { isGeminiConfigured } from "@/lib/clients/gemini-image";
+import { renderImage, resolveImageModel } from "@/lib/clients/image-render";
 import { getAdminClient } from "@/lib/db/client";
 import { createMediaAsset } from "@/lib/db/queries";
 import { optimizeEmailImage } from "@/lib/images/optimize";
@@ -91,6 +88,12 @@ export interface GenerateContentImageArgs {
   /** Render-model quality tier (per-image choice or the brand's stored
    * default); unset = the standard workhorse, today's behavior. */
   modelTier?: ImageModelTier;
+  /** What the business does and who it serves (buildImageBrandContext), so
+   * the auto scene shows this company's world, not a stock metaphor. */
+  brandContext?: string;
+  /** The piece's key message, for the auto scene. */
+  keyMessage?: string;
+  kind?: "email" | "blog";
 }
 
 export interface GenerateContentImageResult {
@@ -158,6 +161,9 @@ export async function generateContentImage(
       emailType: args.emailType,
       tone: args.tone,
       vibe: args.vibe,
+      brandContext: args.brandContext,
+      keyMessage: args.keyMessage,
+      kind: args.kind,
     });
     const userContent: Anthropic.ContentBlockParam[] = [
       { type: "text", text: user },
@@ -209,15 +215,15 @@ export async function generateContentImage(
   }
 
   // 2. Render. 16:9 fits the 600px email column as a wide hero.
-  const imageModel = resolveImageModel(args.modelTier);
-  const rendered = await generateGeminiImage({
+  const rendered = await renderImage({
+    model: resolveImageModel(args.modelTier),
     prompt: finalPrompt,
     aspectRatio: "16:9",
-    reference,
-    model: imageModel,
+    references: reference ? [reference] : [],
   });
-  // Image deltas carry the IMAGE model id so cost rollups price the render
-  // at the right tier (tokens are 0 on these, so token rates never apply).
+  const imageModel = rendered.billedModel;
+  // Image deltas carry the IMAGE model key so cost rollups price the render
+  // at the right model and size (tokens are 0 on these, so token rates never apply).
   usage.push({ model: imageModel, images: 1 });
   logImageUsage("image-render", imageModel, 1, {
     brandId: args.brandId,

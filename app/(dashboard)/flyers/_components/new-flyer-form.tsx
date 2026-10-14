@@ -16,6 +16,7 @@ import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { StylePicker, type StyleOption } from "./style-library";
+import { useImageModelOptions } from "../../_components/image-models-context";
 
 // Aspect labels mirror FLYER_ASPECTS in prompts/generate-flyer.ts; kept
 // inline (not imported) because that module is part of the server prompt
@@ -59,6 +60,9 @@ export function NewFlyerForm({
   const [presetStyle, setPresetStyle] = useState("");
   const [competitorId, setCompetitorId] = useState("");
   const [format, setFormat] = useState<"post" | "ad">("post");
+  // "" = the brand's default model (Settings).
+  const imageModelOptions = useImageModelOptions();
+  const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
@@ -81,6 +85,7 @@ export function NewFlyerForm({
           style: presetStyle || undefined,
           competitorReferenceId: competitorId || undefined,
           format,
+          model: model || undefined,
         }),
       });
       const data = (await res.json()) as {
@@ -200,6 +205,23 @@ export function NewFlyerForm({
             onChange={setAspect}
             options={ASPECT_OPTIONS}
           />
+        </Field>
+
+        <Field
+          label="Image model"
+          hint={`${
+            imageModelOptions.find((m) => m.id === model)?.description ??
+            "Uses the model picked in Settings."
+          } Four options are made, so a flyer costs four images.`}
+        >
+          <Select value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+            <option value="">My default</option>
+            {imageModelOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </Select>
         </Field>
 
         <Field label="Design style">

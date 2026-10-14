@@ -113,6 +113,7 @@ export function logUsage(
     output_tokens?: number | null;
     cache_creation_input_tokens?: number | null;
     cache_read_input_tokens?: number | null;
+    server_tool_use?: { web_search_requests?: number | null } | null;
   },
   opts?: UsageOpts,
 ): void {

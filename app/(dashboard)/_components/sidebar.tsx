@@ -6,13 +6,14 @@ import { LogoutIcon } from "@/components/ui/icons";
 import { signOut } from "@/lib/supabase/actions";
 import { cn } from "@/lib/cn";
 import type { UserRole } from "@/lib/db/types";
-import { NAV, NAV_GROUP_LABEL, type NavGroup, type NavItem } from "./nav";
+import { NAV, NAV_GROUP_LABEL, type NavItem } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 
 /**
  * Desktop left sidebar. Three zones, top to bottom:
- *   1. Logo + the pinned primary action (Create) — always reachable.
- *   2. The work destinations (Content, Media) — the only things that scroll.
+ *   1. Logo + the pinned primary action (Create), always reachable.
+ *   2. The main loop (Campaigns, Review, Library), then "More tools"
+ *      collapsed, so occasional tools never crowd it. Only this part scrolls.
  *   3. A bottom utility cluster (Account, Admin) + the account pill.
  * Account/admin live at the bottom, not in the main list, so the primary nav
  * surface stays short and the eye always lands on Create first.
@@ -31,7 +32,8 @@ export function Sidebar({
 
   const primary = items.find((item) => item.primary);
   const top = items.filter((item) => !item.group && !item.primary);
-  const mainGroups = groupBy(items, ["content", "media"]);
+  const moreItems = items.filter((item) => item.group === "more");
+  const moreActive = moreItems.some((item) => item.match(pathname));
   const accountItems = items.filter((item) => item.group === "account");
   const adminItems = items.filter((item) => item.group === "admin");
 
@@ -55,16 +57,21 @@ export function Sidebar({
             <NavRow key={item.href} item={item} pathname={pathname} />
           ))}
         </div>
-        {mainGroups.map(({ group, items: groupItems }) => (
-          <div key={group} className="mt-5 space-y-0.5">
-            <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-              {NAV_GROUP_LABEL[group]}
-            </p>
-            {groupItems.map((item) => (
-              <NavRow key={item.href} item={item} pathname={pathname} />
-            ))}
-          </div>
-        ))}
+        {moreItems.length > 0 && (
+          // Keyed on the active state so it opens itself when you land on one
+          // of its pages, and otherwise remembers nothing (closed by default).
+          <details key={String(moreActive)} open={moreActive} className="group mt-5">
+            <summary className="flex cursor-pointer list-none items-center justify-between rounded-[var(--radius-md)] px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2 hover:text-muted">
+              {NAV_GROUP_LABEL.more}
+              <span className="transition-transform group-open:rotate-90">›</span>
+            </summary>
+            <div className="space-y-0.5">
+              {moreItems.map((item) => (
+                <NavRow key={item.href} item={item} pathname={pathname} />
+              ))}
+            </div>
+          </details>
+        )}
       </nav>
 
       <div className="border-t border-border p-3">
@@ -161,11 +168,3 @@ function PrimaryLink({ item, pathname }: { item: NavItem; pathname: string }) {
   );
 }
 
-function groupBy(items: NavItem[], groups: NavGroup[]) {
-  return groups
-    .map((group) => ({
-      group,
-      items: items.filter((item) => item.group === group),
-    }))
-    .filter((section) => section.items.length > 0);
-}

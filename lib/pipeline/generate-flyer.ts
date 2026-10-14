@@ -5,11 +5,8 @@ import {
   getAnthropic,
   logUsage,
 } from "@/lib/clients/anthropic";
-import {
-  generateGeminiImage,
-  isGeminiConfigured,
-  resolveImageModel,
-} from "@/lib/clients/gemini-image";
+import { isGeminiConfigured } from "@/lib/clients/gemini-image";
+import { renderImage, resolveImageModel } from "@/lib/clients/image-render";
 import {
   createMediaAsset,
   getDraftWithJobContext,
@@ -25,6 +22,8 @@ import {
 } from "@/lib/db/queries";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
 import { uploadContentImage } from "./generate-image";
+import { composeFlyer } from "@/lib/flyer/compose";
+import { pickLayout, quietZoneFor } from "@/lib/flyer/layout";
 import { resolveBrandTokens } from "@/lib/email/templates/types";
 import { buildBrandVoiceBlock, buildGuidelinesBlock } from "@/prompts/brand-voice";
 import {
@@ -48,8 +47,10 @@ import type {
   FlyerAspect,
   FlyerCopy,
   FlyerFormat,
+  FlyerLayout,
   FlyerStyleId,
   FlyerVariant,
+  ImageModelTier,
   TopicContext,
 } from "@/lib/db/types";
 import { MAX_DRAFT_VERSIONS } from "./constants";
@@ -59,9 +60,10 @@ import { logError, logImageUsage, logWarn } from "@/lib/log";
 
 // Social flyer generation (content_jobs.type='social'): one FAST_MODEL call
 // writes FLYER_VARIANT_COUNT alternative flyers (copy + scene, each fitted to
-// its own design direction), Gemini renders each on the cheap preview tier in
-// parallel (text typeset in the image), sharp fits them to the exact post
-// shape, and they're hosted next to hero images on the content-images bucket.
+// its own design direction), Gemini renders each one's text-free artwork in
+// parallel (built around the real product photo when there is one), code sets
+// the text and logo on top in the brand's fonts (lib/flyer/compose.tsx), sharp
+// fits them to the exact post shape, and they're hosted on content-images.
 // The reviewer picks one and can re-render just that one on the pro tier. The
 // human approval gate covers the output like every other draft kind.
 
@@ -141,8 +143,13 @@ export async function generateFlyerForTopicStreamed(
     const variants = await renderFlyerVariants(ctx, copies, styles, {
       aspect,
       styleReferenceId: meta.style_reference_id,
+      productPhoto: await loadProductPhoto(
+        meta.product_photo_url ?? ctx.product?.image_url ?? undefined,
+        draftId,
+      ),
       draftId,
       usageDeltas,
+      modelTier: meta.flyer_model,
     });
     const first = variants[0];
 
@@ -252,8 +259,13 @@ export async function regenerateFlyerDraft(
   const variants = await renderFlyerVariants(ctx, copies, styles, {
     aspect,
     styleReferenceId: meta.style_reference_id,
+    productPhoto: await loadProductPhoto(
+      meta.product_photo_url ?? ctx.product?.image_url ?? undefined,
+      draftId,
+    ),
     draftId,
     usageDeltas,
+    modelTier: meta.flyer_model,
   });
   const first = variants[0];
 
@@ -284,6 +296,8 @@ export async function regenerateFlyerDraft(
       ...(meta.source_draft_id ? { source_draft_id: meta.source_draft_id } : {}),
       // A rejected scheduled post keeps its day in the weekly queue.
       ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
+      ...(meta.product_photo_url ? { product_photo_url: meta.product_photo_url } : {}),
+      ...(meta.flyer_model ? { flyer_model: meta.flyer_model } : {}),
       usage,
     },
   });
@@ -314,6 +328,10 @@ export async function regenerateFlyerImage(args: {
   /** Concrete image model id; defaults to the brand's tier. The "Finalize in
    * Pro" action passes the pro model. */
   model?: string;
+  /** The picked option's text layout (meta.flyer_layout), kept on re-render. */
+  layout?: FlyerLayout;
+  /** meta.product_photo_url; falls back to the topic's product photo. */
+  productPhotoUrl?: string;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -327,28 +345,36 @@ export async function regenerateFlyerImage(args: {
     args.reference ??
     (await loadStyleReference(args.styleReferenceId, args.draftId)) ??
     undefined;
+  const tokens = resolveBrandTokens(args.ctx.brand);
+  const layout = args.layout ?? pickLayout(0);
 
+  // The exact-prompt path is the user's full control: the model draws
+  // whatever the prompt says, text included, and nothing is composed on top.
+  // Every other path draws text-free art and composes the text in code.
+  const productPhoto = args.exactPrompt
+    ? null
+    : await loadProductPhoto(
+        args.productPhotoUrl ?? args.ctx.product?.image_url ?? undefined,
+        args.draftId,
+      );
   const finalPrompt = args.exactPrompt
     ? reference
       ? `${args.exactPrompt} A reference image is attached: match its visual style, layout language, color treatment, and mood, but keep the text content exactly as specified above.`
       : args.exactPrompt
-    : buildFlyerImagePrompt(
-        args.copy,
-        resolveBrandTokens(args.ctx.brand),
-        args.aspect,
-        Boolean(reference),
-        args.style,
-      );
+    : buildFlyerImagePrompt(args.copy, tokens, args.aspect, Boolean(reference), args.style, {
+        hasProduct: Boolean(productPhoto),
+        quietZone: quietZoneFor(layout),
+      });
 
-  const imageModel =
-    args.model ??
-    resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model);
-  const rendered = await generateGeminiImage({
+  const rendered = await renderImage({
+    model:
+      args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model),
     prompt: finalPrompt,
     aspectRatio: args.aspect,
-    reference,
-    model: imageModel,
+    references: [...(productPhoto ? [productPhoto] : []), ...(reference ? [reference] : [])],
+    minSize: "2K",
   });
+  const imageModel = rendered.billedModel;
   usageDeltas.push({ model: imageModel, images: 1 });
   logImageUsage("flyer-image-regenerate", imageModel, 1, {
     brandId: args.ctx.brand.id,
@@ -356,10 +382,18 @@ export async function regenerateFlyerImage(args: {
     metered: true,
   });
 
-  const optimized = await optimizeFlyerImage(
-    rendered.data,
-    FLYER_ASPECTS[args.aspect],
-  );
+  const size = FLYER_ASPECTS[args.aspect];
+  const finished = args.exactPrompt
+    ? rendered.data
+    : await composeFlyer({
+        art: rendered.data,
+        text: { headline: args.copy.headline, subtext: args.copy.subtext, cta: args.copy.cta },
+        tokens,
+        width: size.width,
+        height: size.height,
+        layout,
+      });
+  const optimized = await optimizeFlyerImage(finished, size);
   const { url, path } = await uploadContentImage(optimized.data);
   const alt = stripEmDashes(args.copy.headline).slice(0, 160);
 
@@ -402,6 +436,8 @@ async function renderFlyer(
     usageDeltas: UsageDelta[];
     /** Concrete image model id; defaults to the brand's tier. */
     model?: string;
+    layout: FlyerLayout;
+    productPhoto?: { data: string; mimeType: string } | null;
   },
 ): Promise<ContentImage> {
   const reference = await loadStyleReference(opts.styleReferenceId, opts.draftId);
@@ -412,16 +448,22 @@ async function renderFlyer(
     opts.aspect,
     Boolean(reference),
     opts.style,
+    { hasProduct: Boolean(opts.productPhoto), quietZone: quietZoneFor(opts.layout) },
   );
 
-  const imageModel =
-    opts.model ?? resolveImageModel(ctx.brand.visual_identity?.image_gen?.model);
-  const rendered = await generateGeminiImage({
+  const rendered = await renderImage({
+    model: opts.model ?? resolveImageModel(ctx.brand.visual_identity?.image_gen?.model),
     prompt: finalPrompt,
     aspectRatio: opts.aspect,
-    reference: reference ?? undefined,
-    model: imageModel,
+    // Product first, then style: the prompt names them in that order.
+    references: [
+      ...(opts.productPhoto ? [opts.productPhoto] : []),
+      ...(reference ? [reference] : []),
+    ],
+    // 1080x1350 posts come out soft from a 1K render.
+    minSize: "2K",
   });
+  const imageModel = rendered.billedModel;
   opts.usageDeltas.push({ model: imageModel, images: 1 });
   logImageUsage("flyer-image", imageModel, 1, {
     brandId: ctx.brand.id,
@@ -429,10 +471,16 @@ async function renderFlyer(
     metered: true,
   });
 
-  const optimized = await optimizeFlyerImage(
-    rendered.data,
-    FLYER_ASPECTS[opts.aspect],
-  );
+  const size = FLYER_ASPECTS[opts.aspect];
+  const composed = await composeFlyer({
+    art: rendered.data,
+    text: { headline: copy.headline, subtext: copy.subtext, cta: copy.cta },
+    tokens,
+    width: size.width,
+    height: size.height,
+    layout: opts.layout,
+  });
+  const optimized = await optimizeFlyerImage(composed, size);
   const { url, path } = await uploadContentImage(optimized.data);
   const alt = stripEmDashes(copy.headline).slice(0, 160);
 
@@ -458,9 +506,11 @@ async function renderFlyer(
 }
 
 /**
- * Renders every option in parallel on the lite (preview) tier. A failed
- * render just means one fewer option; only all of them failing is an error.
- * Usage is recorded per successful render, so a failure isn't billed.
+ * Renders every option in parallel, each with its own text layout, on the
+ * model picked when the flyer was made (meta.flyer_model), else the brand's
+ * default, else Nano Banana 2.1. Finalizing re-renders only the picked one. A failed render
+ * just means one fewer option; only all of them failing is an error. Usage is
+ * recorded per successful render, so a failure isn't billed.
  */
 async function renderFlyerVariants(
   ctx: TopicContext,
@@ -469,14 +519,18 @@ async function renderFlyerVariants(
   opts: {
     aspect: FlyerAspect;
     styleReferenceId?: string;
+    productPhoto?: { data: string; mimeType: string } | null;
     draftId: string;
     usageDeltas: UsageDelta[];
+    modelTier?: ImageModelTier;
   },
 ): Promise<FlyerVariant[]> {
-  const model = resolveImageModel("lite");
+  const model = resolveImageModel(
+    opts.modelTier ?? ctx.brand.visual_identity?.image_gen?.model,
+  );
   const results = await Promise.allSettled(
     copies.map((copy, i) =>
-      renderFlyer(ctx, copy, { ...opts, style: styles[i], model }),
+      renderFlyer(ctx, copy, { ...opts, style: styles[i], model, layout: pickLayout(i) }),
     ),
   );
 
@@ -493,6 +547,7 @@ async function renderFlyerVariants(
       copy: toFlyerCopy(copies[i]),
       scene: copies[i].scene,
       image: result.value,
+      layout: pickLayout(i),
     });
   });
 
@@ -512,6 +567,7 @@ function mirrorVariant(variant: FlyerVariant): Partial<DraftMeta> {
     flyer_image: variant.image,
     flyer_scene: variant.scene,
     ...(variant.style ? { flyer_style: variant.style } : {}),
+    ...(variant.layout ? { flyer_layout: variant.layout } : {}),
   };
 }
 
@@ -650,6 +706,30 @@ async function generateFlyerVariants(
   } catch (err) {
     logError("pipeline:generate-flyer:copy", err);
     return await call("flyer-copy-retry");
+  }
+}
+
+/**
+ * The real product photo the art is built around, as Gemini's reference
+ * payload. Non-fatal like loadStyleReference: an unreachable photo logs a
+ * warning and the flyer renders without it.
+ */
+async function loadProductPhoto(
+  url: string | undefined,
+  draftId: string,
+): Promise<{ data: string; mimeType: string } | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    return await prepareReferenceImage(Buffer.from(await res.arrayBuffer()));
+  } catch (err) {
+    logWarn(
+      "pipeline:generate-flyer:product-photo",
+      err instanceof Error ? err.message : String(err),
+      { draftId },
+    );
+    return null;
   }
 }
 

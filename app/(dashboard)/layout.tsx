@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { getUserRole } from "@/lib/db/queries";
+import { availableImageTiers } from "@/lib/clients/image-render";
 import { AppShell } from "./_components/app-shell";
+import { ImageModelsProvider } from "./_components/image-models-context";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,7 @@ export default async function DashboardLayout({
 
   return (
     <AppShell userEmail={user.email ?? null} role={role}>
-      {children}
+      <ImageModelsProvider tiers={availableImageTiers()}>{children}</ImageModelsProvider>
     </AppShell>
   );
 }
