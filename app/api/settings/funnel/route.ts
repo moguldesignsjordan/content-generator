@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateFunnelDefinition } from "@/lib/db/queries";
 import { logError } from "@/lib/log";
+import { requireOwnStrategy } from "@/lib/brand-access";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -12,6 +13,8 @@ export async function PATCH(req: NextRequest) {
     if (!body.strategyId) {
       return NextResponse.json({ error: "strategyId is required." }, { status: 400 });
     }
+    const access = await requireOwnStrategy(body.strategyId);
+    if (!access.ok) return access.response;
 
     const stages = ["awareness", "consideration", "decision"];
     for (const stage of stages) {

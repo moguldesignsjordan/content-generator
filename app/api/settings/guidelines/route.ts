@@ -20,6 +20,7 @@ import {
 } from "@/prompts/guidelines";
 import { stripEmDashes } from "@/lib/text";
 import { logError } from "@/lib/log";
+import { requireOwnBrand } from "@/lib/brand-access";
 import { getSessionUser } from "@/lib/supabase/server";
 
 export const maxDuration = 120;
@@ -125,6 +126,8 @@ export async function PATCH(req: NextRequest) {
         { status: 400 },
       );
     }
+    const access = await requireOwnBrand(brandId);
+    if (!access.ok) return access.response;
     await updateBrandGuidelines(brandId, {
       ...guidelines,
       approved_at: new Date().toISOString(),

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { updateVisualIdentity } from "@/lib/db/queries";
 import type { VisualIdentity } from "@/lib/db/types";
 import { logError } from "@/lib/log";
+import { requireOwnBrand } from "@/lib/brand-access";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -12,6 +13,8 @@ export async function PATCH(req: NextRequest) {
     if (!brandId) {
       return NextResponse.json({ error: "brandId is required" }, { status: 400 });
     }
+    const access = await requireOwnBrand(brandId);
+    if (!access.ok) return access.response;
     await updateVisualIdentity(brandId, visualIdentity);
     return NextResponse.json({ saved: true });
   } catch (err) {

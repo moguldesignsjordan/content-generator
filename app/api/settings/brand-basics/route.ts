@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { updateBrandBasics } from "@/lib/db/queries";
 import type { MailerliteConfig, SeoDefaults } from "@/lib/db/types";
 import { logError } from "@/lib/log";
+import { requireOwnBrand } from "@/lib/brand-access";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -18,6 +19,8 @@ export async function PATCH(req: NextRequest) {
         { status: 400 },
       );
     }
+    const access = await requireOwnBrand(body.brandId);
+    if (!access.ok) return access.response;
 
     await updateBrandBasics(body.brandId, {
       name: body.name.trim(),

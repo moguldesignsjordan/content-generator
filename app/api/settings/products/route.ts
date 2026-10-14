@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteProduct, upsertProduct } from "@/lib/db/queries";
+import { deleteProduct, getSingleBrand, listProducts, upsertProduct } from "@/lib/db/queries";
+import { getSessionUser } from "@/lib/supabase/server";
 import type { Product } from "@/lib/db/types";
 import { logError } from "@/lib/log";
+import { requireOwnBrand } from "@/lib/brand-access";
 
 /** Creates or updates one product (keyed by brand_id + slug). */
 export async function PATCH(req: NextRequest) {
@@ -16,6 +18,8 @@ export async function PATCH(req: NextRequest) {
         { status: 400 },
       );
     }
+    const access = await requireOwnBrand(brandId);
+    if (!access.ok) return access.response;
     const saved = await upsertProduct(brandId, {
       slug: product.slug.trim(),
       name: product.name.trim(),
@@ -37,6 +41,14 @@ export async function DELETE(req: NextRequest) {
     const { productId } = (await req.json()) as { productId?: string };
     if (!productId) {
       return NextResponse.json({ error: "productId is required" }, { status: 400 });
+    }
+    // Only a product on the signed-in user's own brand can be deleted.
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    const brand = await getSingleBrand(user.id);
+    const own = brand ? await listProducts(brand.id) : [];
+    if (!own.some((p) => p.id === productId)) {
+      return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
     await deleteProduct(productId);
     return NextResponse.json({ deleted: true });
