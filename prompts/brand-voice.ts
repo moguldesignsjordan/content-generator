@@ -262,7 +262,9 @@ export function buildCompetitorReferenceBlock(
     "competitor's words, claims, offer, numbers, or brand. Brand voice wins on",
     "wording; the reference wins on structure and rhythm.):",
     "",
-    `  "${ref.name}": ${p.summary}`,
+    // ref.name is left out on purpose: Ad Library imports name a row after
+    // the competitor's headline, which would hand the model their exact words.
+    `  Summary: ${p.summary}`,
     `    Hook type: ${p.hook_type}`,
     `    Angle: ${p.angle}`,
     `    Structure: ${p.structure.join(" -> ")}`,

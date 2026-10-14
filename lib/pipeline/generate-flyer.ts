@@ -15,6 +15,7 @@ import {
   getDraftWithJobContext,
   getEmailCopyForDraft,
   getLatestDraftVersion,
+  getCompetitorReference,
   getStyleReference,
   getTopicContext,
   patchDraftGeneration,
@@ -30,7 +31,7 @@ import {
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
   FLYER_VARIANT_COUNT,
-  FLYER_VARIANTS_TOOL,
+  flyerVariantsTool,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
   parseFlyerVariants,
@@ -39,12 +40,14 @@ import {
 } from "@/prompts/generate-flyer";
 import { stripEmDashes } from "@/lib/text";
 import type {
+  CompetitorReference,
   ContentImage,
   DraftMeta,
   DraftUsage,
   EmailCopy,
   FlyerAspect,
   FlyerCopy,
+  FlyerFormat,
   FlyerStyleId,
   FlyerVariant,
   TopicContext,
@@ -110,6 +113,12 @@ export async function generateFlyerForTopicStreamed(
       });
     }
 
+    const competitorRef = await loadCompetitorRef(
+      meta.competitor_reference_id,
+      ctx.brand.id,
+      draftId,
+    );
+
     const usageDeltas: UsageDelta[] = [];
     const copies = await generateFlyerVariants(ctx, {
       aspect,
@@ -117,6 +126,8 @@ export async function generateFlyerForTopicStreamed(
       style: meta.flyer_style,
       styles,
       emailCopy,
+      competitorRef,
+      format: meta.flyer_format ?? "post",
       usageDeltas,
     });
 
@@ -215,6 +226,12 @@ export async function regenerateFlyerDraft(
     hasReference: Boolean(meta.style_reference_id),
   });
 
+  const competitorRef = await loadCompetitorRef(
+    meta.competitor_reference_id,
+    ctx.brand.id,
+    draftId,
+  );
+
   const usageDeltas: UsageDelta[] = [];
   const copies = await generateFlyerVariants(ctx, {
     aspect,
@@ -222,6 +239,8 @@ export async function regenerateFlyerDraft(
     style: fixedStyle,
     styles,
     emailCopy,
+    competitorRef,
+    format: meta.flyer_format ?? "post",
     usageDeltas,
     rejection: {
       feedback,
@@ -258,6 +277,10 @@ export async function regenerateFlyerDraft(
       ...(meta.style_reference_id
         ? { style_reference_id: meta.style_reference_id }
         : {}),
+      ...(meta.competitor_reference_id
+        ? { competitor_reference_id: meta.competitor_reference_id }
+        : {}),
+      ...(meta.flyer_format ? { flyer_format: meta.flyer_format } : {}),
       ...(meta.source_draft_id ? { source_draft_id: meta.source_draft_id } : {}),
       // A rejected scheduled post keeps its day in the weekly queue.
       ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
@@ -529,6 +552,7 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
     ...(copy.cta ? { cta: copy.cta } : {}),
     caption: copy.caption,
     ...(copy.hashtags?.length ? { hashtags: copy.hashtags } : {}),
+    ...(copy.ad ? { ad: copy.ad } : {}),
   };
 }
 
@@ -538,6 +562,26 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
  * one per option: the brand voice/guidelines input is the bulk of the tokens,
  * and this way it's paid once.
  */
+/**
+ * The competitor ad a flyer learns from, or null. Scoped to the draft's own
+ * brand, since the id arrives from the client. Non-fatal: a missing or
+ * foreign ref just means a flyer without one.
+ */
+async function loadCompetitorRef(
+  id: string | undefined,
+  brandId: string,
+  draftId: string,
+): Promise<CompetitorReference | null> {
+  if (!id) return null;
+  try {
+    const ref = await getCompetitorReference(id);
+    return ref?.brand_id === brandId ? ref : null;
+  } catch (err) {
+    logWarn("pipeline:generate-flyer:competitor-ref", String(err), { draftId, id });
+    return null;
+  }
+}
+
 async function generateFlyerVariants(
   ctx: TopicContext,
   opts: {
@@ -548,6 +592,8 @@ async function generateFlyerVariants(
     /** One entry per option to generate, by position. */
     styles: (FlyerStyleId | undefined)[];
     emailCopy: EmailCopy | null;
+    competitorRef: CompetitorReference | null;
+    format: FlyerFormat;
     usageDeltas: UsageDelta[];
     rejection?: {
       feedback: string;
@@ -566,6 +612,8 @@ async function generateFlyerVariants(
     brief: opts.brief,
     style: opts.style,
     emailCopy: opts.emailCopy ?? undefined,
+    competitorRef: opts.competitorRef,
+    format: opts.format,
     rejection: opts.rejection,
     variants: { count, styles: opts.styles },
   });
@@ -576,7 +624,7 @@ async function generateFlyerVariants(
       max_tokens: 4096,
       system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],
-      tools: [FLYER_VARIANTS_TOOL],
+      tools: [flyerVariantsTool(opts.format)],
       tool_choice: { type: "tool", name: "save_flyer_variants" },
     });
     logUsage(label, FAST_MODEL, response.usage, {
@@ -590,7 +638,7 @@ async function generateFlyerVariants(
       (b) => b.type === "tool_use" && b.name === "save_flyer_variants",
     );
     const variants =
-      tu && tu.type === "tool_use" ? parseFlyerVariants(tu.input, count) : [];
+      tu && tu.type === "tool_use" ? parseFlyerVariants(tu.input, count, opts.format) : [];
     if (variants.length === 0) {
       throw new Error("Couldn't come up with flyer copy. Try again.");
     }

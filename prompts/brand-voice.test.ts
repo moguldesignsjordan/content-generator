@@ -361,6 +361,14 @@ describe("buildCompetitorReferenceBlock", () => {
     expect(block).not.toContain("50% off everything, today only!");
   });
 
+  it("leaves out the saved name, which can carry the competitor's headline", () => {
+    const block = buildCompetitorReferenceBlock(
+      makeCompetitorReference({ name: "Acme: Holiday Cards | 10 from $8.56" }),
+    );
+    expect(block).not.toContain("Holiday Cards");
+    expect(block).not.toContain("$8.56");
+  });
+
   it("omits optional persuasion_levers/register lines when unset", () => {
     const block = buildCompetitorReferenceBlock(
       makeCompetitorReference({

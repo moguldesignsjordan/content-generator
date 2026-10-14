@@ -14,6 +14,7 @@ export interface GenerateContentInput {
   email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
   blog_type?: "pillar" | "how_to" | "listicle" | "case_study" | "thought_leadership" | "landing";
   flyer_aspect?: "1:1" | "4:5" | "9:16";
+  social_format?: "post" | "ad";
 }
 
 /**
@@ -57,6 +58,16 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
         description:
           "Shape of a social image (channel \"social\" only): 1:1 square post, " +
           "4:5 feed portrait, 9:16 story/reel. Defaults to 1:1.",
+      },
+      social_format: {
+        type: "string",
+        enum: ["post", "ad"],
+        description:
+          "Channel \"social\" only. \"ad\" when the user wants a paid Facebook or " +
+          "Instagram ad (writes primary text, headline, description, and a CTA " +
+          "button); \"post\" for an organic post with a caption. Infer it from " +
+          "their wording (\"an ad for...\", \"boost\", \"run ads\"); never ask. " +
+          "Defaults to post.",
       },
     },
     required: ["channel"],

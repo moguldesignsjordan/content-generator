@@ -47,9 +47,10 @@ of crashing.
 | `npm run build` | Production build |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run seed` | Seed the Mogul Design Agency strategy into Supabase |
+| `npm test` | Run the Vitest unit tests |
 
-There is no test framework yet — `npm run typecheck` + `npm run build` is
-the verification gate after each change.
+`npm run typecheck`, `npm test`, and `npm run build` are the verification
+gate after each change.
 
 ## Layout
 

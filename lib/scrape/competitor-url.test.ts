@@ -8,19 +8,20 @@ vi.mock("./fetch-page", () => ({
 }));
 
 import { scrapeCompetitorAdUrl } from "./index";
+import { parseAdLibraryUrl } from "./url";
 
 describe("scrapeCompetitorAdUrl", () => {
   beforeEach(() => {
     fetchHtmlMock.mockReset();
   });
 
-  it("returns guidance for a Facebook Ad Library URL without ever fetching it", async () => {
+  it("points a Facebook Ad Library URL at the import, without ever fetching it", async () => {
     const result = await scrapeCompetitorAdUrl(
       "https://www.facebook.com/ads/library/?id=123456",
     );
     expect(result).toEqual({
       ok: false,
-      guidance: expect.stringContaining("Paste the ad copy or upload a screenshot"),
+      guidance: expect.stringContaining("Media > Competitor Ads > Ad Library"),
     });
     expect(fetchHtmlMock).not.toHaveBeenCalled();
   });
@@ -60,5 +61,40 @@ describe("scrapeCompetitorAdUrl", () => {
     const result = await scrapeCompetitorAdUrl("not a url");
     expect(result.ok).toBe(false);
     expect(fetchHtmlMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseAdLibraryUrl", () => {
+  it("reads the page id, country, and status from an advertiser link", () => {
+    expect(
+      parseAdLibraryUrl(
+        "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US" +
+          "&is_targeted_country=false&media_type=all&search_type=page" +
+          "&sort_data[direction]=desc&sort_data[mode]=total_impressions&view_all_page_id=21281155105",
+      ),
+    ).toEqual({ pageId: "21281155105", country: "US", status: "ACTIVE" });
+  });
+
+  it("defaults country and status when the link leaves them out", () => {
+    expect(parseAdLibraryUrl("facebook.com/ads/library/?view_all_page_id=42")).toEqual({
+      pageId: "42",
+      country: "US",
+      status: "ACTIVE",
+    });
+  });
+
+  it("keeps ALL and inactive filters", () => {
+    expect(
+      parseAdLibraryUrl(
+        "https://www.facebook.com/ads/library/?view_all_page_id=42&country=ALL&active_status=all",
+      ),
+    ).toEqual({ pageId: "42", country: "ALL", status: "ALL" });
+  });
+
+  it("returns null for a keyword search, a single ad, or another site", () => {
+    expect(parseAdLibraryUrl("https://www.facebook.com/ads/library/?q=shoes")).toBeNull();
+    expect(parseAdLibraryUrl("https://www.facebook.com/ads/library/?id=123")).toBeNull();
+    expect(parseAdLibraryUrl("https://example.com/ads/library/?view_all_page_id=42")).toBeNull();
+    expect(parseAdLibraryUrl("not a url")).toBeNull();
   });
 });

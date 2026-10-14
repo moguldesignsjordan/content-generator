@@ -11,7 +11,12 @@ import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
 import { resolveImageModel } from "@/lib/clients/gemini-image";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
-import { DEFAULT_FLYER_ASPECT, FLYER_ASPECTS, isFlyerAspect } from "@/prompts/generate-flyer";
+import {
+  DEFAULT_FLYER_ASPECT,
+  FLYER_ASPECTS,
+  cleanAdCopy,
+  isFlyerAspect,
+} from "@/prompts/generate-flyer";
 import { stripEmDashes } from "@/lib/text";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { logError } from "@/lib/log";
@@ -35,6 +40,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
  *    cover-fitted to the flyer's post shape. No AI.
  *  - "caption": { caption, hashtags? } edits the post caption only. No AI,
  *    no image change.
+ *  - "ad_copy": { primary_text, headline, description?, cta_button } edits an
+ *    ad-format flyer's text fields (caption mirrors primary_text). No AI.
  *  - "pick": { index } swaps in another already-rendered option from
  *    meta.flyer_variants. No AI.
  * Only in_review drafts are editable: an approved flyer is a publish record.
@@ -71,25 +78,47 @@ export async function POST(
     const currentCopy = meta.flyer_copy;
     const aspect: FlyerAspect = readAspect(form, meta.flyer_aspect);
 
-    // ── caption: plain text edit, instant ──────────────────────────────────
-    if (mode === "caption") {
-      const caption = stripEmDashes(String(form.get("caption") ?? "").trim());
-      if (!caption) {
-        return NextResponse.json({ error: "The caption can't be empty." }, { status: 400 });
-      }
-      const hashtags = String(form.get("hashtags") ?? "")
-        .split(/[\s,]+/)
-        .map((h) => h.trim())
-        .filter(Boolean)
-        .map((h) => (h.startsWith("#") ? h : `#${h}`))
-        .slice(0, 10);
-      const flyerCopy: FlyerCopy = {
+    // ── caption / ad_copy: plain text edit, instant ────────────────────────
+    if (mode === "caption" || mode === "ad_copy") {
+      const baseCopy = {
         headline: currentCopy?.headline ?? draftCtx.content.subject,
         ...(currentCopy?.subtext ? { subtext: currentCopy.subtext } : {}),
         ...(currentCopy?.cta ? { cta: currentCopy.cta } : {}),
-        caption,
-        ...(hashtags.length ? { hashtags } : {}),
       };
+      let flyerCopy: FlyerCopy;
+      if (mode === "ad_copy") {
+        const ad = cleanAdCopy({
+          primary_text: String(form.get("primary_text") ?? ""),
+          headline: String(form.get("headline") ?? ""),
+          description: String(form.get("description") ?? ""),
+          cta_button: String(form.get("cta_button") ?? ""),
+        });
+        if (!ad) {
+          return NextResponse.json(
+            { error: "The ad needs primary text and a headline." },
+            { status: 400 },
+          );
+        }
+        flyerCopy = { ...baseCopy, caption: ad.primary_text, ad };
+      } else {
+        const caption = stripEmDashes(String(form.get("caption") ?? "").trim());
+        if (!caption) {
+          return NextResponse.json({ error: "The caption can't be empty." }, { status: 400 });
+        }
+        const hashtags = String(form.get("hashtags") ?? "")
+          .split(/[\s,]+/)
+          .map((h) => h.trim())
+          .filter(Boolean)
+          .map((h) => (h.startsWith("#") ? h : `#${h}`))
+          .slice(0, 10);
+        flyerCopy = {
+          ...baseCopy,
+          caption,
+          ...(hashtags.length ? { hashtags } : {}),
+          ...(currentCopy?.ad ? { ad: currentCopy.ad } : {}),
+        };
+      }
+      const caption = flyerCopy.caption;
       const variantIndex = meta.flyer_variant_index;
       await updateDraftContent(
         id,
@@ -298,6 +327,7 @@ export async function POST(
       ...(cta ? { cta } : {}),
       caption: currentCopy?.caption ?? "",
       ...(currentCopy?.hashtags?.length ? { hashtags: currentCopy.hashtags } : {}),
+      ...(currentCopy?.ad ? { ad: currentCopy.ad } : {}),
     };
 
     await updateDraftContent(

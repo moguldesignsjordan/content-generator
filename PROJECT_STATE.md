@@ -7,9 +7,12 @@ blow) belongs in git history and the code itself, not here. `git log
 --oneline -20` is the changelog; this file is decisions + current state +
 what's genuinely still open.
 
-Last updated: 2026-09-26 (simpler, connected create flow. Typecheck + 552
-tests + build green; UNCOMMITTED, no browser click-through yet. See session
-below.)
+Last updated: 2026-10-11 (Ad Library import, flyers learn from competitor
+ads, FB/IG ad copy mode: all 3 slices built. Typecheck + 636 tests + build
+green; UNCOMMITTED, no browser click-through. See session below.)
+
+Previously: 2026-09-26 (simpler, connected create flow. Typecheck + 552
+tests + build green; UNCOMMITTED, no browser click-through yet.)
 
 Previously: 2026-09-26 (flyer options + cheaper emails + angle switching.
 Committed as 83f007b.)
@@ -104,7 +107,54 @@ carefully when committing.
 - Still open: deploy mdawebsite BEFORE publishing a blog from here; then
   publish one real blog and confirm it's live with FAQ; submit the sitemap in
   Search Console; redirect www to the apex in Vercel (both return 200 today).
-## Session 2026-09-26 (latest): simpler, connected create flow
+## Session 2026-10-11 (latest): Ad Library import (slice 1 of 3)
+
+Plan: `~/.claude/plans/i-would-like-to-serene-hopcroft.md`. Jordan wants to
+use competitors' Facebook Ad Library pages as inspiration for flyers,
+captions, and FB/IG ad copy. Meta's own Ad Library API returns only
+political/issue ads for US-only delivery, so ads come through ScrapeCreators
+(`lib/clients/scrapecreators.ts`, key `SCRAPECREATORS_API_KEY`).
+
+- Slice 1 built: /media > Competitor Ads > "Ad Library" tab. Paste an
+  advertiser link (`view_all_page_id`), preview the top ~20 ads, tick up to
+  10, and each is saved as its own competitor_references row. The image is
+  re-hosted (Meta CDN links expire) and the strategy is distilled from image +
+  copy. No migration. Typecheck + 596 tests + build green; UNCOMMITTED.
+- Live preview verified 2026-10-11 against page 21281155105 (VistaPrint):
+  30 ads, all normalized, 1 credit. Every ad was DCO/DPA with copy on
+  `snapshot.body`/`title` and images only on `cards[]`
+  (`original_image_url`); fbcdn images download fine server-side. Key is in
+  `.env.local` and Vercel (Production + Preview, stored as Secret, so never
+  `vercel env pull`). Still open: the save path (re-host + distill) and the UI
+  need a logged-in browser click-through; add the key to `.env.example`.
+- Slice 2 built: flyers (copy, caption, scene) can learn from a saved
+  competitor ad via `meta.competitor_reference_id`. Picker on /flyers/new;
+  the chat's social path forwards `brief.competitor_reference_id`. Only the
+  distilled profile reaches the prompt, plus a new `visual_notes` (generic
+  layout terms) on profiles saved from now on. The competitor image is never
+  sent to the image model. `buildCompetitorReferenceBlock` no longer prints
+  the row's name (Ad Library names carry the competitor's headline/price);
+  this also affects emails. Typecheck + 599 tests + build green; UNCOMMITTED,
+  no live flyer generated yet.
+- Gap found: the create chat can only use a competitor ad pasted in that
+  conversation; it can't pick one already in the library (e.g. imported
+  Ad Library ads). Not in the approved plan; raise with Jordan.
+- Slice 3 built: `meta.flyer_format = "ad"` makes the same single Haiku call
+  write `FlyerCopy.ad` (primary text, headline, description, CTA button from
+  a 12-label subset of Meta's call_to_action types) instead of caption +
+  hashtags; `caption` mirrors primary text so every caption reader and the
+  FB/IG organic posting providers keep working. Entry points: "Organic post /
+  Paid ad" toggle on /flyers/new, `social_format` on the chat's
+  generate_content. Review shows a feed-style "Ad text" card with per-field
+  copy and an edit sheet (flyer route mode `ad_copy`, no AI).
+- Still open across all 3: browser click-through (import grid, flyer with a
+  competitor ad picked, ad mode); commit. Another session was editing the
+  same tree at the same time (social scheduling / FB-IG publishing), so
+  separate the two sets of changes at commit time.
+- `npm run lint` is not set up here: `next lint` opens its interactive
+  config prompt.
+
+## Session 2026-09-26: simpler, connected create flow
 
 Plan: `~/.claude/plans/i-want-to-make-zany-whale.md`. Jordan found the app
 hard to use and disconnected, and wanted simpler questions with better

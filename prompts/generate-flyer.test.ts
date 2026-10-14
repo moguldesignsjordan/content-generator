@@ -6,6 +6,7 @@ import {
   FLYER_VARIANT_COUNT,
   buildFlyerCopyMessages,
   buildFlyerImagePrompt,
+  flyerVariantsTool,
   isFlyerAspect,
   isFlyerStyle,
   parseFlyerVariants,
@@ -15,7 +16,7 @@ import {
 } from "./generate-flyer";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import type { BrandTokens } from "@/lib/email/templates/types";
-import type { FlyerStyleId } from "@/lib/db/types";
+import type { CompetitorReference, FlyerStyleId } from "@/lib/db/types";
 
 const tokens: BrandTokens = {
   logo_url: null,
@@ -187,6 +188,69 @@ describe("parseFlyerVariants", () => {
     expect(parseFlyerVariants({ variants: "nope" }, 4)).toEqual([]);
     expect(parseFlyerVariants({}, 4)).toEqual([]);
   });
+
+  describe("ad format", () => {
+    const ad = {
+      primary_text: "Slow sites \u2014 lost clients. Fix it this week.",
+      headline: "**Free** speed audit",
+      description: "Takes 2 minutes",
+      cta_button: "Get quote",
+    };
+    const goodAd = { headline: "Fast sites win", scene: "A stopwatch", ad };
+
+    it("mirrors primary text into the caption and cleans every ad field", () => {
+      const [v] = parseFlyerVariants({ variants: [goodAd] }, 4, "ad");
+      expect(v.ad).toEqual({
+        primary_text: expect.not.stringContaining("\u2014"),
+        headline: "Free speed audit",
+        description: "Takes 2 minutes",
+        cta_button: "Get quote",
+      });
+      expect(v.caption).toBe(v.ad?.primary_text);
+      expect(v.hashtags).toEqual([]);
+    });
+
+    it("drops variants missing primary text or headline, and defaults an unknown button", () => {
+      const out = parseFlyerVariants(
+        {
+          variants: [
+            { ...goodAd, ad: { ...ad, primary_text: "" } },
+            { ...goodAd, ad: { ...ad, headline: undefined } },
+            { ...goodAd, ad: { ...ad, cta_button: "Click here!!" } },
+          ],
+        },
+        4,
+        "ad",
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0].ad?.cta_button).toBe("Learn more");
+    });
+
+    it("ignores ad fields on a post-format parse", () => {
+      const [v] = parseFlyerVariants({ variants: [{ ...good, ad }] }, 4);
+      expect(v.ad).toBeUndefined();
+    });
+  });
+});
+
+describe("flyerVariantsTool", () => {
+  type Items = { properties: Record<string, unknown>; required: string[] };
+  const items = (format?: "post" | "ad") =>
+    (flyerVariantsTool(format).input_schema.properties as { variants: { items: Items } })
+      .variants.items;
+
+  it("asks for a caption and hashtags on a post", () => {
+    expect(items().required).toContain("caption");
+    expect(items().properties).toHaveProperty("hashtags");
+    expect(items().properties).not.toHaveProperty("ad");
+  });
+
+  it("swaps caption and hashtags for the ad fields on an ad", () => {
+    expect(items("ad").required).toEqual(["headline", "ad", "scene"]);
+    expect(items("ad").properties).not.toHaveProperty("caption");
+    expect(items("ad").properties).not.toHaveProperty("hashtags");
+    expect(items("ad").properties).toHaveProperty("headline");
+  });
 });
 
 describe("buildFlyerCopyMessages", () => {
@@ -207,6 +271,56 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain("Square post (1:1)");
     expect(user).toContain("VOICE: direct");
     expect(user).not.toContain("EXISTING EMAIL");
+  });
+
+  const competitorRef: CompetitorReference = {
+    id: "c1",
+    brand_id: "b1",
+    name: "VistaPrint: Holiday Cards | 10 from $8.56",
+    input_kind: "image",
+    content: "Primary text: Turn big ideas into bold moments.\nHeadline: Holiday Cards | 10 from $8.56",
+    image_url: "https://example.supabase.co/a.jpg",
+    storage_path: "a.jpg",
+    source_url: "https://www.facebook.com/ads/library/?id=1",
+    competitor_profile: {
+      summary: "Leads with a seasonal product and a low entry price.",
+      hook_type: "product + price anchor",
+      angle: "seasonal urgency",
+      structure: ["product headline", "price anchor", "shop CTA"],
+      cta_style: "short imperative",
+      visual_notes: "Product photo fills the frame; headline in a heavy sans across the top.",
+    },
+    created_at: "2026-10-11T00:00:00Z",
+  };
+
+  it("adds the competitor strategy and layout idea, never its words or name", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, competitorRef });
+    expect(user).toContain("COMPETITOR REFERENCE (strategy only, DO NOT COPY)");
+    expect(user).toContain("Hook type: product + price anchor");
+    expect(user).toContain("Layout idea: Product photo fills the frame");
+    expect(user).toContain("inspiration, not a template");
+    expect(user).not.toContain("Turn big ideas");
+    expect(user).not.toContain("Holiday Cards");
+    expect(user).not.toContain("$8.56");
+  });
+
+  it("adds no competitor lines without a reference or a distilled profile", () => {
+    expect(buildFlyerCopyMessages(base).user).not.toContain("COMPETITOR REFERENCE");
+    const { user } = buildFlyerCopyMessages({
+      ...base,
+      competitorRef: { ...competitorRef, competitor_profile: null },
+    });
+    expect(user).not.toContain("COMPETITOR REFERENCE");
+    expect(user).not.toContain("inspiration, not a template");
+  });
+
+  it("writes ad rules instead of caption rules in ad format", () => {
+    const post = buildFlyerCopyMessages(base).system;
+    const ad = buildFlyerCopyMessages({ ...base, format: "ad" }).system;
+    expect(post).toContain("- caption:");
+    expect(ad).not.toContain("- caption:");
+    expect(ad).toContain("ad.primary_text");
+    expect(ad).toContain("ad.cta_button");
   });
 
   it("distills the source email when emailCopy is provided", () => {

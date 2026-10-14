@@ -793,6 +793,41 @@ export type FlyerStyleId =
   | "gradient_glow"
   | "elegant";
 
+/** "post" is an organic post (caption + hashtags); "ad" is a paid FB/IG ad
+ * (primary text, headline, description, CTA button) on the same creative. */
+export type FlyerFormat = "post" | "ad";
+
+/** Meta's CTA button labels offered for ads: a small-business subset of the
+ * call_to_action types in Meta's Marketing API reference (checked 2026-10).
+ * Not every button is allowed for every campaign objective. */
+export const AD_CTA_BUTTONS = [
+  "Learn more",
+  "Shop now",
+  "Sign up",
+  "Book now",
+  "Contact us",
+  "Get quote",
+  "Get offer",
+  "Subscribe",
+  "Download",
+  "Apply now",
+  "Order now",
+  "Get started",
+] as const;
+
+export type AdCtaButton = (typeof AD_CTA_BUTTONS)[number];
+
+/** The text fields of a paid FB/IG ad, pasted into Ads Manager by hand. */
+export interface AdCopy {
+  /** Above the image. About 125 characters show before "See more". */
+  primary_text: string;
+  /** Bold line under the image, about 40 characters. */
+  headline: string;
+  /** Muted line under the headline, about 30 characters. Optional in Meta. */
+  description?: string;
+  cta_button: AdCtaButton;
+}
+
 export interface FlyerCopy {
   /** Rendered IN the image, as-is. Keep it short. */
   headline: string;
@@ -800,9 +835,12 @@ export interface FlyerCopy {
   subtext?: string;
   /** Rendered IN the image as the call-to-action (optional). */
   cta?: string;
-  /** The post caption that accompanies the image; NOT rendered in it. */
+  /** The post caption that accompanies the image; NOT rendered in it. For
+   * an ad this mirrors ad.primary_text, so caption readers keep working. */
   caption: string;
   hashtags?: string[];
+  /** Present only on ad-format flyers. */
+  ad?: AdCopy;
 }
 
 /** One option from a multi-variant flyer generation (meta.flyer_variants). */
@@ -902,6 +940,9 @@ export interface CompetitorProfile {
   /** How the ad asks for the click/action, its tone and framing. */
   cta_style: string;
   register?: string;
+  /** Layout and composition only (no products, people, brand, or text), when
+   * the ad had an image. Steers flyer scenes; absent on text-only saves. */
+  visual_notes?: string;
 }
 
 /** One row of competitor_references: a competitor ad saved as "learn from
@@ -1002,6 +1043,11 @@ export interface DraftMeta {
   flyer_brief?: string;
   // The style_references row whose image steers this flyer's look, if any.
   style_reference_id?: string;
+  // "ad" when the flyer is a paid FB/IG ad; absent means an organic post.
+  flyer_format?: FlyerFormat;
+  // The competitor_references row (migration 025) whose distilled strategy
+  // steers this flyer's copy and scene, if any. Never its words or image.
+  competitor_reference_id?: string;
   // The design-direction preset this flyer was rendered with. Persisted as
   // the RESOLVED style (an explicit pick or the varied-rotation result), so
   // regenerations keep the same look instead of re-rolling.

@@ -39,6 +39,10 @@ export const CompetitorProfileSchema = z.object({
     .string()
     .optional()
     .describe("The register/voice: casual, formal, playful, urgent, and so on."),
+  visual_notes: z
+    .string()
+    .optional()
+    .describe("Layout and composition of the ad's image, when one was shown."),
 });
 
 export type CompetitorProfileOutput = z.infer<typeof CompetitorProfileSchema>;
@@ -86,6 +90,14 @@ export const EXTRACT_COMPETITOR_TOOL: Anthropic.Tool = {
         type: "string",
         description: "The register/voice: casual, formal, playful, urgent, and so on.",
       },
+      visual_notes: {
+        type: "string",
+        description:
+          "Only when an image was shown: 1-2 sentences on its layout and composition " +
+          "(where the headline sits, how much space the visual takes, the type weight, " +
+          "the overall density). Generic design language only: never name or describe " +
+          "its products, people, logo, brand colors, or any of its text.",
+      },
     },
     required: ["summary", "hook_type", "angle", "structure", "cta_style"],
   },
@@ -105,6 +117,8 @@ export function buildExtractCompetitorMessages(content?: string): {
     "persuades, so another brand can adapt the STRATEGY without copying it.",
     "Analyze its hook, angle, structure (the beats top to bottom), persuasion",
     "levers (scarcity, social proof, authority, and so on), and CTA style.",
+    "If an image is attached, also note its layout and composition in generic",
+    "design terms (visual_notes).",
     "",
     "NEVER transcribe, quote, or summarize its actual words, claims, offer,",
     "numbers, or brand name. Distill the strategy only: the words themselves",

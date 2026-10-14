@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getSingleBrand, listStyleReferences, listTopics } from "@/lib/db/queries";
+import {
+  getSingleBrand,
+  listCompetitorReferences,
+  listStyleReferences,
+  listTopics,
+} from "@/lib/db/queries";
 import { getSessionUser } from "@/lib/supabase/server";
 import { Card } from "@/components/ui";
 import { ArrowLeftIcon } from "@/components/ui/icons";
@@ -24,12 +29,14 @@ export default async function NewFlyerPage() {
 
   let topics: Awaited<ReturnType<typeof listTopics>> = [];
   let styles: Awaited<ReturnType<typeof listStyleReferences>> = [];
+  let competitorAds: Awaited<ReturnType<typeof listCompetitorReferences>> = [];
   try {
     const user = await getSessionUser();
     const brand = user ? await getSingleBrand(user.id) : null;
     if (brand) {
       topics = await listTopics(brand.id);
       styles = await listStyleReferences(brand.id);
+      competitorAds = await listCompetitorReferences(brand.id);
     }
   } catch {
     // Non-fatal: the form still works with an empty topic list (freeform path).
@@ -50,6 +57,9 @@ export default async function NewFlyerPage() {
       <NewFlyerForm
         topics={topics.map((t) => ({ id: t.id, title: t.title, pillar: t.pillar }))}
         styles={styles.map((s) => ({ id: s.id, name: s.name, imageUrl: s.image_url }))}
+        competitorAds={competitorAds
+          .filter((r) => r.competitor_profile)
+          .map((r) => ({ id: r.id, name: r.name }))}
       />
     </>
   );

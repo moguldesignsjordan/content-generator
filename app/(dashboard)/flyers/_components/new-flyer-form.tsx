@@ -32,14 +32,21 @@ export interface FlyerTopicOption {
   pillar: string;
 }
 
+export interface CompetitorAdOption {
+  id: string;
+  name: string;
+}
+
 type Source = "topic" | "brief";
 
 export function NewFlyerForm({
   topics,
   styles,
+  competitorAds,
 }: {
   topics: FlyerTopicOption[];
   styles: StyleOption[];
+  competitorAds: CompetitorAdOption[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -50,6 +57,8 @@ export function NewFlyerForm({
   const [aspect, setAspect] = useState("1:1");
   const [styleId, setStyleId] = useState("");
   const [presetStyle, setPresetStyle] = useState("");
+  const [competitorId, setCompetitorId] = useState("");
+  const [format, setFormat] = useState<"post" | "ad">("post");
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
@@ -70,6 +79,8 @@ export function NewFlyerForm({
           aspect,
           styleReferenceId: styleId || undefined,
           style: presetStyle || undefined,
+          competitorReferenceId: competitorId || undefined,
+          format,
         }),
       });
       const data = (await res.json()) as {
@@ -144,6 +155,44 @@ export function NewFlyerForm({
             disabled={busy}
           />
         </Field>
+
+        <Field
+          label="Use it as"
+          hint={
+            format === "ad"
+              ? "Writes the ad's primary text, headline, description, and CTA button to paste into Ads Manager."
+              : "Writes a caption and hashtags to post with the image."
+          }
+        >
+          <SegmentedControl
+            value={format}
+            onChange={setFormat}
+            options={[
+              { value: "post", label: "Organic post" },
+              { value: "ad", label: "Paid ad" },
+            ]}
+          />
+        </Field>
+
+        {competitorAds.length > 0 && (
+          <Field
+            label="Inspired by a competitor ad (optional)"
+            hint="Borrows its hook, structure, and layout idea. The words, offer, and imagery stay yours."
+          >
+            <Select
+              value={competitorId}
+              onChange={(e) => setCompetitorId(e.target.value)}
+              disabled={busy}
+            >
+              <option value="">None</option>
+              {competitorAds.map((ad) => (
+                <option key={ad.id} value={ad.id}>
+                  {ad.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
 
         <Field label="Post shape">
           <SegmentedControl

@@ -21,6 +21,7 @@ import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { FlyerSheet } from "./flyer-sheet";
+import { AdCopyCard } from "./ad-copy-card";
 
 /** A connected network this flyer can post to (see lib/publishing/providers). */
 export interface SocialTarget {
@@ -458,8 +459,11 @@ export function FlyerReviewActions({
         )}
       </Card>
 
-      {/* Post caption: what gets pasted next to the image on FB/IG. */}
-      {copy && (
+      {/* Ad flyers show Meta's ad fields; posts show the caption pasted next
+          to the image on FB/IG. */}
+      {copy?.ad ? (
+        <AdCopyCard draftId={draftId} ad={copy.ad} editable={isActionable} onSaved={setCopy} />
+      ) : copy && (
         <Card className="p-5">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-semibold">Post caption</h3>
@@ -548,7 +552,9 @@ export function FlyerReviewActions({
         {isApproved ? (
           <>
             <p className="text-sm text-muted">
-              Approved. Download the flyer and post it with the caption above.
+              {copy?.ad
+                ? "Approved. Download the image and paste the ad text above into Ads Manager."
+                : "Approved. Download the flyer and post it with the caption above."}
             </p>
             <a href={`/api/drafts/${draftId}/flyer/download`} download>
               <Button variant="gradient">

@@ -38,6 +38,7 @@ import type {
   BlogType,
   FeedbackEmailExample,
   FlyerAspect,
+  FlyerFormat,
   FlyerStyleId,
   EmailDesignProfile,
   StyleReference,
@@ -317,6 +318,8 @@ export async function createDraftShell(args: {
   flyerBrief?: string;
   styleReferenceId?: string;
   flyerStyle?: FlyerStyleId;
+  competitorReferenceId?: string;
+  flyerFormat?: FlyerFormat;
   /** Social only: the day the weekly schedule plans to post it. */
   plannedPublishAt?: string;
 }): Promise<string> {
@@ -335,6 +338,8 @@ export async function createDraftShell(args: {
     flyerBrief,
     styleReferenceId,
     flyerStyle,
+    competitorReferenceId,
+    flyerFormat,
     plannedPublishAt,
   } = args;
 
@@ -372,6 +377,8 @@ export async function createDraftShell(args: {
     ...(flyerBrief ? { flyer_brief: flyerBrief } : {}),
     ...(styleReferenceId ? { style_reference_id: styleReferenceId } : {}),
     ...(flyerStyle ? { flyer_style: flyerStyle } : {}),
+    ...(competitorReferenceId ? { competitor_reference_id: competitorReferenceId } : {}),
+    ...(flyerFormat === "ad" ? { flyer_format: flyerFormat } : {}),
     ...(plannedPublishAt ? { planned_publish_at: plannedPublishAt } : {}),
   };
 

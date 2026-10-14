@@ -111,3 +111,37 @@ export async function assertPublicHost(hostname: string): Promise<void> {
     throw new ScrapeError("blocked_host", "That host can't be scanned.");
   }
 }
+
+export interface AdLibraryPageRef {
+  pageId: string;
+  /** Two-letter code, or "ALL". */
+  country: string;
+  status: "ACTIVE" | "INACTIVE" | "ALL";
+}
+
+/**
+ * Reads a Facebook Ad Library advertiser link
+ * (`/ads/library/?view_all_page_id=...&country=US&active_status=active`).
+ * Null for anything else, including a keyword search, which has no page id.
+ */
+export function parseAdLibraryUrl(input: string): AdLibraryPageRef | null {
+  let url: URL;
+  try {
+    url = normalizeSiteUrl(input);
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)facebook\.com$/i.test(url.hostname) || !/\/ads\/library/i.test(url.pathname)) {
+    return null;
+  }
+  const pageId = url.searchParams.get("view_all_page_id") ?? "";
+  if (!/^\d+$/.test(pageId)) return null;
+
+  const country = (url.searchParams.get("country") ?? "").toUpperCase();
+  const status = (url.searchParams.get("active_status") ?? "").toUpperCase();
+  return {
+    pageId,
+    country: /^[A-Z]{2}$|^ALL$/.test(country) ? country : "US",
+    status: status === "INACTIVE" || status === "ALL" ? status : "ACTIVE",
+  };
+}

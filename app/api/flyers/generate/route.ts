@@ -15,7 +15,7 @@ import {
   isFlyerAspect,
   isFlyerStyle,
 } from "@/prompts/generate-flyer";
-import type { FlyerAspect, FlyerStyleId } from "@/lib/db/types";
+import type { FlyerAspect, FlyerFormat, FlyerStyleId } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -23,9 +23,10 @@ import { getSessionUser } from "@/lib/supabase/server";
 // Starts a social flyer draft. Two entry shapes:
 //   { topicId }          — flyer from an existing topic
 //   { title, brief? }    — standalone: mints a topic in the default cluster
-// plus { aspect?, styleReferenceId? } on either. Like /api/generate this only
-// does fast DB writes and returns { draftId }; the review page's SSE stream
-// drives the actual generation.
+// plus { aspect?, styleReferenceId?, competitorReferenceId?, format? } on
+// either ("ad" writes paid-ad text instead of a caption). Like /api/generate
+// this only does fast DB writes and returns { draftId }; the review page's SSE
+// stream drives the actual generation.
 
 export async function POST(request: Request) {
   if (!isSupabaseConfigured() || !isAnthropicConfigured()) {
@@ -65,6 +66,8 @@ export async function POST(request: Request) {
   let aspect: FlyerAspect = DEFAULT_FLYER_ASPECT;
   let styleReferenceId: string | undefined;
   let flyerStyle: FlyerStyleId | undefined;
+  let competitorReferenceId: string | undefined;
+  let flyerFormat: FlyerFormat = "post";
   let campaignId: string | undefined;
   try {
     const body = await request.json();
@@ -74,6 +77,11 @@ export async function POST(request: Request) {
     if (isFlyerAspect(body?.aspect)) aspect = body.aspect;
     styleReferenceId = body?.styleReferenceId || undefined;
     if (isFlyerStyle(body?.style)) flyerStyle = body.style;
+    competitorReferenceId =
+      typeof body?.competitorReferenceId === "string"
+        ? body.competitorReferenceId || undefined
+        : undefined;
+    if (body?.format === "ad") flyerFormat = "ad";
     campaignId = body?.campaignId || undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
@@ -123,6 +131,8 @@ export async function POST(request: Request) {
       flyerBrief: brief,
       styleReferenceId,
       flyerStyle,
+      competitorReferenceId,
+      flyerFormat,
     });
     return NextResponse.json({ draftId });
   } catch (err) {

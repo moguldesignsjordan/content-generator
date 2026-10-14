@@ -152,8 +152,8 @@ const BARE_URL_RE = /https?:\/\/[^\s<>"')\]]+/i;
  * When the message contains a bare URL and no image is attached, scrapes it
  * server-side (SSRF-guarded, see lib/scrape) and appends a system note with
  * either the extracted text or an honest "couldn't read it" guidance message
- * (Facebook Ad Library and similar login-walled pages always fall into the
- * latter). The model decides what to do with it (competitor ad vs. unrelated
+ * (login-walled pages fall into the latter; Facebook Ad Library links get
+ * pointed at the Competitor Ads import instead). The model decides what to do with it (competitor ad vs. unrelated
  * link) per the COMPETITOR ADS CAN ARRIVE AT ANY STAGE rule in
  * buildCreateAgentSystem; this only makes sure it never has to guess at a
  * naked link's contents.
@@ -682,6 +682,8 @@ async function dispatchTool(
                 ? input.flyer_aspect
                 : DEFAULT_FLYER_ASPECT,
               flyerBrief,
+              competitorReferenceId: state.brief.competitor_reference_id,
+              flyerFormat: input.social_format === "ad" ? "ad" : "post",
             }
           : {}),
       });

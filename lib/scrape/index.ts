@@ -200,12 +200,16 @@ export type { ScrapeResult, ScrapedPage, SiteSignals, ColorCandidate } from "./t
 // Library and similar login-walled/JS-app pages are a dead end for a plain
 // fetch, so those (and any other page a plain fetch can't read) get a guidance
 // message the create-chat agent relays, instead of silently distilling junk.
+// Ad Library links point at the dedicated import (lib/clients/scrapecreators.ts).
 
 const MIN_AD_TEXT_CHARS = 200;
 const MAX_AD_TEXT_CHARS = 12000;
 
 const SCRAPE_GUIDANCE =
   "This site blocks scraping. Paste the ad copy or upload a screenshot instead.";
+const AD_LIBRARY_GUIDANCE =
+  "To pull ads from Facebook Ad Library, go to Media > Competitor Ads > Ad Library, " +
+  "paste the advertiser's page link there, and pick which ads to save.";
 
 export type CompetitorUrlScrapeResult =
   | { ok: true; content: string }
@@ -232,7 +236,7 @@ export async function scrapeCompetitorAdUrl(
     return { ok: false, guidance: SCRAPE_GUIDANCE };
   }
   if (isFacebookAdsLibrary(url)) {
-    return { ok: false, guidance: SCRAPE_GUIDANCE };
+    return { ok: false, guidance: AD_LIBRARY_GUIDANCE };
   }
 
   const page = await fetchHtml(url).catch(() => null);

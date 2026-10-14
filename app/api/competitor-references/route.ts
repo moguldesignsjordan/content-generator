@@ -20,9 +20,9 @@ import { getSessionUser } from "@/lib/supabase/server";
 //   - pasted ad copy (content)
 //   - an uploaded screenshot (file), hosted on the same content-images bucket
 //     generated heroes use
-//   - a URL (source_url only), server-scraped; a login-walled/JS page like
-//     Facebook Ad Library returns guidance instead of junk (see
-//     lib/scrape/scrapeCompetitorAdUrl)
+//   - a URL (source_url only), server-scraped; a login-walled/JS page
+//     returns guidance instead of junk (see lib/scrape/scrapeCompetitorAdUrl).
+//     Facebook Ad Library pages have their own import: ./ad-library
 // Claude distills the strategy once here, and every email generation injects
 // the result (see buildCompetitorReferenceBlock) instead of re-analyzing the
 // raw ad. One Claude call per save, so maxDuration covers it.

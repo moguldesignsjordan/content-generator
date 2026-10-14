@@ -1,7 +1,18 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
-import type { EmailCopy, FlyerAspect, FlyerCopy, FlyerStyleId } from "@/lib/db/types";
+import {
+  AD_CTA_BUTTONS,
+  type AdCopy,
+  type AdCtaButton,
+  type CompetitorReference,
+  type EmailCopy,
+  type FlyerAspect,
+  type FlyerCopy,
+  type FlyerFormat,
+  type FlyerStyleId,
+} from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
+import { buildCompetitorReferenceBlock } from "./brand-voice";
 import { stripEmDashes, stripMarkdown } from "@/lib/text";
 
 // Flyer prompt assembly: one FAST_MODEL call produces several alternative
@@ -155,29 +166,69 @@ const FLYER_COPY_PROPERTIES = {
 
 const FLYER_COPY_REQUIRED = ["headline", "caption", "scene"];
 
-/** Forced tool: several complete alternative flyers in one cheap call. */
-export const FLYER_VARIANTS_TOOL: Anthropic.Tool = {
-  name: "save_flyer_variants",
-  description:
-    "Return several alternative flyers for the same topic. Each one is " +
-    "complete: its own headline/subtext/cta (typeset INTO the image exactly " +
-    "as written), caption, hashtags, and scene. Make them genuinely different " +
-    "hooks, not rewordings of one idea.",
-  input_schema: {
+// An ad swaps the organic caption + hashtags for Meta's ad text fields.
+const { caption: _caption, hashtags: _hashtags, ...FLYER_IMAGE_PROPERTIES } =
+  FLYER_COPY_PROPERTIES;
+const AD_PROPERTIES = {
+  ...FLYER_IMAGE_PROPERTIES,
+  ad: {
     type: "object",
+    description: "The paid ad's text fields, shown around the image in the feed.",
     properties: {
-      variants: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: FLYER_COPY_PROPERTIES,
-          required: FLYER_COPY_REQUIRED,
-        },
+      primary_text: {
+        type: "string",
+        description:
+          "The text above the image: 1 to 3 short sentences in the brand voice. " +
+          "Front-load the hook: only about the first 125 characters show " +
+          "before 'See more'. Plain text, no hashtags, never use em dashes.",
+      },
+      headline: {
+        type: "string",
+        description:
+          "The bold line under the image, about 40 characters max. The offer " +
+          "or benefit, not a repeat of the on-image headline.",
+      },
+      description: {
+        type: "string",
+        description: "One muted supporting line under the headline, about 30 characters max.",
+      },
+      cta_button: {
+        type: "string",
+        enum: [...AD_CTA_BUTTONS],
+        description: "The ad's button. Pick the one that matches what the reader should do.",
       },
     },
-    required: ["variants"],
+    required: ["primary_text", "headline", "cta_button"],
   },
 };
+const AD_REQUIRED = ["headline", "ad", "scene"];
+
+/** Forced tool: several complete alternative flyers in one cheap call. */
+export function flyerVariantsTool(format: FlyerFormat = "post"): Anthropic.Tool {
+  const ad = format === "ad";
+  return {
+    name: "save_flyer_variants",
+    description:
+      "Return several alternative flyers for the same topic. Each one is " +
+      "complete: its own headline/subtext/cta (typeset INTO the image exactly " +
+      `as written), ${ad ? "ad text fields" : "caption, hashtags"}, and scene. ` +
+      "Make them genuinely different hooks, not rewordings of one idea.",
+    input_schema: {
+      type: "object",
+      properties: {
+        variants: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: ad ? AD_PROPERTIES : FLYER_COPY_PROPERTIES,
+            required: ad ? AD_REQUIRED : FLYER_COPY_REQUIRED,
+          },
+        },
+      },
+      required: ["variants"],
+    },
+  };
+}
 
 /** Builds the (system, user) pair for the flyer variants call. */
 export function buildFlyerCopyMessages(args: {
@@ -193,6 +244,10 @@ export function buildFlyerCopyMessages(args: {
   style?: FlyerStyleId;
   /** When the flyer is spun off an email draft: distill this email's offer. */
   emailCopy?: EmailCopy;
+  /** A saved competitor ad to learn the approach from (strategy only). */
+  competitorRef?: CompetitorReference | null;
+  /** "ad" writes paid-ad text fields instead of a caption. */
+  format?: FlyerFormat;
   /** Reviewer feedback when regenerating a rejected flyer. */
   rejection?: {
     feedback: string;
@@ -207,14 +262,29 @@ export function buildFlyerCopyMessages(args: {
   const variants = args.variants;
   const perVariantStyles =
     variants.styles && new Set(variants.styles).size > 1 ? variants.styles : null;
+  const isAd = args.format === "ad";
   const system = [
-    "You write copy for social media flyers (Instagram and Facebook post",
-    "graphics). Given a topic and brand context, produce alternative flyers,",
-    "each with its own on-image text, post caption, and visual concept. Rules:",
+    isAd
+      ? "You write paid Facebook and Instagram ads: the designed image plus the"
+      : "You write copy for social media flyers (Instagram and Facebook post",
+    isAd
+      ? "ad's text fields. Given a topic and brand context, produce alternative"
+      : "graphics). Given a topic and brand context, produce alternative flyers,",
+    isAd
+      ? "ads, each with its own on-image text, ad text, and visual concept. Rules:"
+      : "each with its own on-image text, post caption, and visual concept. Rules:",
     "- headline: 8 words max, concrete benefit or hook, no clickbait.",
     "- subtext: one short line only when it adds something; otherwise omit.",
     "- cta: 2 to 4 words, action verb first.",
-    "- caption: 1 to 3 sentences in the brand voice with a clear next step.",
+    ...(isAd
+      ? [
+          "- ad.primary_text: hook in the first sentence, about 125 characters",
+          "  before it would truncate, one clear reason to act. No hashtags.",
+          "- ad.headline and ad.description: short, specific, and different",
+          "  from the on-image headline so the ad doesn't say the same thing twice.",
+          "- ad.cta_button: the one button that matches the next step.",
+        ]
+      : ["- caption: 1 to 3 sentences in the brand voice with a clear next step."]),
     "- scene: imagery and composition only. Never describe the text, colors,",
     "  or fonts; the render prompt handles those.",
     "- NEVER use em dashes anywhere.",
@@ -234,6 +304,23 @@ export function buildFlyerCopyMessages(args: {
           .slice(0, 3)
           .map((s) => `  Email body: ${[s.heading, s.body].filter(Boolean).join(": ")}`),
         `  Email CTA: ${args.emailCopy.cta_text}`,
+      ]
+    : [];
+
+  const competitorBlock = buildCompetitorReferenceBlock(args.competitorRef);
+  const competitorLines = competitorBlock
+    ? [
+        "",
+        competitorBlock,
+        ...(args.competitorRef?.competitor_profile?.visual_notes
+          ? [`    Layout idea: ${args.competitorRef.competitor_profile.visual_notes}`]
+          : []),
+        "Treat it as inspiration, not a template. Every variant must read as",
+        "this brand's own post about the FLYER TOPIC, with this brand's offer",
+        "and wording. At least two variants follow the reference's hook type",
+        "and structure; the rest may try something else. A layout idea may",
+        "shape a scene, but never recreate the competitor's products, people,",
+        "or imagery.",
       ]
     : [];
 
@@ -271,6 +358,7 @@ export function buildFlyerCopyMessages(args: {
         : "",
     args.brief ? `CREATIVE BRIEF FROM THE USER (follow it): ${args.brief}` : "",
     ...emailLines,
+    ...competitorLines,
     ...rejectionLines,
     "",
     `Call save_flyer_variants with ${variants.count} complete variants.`,
@@ -281,11 +369,31 @@ export function buildFlyerCopyMessages(args: {
   return { system, user };
 }
 
+// Flyer copy is painted onto an image and posted as a caption: markdown the
+// model slipped in would render as literal asterisks either way.
+const plain = (text: string) => stripMarkdown(stripEmDashes(text));
+
+function isAdCtaButton(value: unknown): value is AdCtaButton {
+  return AD_CTA_BUTTONS.includes(value as AdCtaButton);
+}
+
+/** Cleans an ad's text fields; null when a required one is missing. */
+export function cleanAdCopy(raw: unknown): AdCopy | null {
+  const ad = raw as Partial<Record<keyof AdCopy, unknown>> | null;
+  const primary = typeof ad?.primary_text === "string" ? ad.primary_text.trim() : "";
+  const headline = typeof ad?.headline === "string" ? ad.headline.trim() : "";
+  if (!primary || !headline) return null;
+  const description = typeof ad?.description === "string" ? ad.description.trim() : "";
+  return {
+    primary_text: plain(primary),
+    headline: plain(headline),
+    ...(description ? { description: plain(description) } : {}),
+    cta_button: isAdCtaButton(ad?.cta_button) ? ad.cta_button : "Learn more",
+  };
+}
+
 /** Em-dash stripping + trimming across every text field, like the other pipelines. */
 export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
-  // Flyer copy is painted onto an image and posted as a caption: markdown the
-  // model slipped in would render as literal asterisks either way.
-  const plain = (text: string) => stripMarkdown(stripEmDashes(text));
   return {
     headline: plain(out.headline.trim()),
     subtext: out.subtext?.trim() ? plain(out.subtext.trim()) : undefined,
@@ -304,9 +412,33 @@ export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
  * cleans the rest, and caps at `count`. Fewer than asked is fine (fewer
  * options); none at all is the caller's retry signal, so it returns [].
  */
-export function parseFlyerVariants(input: unknown, count: number): FlyerCopyOutput[] {
+export function parseFlyerVariants(
+  input: unknown,
+  count: number,
+  format: FlyerFormat = "post",
+): FlyerCopyOutput[] {
   const raw = (input as { variants?: unknown } | null)?.variants;
   if (!Array.isArray(raw)) return [];
+  if (format === "ad") {
+    // Ads carry no caption of their own: the primary text stands in for it,
+    // so everything that reads flyer_copy.caption keeps working.
+    return raw
+      .map((v): FlyerCopyOutput | null => {
+        const c = v as Partial<FlyerCopyOutput> & { ad?: unknown };
+        const ad = cleanAdCopy(c?.ad);
+        if (!ad || !c?.headline?.trim() || !c.scene?.trim()) return null;
+        const copy = cleanFlyerCopy({
+          headline: c.headline,
+          subtext: c.subtext,
+          cta: c.cta,
+          caption: ad.primary_text,
+          scene: c.scene,
+        });
+        return { ...copy, ad };
+      })
+      .filter((v): v is FlyerCopyOutput => v !== null)
+      .slice(0, count);
+  }
   return raw
     .filter((v): v is FlyerCopyOutput => {
       const c = v as Partial<FlyerCopyOutput> | null;
