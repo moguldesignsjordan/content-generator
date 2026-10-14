@@ -263,3 +263,48 @@ export async function composeFlyer(args: {
   );
   return Buffer.from(await image.arrayBuffer());
 }
+
+/**
+ * Places the brand logo, exactly as uploaded, on an AI-designed flyer at the
+ * corner its look names. The image model never redraws a logo (it would
+ * distort it), so it's stamped here instead: a small chip on the brand's
+ * light color, inset like the composed layouts. No logo on file: unchanged.
+ */
+export async function stampLogo(args: {
+  image: Buffer;
+  tokens: BrandTokens;
+  width: number;
+  height: number;
+  corner: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+}): Promise<Buffer> {
+  const { width: W, height: H } = args;
+  const base = await sharp(args.image).rotate().resize({ width: W, height: H, fit: "cover" }).toBuffer();
+  const logoUri = args.tokens.logo_url ? await loadLogo(args.tokens.logo_url) : null;
+  if (!logoUri) return base;
+
+  const s = W / 1080;
+  const logoH = Math.round(56 * s);
+  const padX = Math.round(20 * s);
+  const padY = Math.round(14 * s);
+  const logo = await sharp(Buffer.from(logoUri.split(",")[1], "base64"))
+    .resize({ height: logoH })
+    .png()
+    .toBuffer();
+  const { width: logoW = logoH } = await sharp(logo).metadata();
+  const chipW = logoW + padX * 2;
+  const chipH = logoH + padY * 2;
+  const radius = Math.round(16 * s);
+  const chipBg = hex(args.tokens.colors.background, "#FFFFFF");
+  const chip = await sharp(
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${chipW}" height="${chipH}"><rect width="${chipW}" height="${chipH}" rx="${radius}" fill="${chipBg}"/></svg>`,
+    ),
+  )
+    .composite([{ input: logo, left: padX, top: padY }])
+    .png()
+    .toBuffer();
+  const inset = Math.round(64 * s);
+  const left = args.corner.endsWith("left") ? inset : W - inset - chipW;
+  const top = args.corner.startsWith("top") ? inset : H - inset - chipH;
+  return sharp(base).composite([{ input: chip, left, top }]).png().toBuffer();
+}

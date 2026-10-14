@@ -127,6 +127,7 @@ function createShell(
     flyerAspect: item.kind === "ad" ? "1:1" : "4:5",
     flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research),
     ...(args.photoUrl ? { productPhotoUrl: args.photoUrl } : {}),
+    ...(args.factory.look_id ? { lookId: args.factory.look_id } : {}),
     // Organic posts go out on their day through the daily cron once approved.
     // Ads never get a posting date: that cron would publish them as organic
     // posts. They're run from Ads Manager instead.

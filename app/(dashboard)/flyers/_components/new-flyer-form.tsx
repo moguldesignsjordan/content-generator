@@ -17,6 +17,7 @@ import { toastApiError } from "@/lib/billing/toast-error";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { StylePicker, type StyleOption } from "./style-library";
 import { useImageModelOptions } from "../../_components/image-models-context";
+import { LookPicker } from "../../_components/look-picker";
 
 // Aspect labels mirror FLYER_ASPECTS in prompts/generate-flyer.ts; kept
 // inline (not imported) because that module is part of the server prompt
@@ -63,6 +64,7 @@ export function NewFlyerForm({
   // "" = the brand's default model (Settings).
   const imageModelOptions = useImageModelOptions();
   const [model, setModel] = useState("");
+  const [lookId, setLookId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const canSubmit =
@@ -86,6 +88,7 @@ export function NewFlyerForm({
           competitorReferenceId: competitorId || undefined,
           format,
           model: model || undefined,
+          ...(lookId ? { lookId } : {}),
         }),
       });
       const data = (await res.json()) as {
@@ -222,6 +225,10 @@ export function NewFlyerForm({
               </option>
             ))}
           </Select>
+        </Field>
+
+        <Field label="Make it look like">
+          <LookPicker value={lookId} onChange={setLookId} disabled={busy} />
         </Field>
 
         <Field label="Design style">

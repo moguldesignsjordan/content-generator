@@ -4,6 +4,7 @@ import {
   type AdCopy,
   type AdCtaButton,
   type CompetitorReference,
+  type DesignLookProfile,
   type EmailCopy,
   type FlyerAspect,
   type FlyerCopy,
@@ -501,4 +502,66 @@ export function buildFlyerImagePrompt(
   ].filter(Boolean);
 
   return parts.join(" ");
+}
+
+/**
+ * Builds the render prompt for a flyer that follows a design look: the image
+ * model designs the WHOLE flyer, text included, matching the attached
+ * examples. The text it sets is read back and checked (lib/flyer/text-check.ts)
+ * before anyone sees it. References arrive in this order: the product photo
+ * (when hasProduct), then the look's examples.
+ */
+export function buildFlyerDesignPrompt(
+  copy: FlyerCopyOutput,
+  tokens: BrandTokens,
+  aspect: FlyerAspect,
+  look: {
+    profile: DesignLookProfile | null;
+    exampleCount: number;
+    roles: { background: string; text: string; accent: string };
+  },
+  opts: {
+    hasProduct?: boolean;
+    misspelled?: string[];
+    /** Where the real logo is stamped afterwards; that corner is kept clear. */
+    logoCorner?: "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
+  } = {},
+): string {
+  const p = look.profile;
+  const showCta = Boolean(copy.cta) && p?.cta_style !== "none";
+  const textLines = [
+    `the headline "${copy.headline}"`,
+    copy.subtext ? `the supporting line "${copy.subtext}"` : "",
+    showCta ? `the call to action "${copy.cta}"${p ? ` styled as a ${p.cta_style}` : ""}` : "",
+  ].filter(Boolean);
+  const font = tokens.fonts.heading.split(",")[0].replace(/['"]/g, "").trim();
+  const examples =
+    look.exampleCount === 1 ? "the attached example image" : `the ${look.exampleCount} attached example images`;
+
+  return [
+    `Design a finished, professional social media ad, ${FLYER_ASPECTS[aspect].label.toLowerCase()}.`,
+    `Match the design of ${examples}${opts.hasProduct ? " (the images after the product photo)" : ""} as closely as possible: their layout, kind of imagery and setting, typographic treatment, composition, density, and overall feel. The examples come first; everything below adapts them to this brand and message.`,
+    ...(p
+      ? [
+          `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Headline: ${p.headline_treatment}. Imagery: ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
+        ]
+      : []),
+    `Subject for this piece, shown the way the examples show theirs: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    `Typeset EXACTLY this text and nothing else: ${textLines.join(", ")}. Every word spelled exactly as given.`,
+    ...(opts.misspelled?.length
+      ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
+      : []),
+    `Colors: use the brand's colors in the roles the examples use. Main background or dominant color ${look.roles.background}, text ${look.roles.text}, and ${look.roles.accent} as the one accent${p ? ` (${p.color_roles.accent_usage})` : ""}.`,
+    `Headline typography in the spirit of ${font || "a bold modern sans serif"}.`,
+    ...(opts.hasProduct
+      ? [
+          "The first attached image is the real product: show this exact product, unchanged (same shape, colors, label, and proportions). Do not redesign it.",
+        ]
+      : []),
+    ...(opts.logoCorner
+      ? [`Keep the ${opts.logoCorner} corner completely empty of text and key subjects: the brand logo is added there afterwards.`]
+      : []),
+    "The examples are style references only. Never copy their words, logos, brand names, products, or people.",
+    "No watermarks, no extra words, and no placeholder text anywhere: printed items, screens, signs, and packaging in the scene carry no words (only a real product photo keeps its own label).",
+  ].join(" ");
 }

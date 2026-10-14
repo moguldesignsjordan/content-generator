@@ -49,6 +49,29 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-14 (evening): design looks
+
+- **Looks:** a named group of 1-6 example ads/posts (upload, library,
+  Facebook Ad Library link, or image URL; all re-hosted on our bucket). Saved
+  in `design_looks` (migration **031, applied**). Sonnet reads the design
+  once at save (layout, type, color roles, imagery, CTA, logo corner). One
+  can be the brand default; "none" opts a flyer out of it.
+- **Designed flyers:** with a look, the image model designs the whole flyer
+  (text included) following up to 3 examples, brand colors mapped to the
+  roles the examples use (`lib/flyer/color-roles.ts`). Haiku reads the text
+  back (`lib/flyer/text-check.ts`); one retry naming the misspelling, then
+  the old code-set layout as a safe fallback. Logo is stamped in code.
+  Competitor ad images now reach the image model, but only inside a look
+  the owner built, with a no-copying instruction.
+- **Picker** on Create ("Make flyers look like") and the new-flyer form.
+- **Model test (VistaPrint ads):** Nano Banana 2.1 matched Pro on text and
+  looked as good at a third of the cost, so it stays the default. Fixed from
+  the test: logo corner always kept clear, no placeholder text, examples
+  weighted over the scene.
+- **Open:** the `ANTHROPIC_API_KEY` in `.env.local` is invalid (401), so
+  every Claude call fails locally; production's key works. Re-run the look
+  test once it's replaced. UNCOMMITTED.
+
 ## Session 2026-10-14 (later): image models and hero prompts
 
 - **Default image model is Nano Banana 2.1** (`gemini-nano-banana-2.1`,

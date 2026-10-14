@@ -572,6 +572,8 @@ export interface FactoryState {
   photo_url?: string;
   /** Matched saved product, when the sentence is about one. */
   offer_slug?: string;
+  /** The design look picked for this campaign's social posts and ads. */
+  look_id?: string;
   research?: FactoryResearch;
   plan?: FactoryPlanItem[];
   quote?: FactoryQuote;
@@ -960,6 +962,47 @@ export interface FlyerVariant {
   finalized?: boolean;
 }
 
+// ── Design looks (migration 031) ─────────────────────────────────────────────
+
+/** Where one example image in a look came from. */
+export type LookExampleSource = "upload" | "library" | "ad_library" | "url";
+
+export interface LookExample {
+  /** Public, re-hosted image URL on our bucket. */
+  url: string;
+  source: LookExampleSource;
+  /** The style_references / competitor_references row it came from, if any. */
+  ref_id?: string;
+}
+
+/** What Claude reads from a look's examples once, at save time. */
+export interface DesignLookProfile {
+  summary: string;
+  layout: string;
+  text_placement: string;
+  text_amount: "minimal" | "medium" | "heavy";
+  headline_treatment: string;
+  color_roles: {
+    background: "dark" | "light" | "vivid" | "photo";
+    accent_usage: string;
+  };
+  imagery: string;
+  cta_style: "pill" | "box" | "underline" | "text" | "none";
+  logo_placement: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "none";
+  mood: string[];
+}
+
+export interface DesignLook {
+  id: string;
+  brand_id: string;
+  name: string;
+  examples: LookExample[];
+  profile: DesignLookProfile | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 /** How a reference image is used: "style" borrows the look loosely (the
  * default, the original migration-014 flyer behavior); "recreate" rebuilds the
  * reference's actual layout/composition with our own text and brand. */
@@ -1173,6 +1216,9 @@ export interface DraftMeta {
   /** Social only: a real, already-hosted product photo the flyer art is built
    * around (factory upload, or the promoted product's own photo). */
   product_photo_url?: string;
+  /** The design look (migration 031) this flyer follows; unset means the
+   * brand's default look, if it has one, and "none" opts out of it. */
+  look_id?: string;
   /** The image model the flyer's options were made with (picked on the
    * create form). Unset means the brand's default. */
   flyer_model?: ImageModelTier;

@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { readSse } from "@/lib/read-sse";
 import type { FactoryKind } from "@/lib/db/types";
 import { FACTORY_KINDS, FACTORY_KIND_LABELS } from "@/prompts/campaign-formats";
+import { LookPicker } from "./look-picker";
 
 // The factory's front door: one sentence, what to make, how many, over how
 // long. Submitting researches and plans (nothing is generated yet) and opens
@@ -30,6 +31,8 @@ export function FactoryStart({ hasWebsite }: { hasWebsite: boolean }) {
   const [size, setSize] = useState<Size>("12");
   const [days, setDays] = useState<Days>("30");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // null = the brand default look (or our layouts when there is none).
+  const [lookId, setLookId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<string | null>(null);
@@ -72,6 +75,7 @@ export function FactoryStart({ hasWebsite }: { hasWebsite: boolean }) {
           size: Number(size),
           days: Number(days),
           ...(photoUrl ? { photo_url: photoUrl } : {}),
+          ...(lookId ? { look_id: lookId } : {}),
         }),
       });
       if (!res.ok) {
@@ -189,6 +193,13 @@ export function FactoryStart({ hasWebsite }: { hasWebsite: boolean }) {
           })}
         </div>
       </div>
+
+      {(kinds.includes("social") || kinds.includes("ad")) && (
+        <div className="space-y-2">
+          <p className="text-[13px] font-medium text-foreground">Make flyers look like</p>
+          <LookPicker value={lookId} onChange={setLookId} disabled={running} />
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-6">
         <div className="space-y-2">

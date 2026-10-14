@@ -28,9 +28,12 @@ import type {
   DraftGenerationState,
   DraftJobContext,
   DraftListRow,
+  DesignLook,
+  DesignLookProfile,
   DraftMeta,
   FactoryKind,
   ImageModelTier,
+  LookExample,
   DraftSeoData,
   EmailCopy,
   EmailDraftContent,
@@ -329,6 +332,8 @@ export async function createDraftShell(args: {
   productPhotoUrl?: string;
   /** Social only: the image model picked for the options (meta.flyer_model). */
   flyerModel?: ImageModelTier;
+  /** Social only: the design look to follow (meta.look_id). */
+  lookId?: string;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -350,6 +355,7 @@ export async function createDraftShell(args: {
     plannedPublishAt,
     productPhotoUrl,
     flyerModel,
+    lookId,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -391,6 +397,7 @@ export async function createDraftShell(args: {
     ...(plannedPublishAt ? { planned_publish_at: plannedPublishAt } : {}),
     ...(productPhotoUrl ? { product_photo_url: productPhotoUrl } : {}),
     ...(flyerModel ? { flyer_model: flyerModel } : {}),
+    ...(lookId ? { look_id: lookId } : {}),
   };
 
   const { data: draft, error: draftErr } = await db
@@ -2648,6 +2655,121 @@ export async function getEmailCopyForDraft(
 // One table, two libraries: flyer style references (kind 'flyer', the original
 // behavior) and email design references (kind 'email', whose layout email
 // generation recreates).
+
+// ── Design looks (migration 031) ─────────────────────────────────────────────
+
+/** A brand's saved looks, default first, then newest. Empty before 031. */
+export async function listDesignLooks(brandId: string): Promise<DesignLook[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("design_looks")
+    .select("*")
+    .eq("brand_id", brandId)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as DesignLook[];
+}
+
+/** One look, only when it belongs to `brandId`. */
+export async function getDesignLook(id: string, brandId: string): Promise<DesignLook | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("design_looks")
+    .select("*")
+    .eq("id", id)
+    .eq("brand_id", brandId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as DesignLook) ?? null;
+}
+
+/** The brand's default look, if it set one. */
+export async function getDefaultDesignLook(brandId: string): Promise<DesignLook | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("design_looks")
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("is_default", true)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
+  return (data as DesignLook) ?? null;
+}
+
+/** Clears the brand's current default, so a new one can be set (the table
+ * allows only one default per brand). */
+async function clearDefaultDesignLook(brandId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db
+    .from("design_looks")
+    .update({ is_default: false })
+    .eq("brand_id", brandId)
+    .eq("is_default", true);
+  if (error) throw error;
+}
+
+export async function createDesignLook(args: {
+  brandId: string;
+  name: string;
+  examples: LookExample[];
+  profile: DesignLookProfile | null;
+  isDefault: boolean;
+}): Promise<DesignLook> {
+  if (args.isDefault) await clearDefaultDesignLook(args.brandId);
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("design_looks")
+    .insert({
+      brand_id: args.brandId,
+      name: args.name,
+      examples: args.examples,
+      profile: args.profile,
+      is_default: args.isDefault,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as DesignLook;
+}
+
+export async function updateDesignLook(
+  id: string,
+  brandId: string,
+  patch: {
+    name?: string;
+    examples?: LookExample[];
+    profile?: DesignLookProfile | null;
+    is_default?: boolean;
+  },
+): Promise<DesignLook | null> {
+  if (patch.is_default) await clearDefaultDesignLook(brandId);
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("design_looks")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("brand_id", brandId)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as DesignLook) ?? null;
+}
+
+export async function deleteDesignLook(id: string, brandId: string): Promise<void> {
+  const db = getAdminClient();
+  const { error } = await db.from("design_looks").delete().eq("id", id).eq("brand_id", brandId);
+  if (error) throw error;
+}
 
 /**
  * The brand's reference images of the given kind, newest first. kind defaults

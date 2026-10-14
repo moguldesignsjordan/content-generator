@@ -13,6 +13,8 @@ import {
   getEmailCopyForDraft,
   getLatestDraftVersion,
   getCompetitorReference,
+  getDefaultDesignLook,
+  getDesignLook,
   getStyleReference,
   getTopicContext,
   patchDraftGeneration,
@@ -22,7 +24,12 @@ import {
 } from "@/lib/db/queries";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
 import { uploadContentImage } from "./generate-image";
-import { composeFlyer } from "@/lib/flyer/compose";
+import sharp from "sharp";
+import { composeFlyer, stampLogo } from "@/lib/flyer/compose";
+import { mapBrandColors } from "@/lib/flyer/color-roles";
+import { checkRenderedText } from "@/lib/flyer/text-check";
+import { loadLookImages } from "./extract-look";
+import { readImageText } from "./read-image-text";
 import { pickLayout, quietZoneFor } from "@/lib/flyer/layout";
 import { resolveBrandTokens } from "@/lib/email/templates/types";
 import { buildBrandVoiceBlock, buildGuidelinesBlock } from "@/prompts/brand-voice";
@@ -32,6 +39,7 @@ import {
   FLYER_VARIANT_COUNT,
   flyerVariantsTool,
   buildFlyerCopyMessages,
+  buildFlyerDesignPrompt,
   buildFlyerImagePrompt,
   parseFlyerVariants,
   resolveVariantStyles,
@@ -41,6 +49,7 @@ import { stripEmDashes } from "@/lib/text";
 import type {
   CompetitorReference,
   ContentImage,
+  DesignLookProfile,
   DraftMeta,
   DraftUsage,
   EmailCopy,
@@ -121,10 +130,12 @@ export async function generateFlyerForTopicStreamed(
       draftId,
     );
 
+    const look = await resolveLook(meta.look_id, ctx.brand.id, draftId);
+
     const usageDeltas: UsageDelta[] = [];
     const copies = await generateFlyerVariants(ctx, {
       aspect,
-      brief: meta.flyer_brief,
+      brief: withLookNote(meta.flyer_brief, look?.profile),
       style: meta.flyer_style,
       styles,
       emailCopy,
@@ -150,6 +161,7 @@ export async function generateFlyerForTopicStreamed(
       draftId,
       usageDeltas,
       modelTier: meta.flyer_model,
+      look,
     });
     const first = variants[0];
 
@@ -158,6 +170,7 @@ export async function generateFlyerForTopicStreamed(
 
     const nextMeta: DraftMeta = {
       ...mirrorVariant(first),
+      ...(look ? { look_id: look.id } : {}),
       flyer_aspect: aspect,
       flyer_variants: variants,
       flyer_variant_index: 0,
@@ -239,10 +252,12 @@ export async function regenerateFlyerDraft(
     draftId,
   );
 
+  const look = await resolveLook(meta.look_id, ctx.brand.id, draftId);
+
   const usageDeltas: UsageDelta[] = [];
   const copies = await generateFlyerVariants(ctx, {
     aspect,
-    brief: meta.flyer_brief,
+    brief: withLookNote(meta.flyer_brief, look?.profile),
     style: fixedStyle,
     styles,
     emailCopy,
@@ -266,6 +281,7 @@ export async function regenerateFlyerDraft(
     draftId,
     usageDeltas,
     modelTier: meta.flyer_model,
+    look,
   });
   const first = variants[0];
 
@@ -298,6 +314,7 @@ export async function regenerateFlyerDraft(
       ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
       ...(meta.product_photo_url ? { product_photo_url: meta.product_photo_url } : {}),
       ...(meta.flyer_model ? { flyer_model: meta.flyer_model } : {}),
+      ...(look ? { look_id: look.id } : {}),
       usage,
     },
   });
@@ -332,6 +349,8 @@ export async function regenerateFlyerImage(args: {
   layout?: FlyerLayout;
   /** meta.product_photo_url; falls back to the topic's product photo. */
   productPhotoUrl?: string;
+  /** meta.look_id: re-render following the same look (AI-designed). */
+  lookId?: string;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -347,6 +366,27 @@ export async function regenerateFlyerImage(args: {
     undefined;
   const tokens = resolveBrandTokens(args.ctx.brand);
   const layout = args.layout ?? pickLayout(0);
+
+  // A flyer that follows a look re-renders as an AI design, text checked; the
+  // code-set path below is its fallback, and the exact-prompt path stays the
+  // user's full control.
+  if (!args.exactPrompt && args.lookId) {
+    const look = await resolveLook(args.lookId, args.ctx.brand.id, args.draftId);
+    if (look) {
+      const designed = await renderDesignedFlyer(args.ctx, args.copy, {
+        aspect: args.aspect,
+        look,
+        model: args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model),
+        productPhoto: await loadProductPhoto(
+          args.productPhotoUrl ?? args.ctx.product?.image_url ?? undefined,
+          args.draftId,
+        ),
+        draftId: args.draftId,
+        usageDeltas,
+      });
+      if (designed) return { image: designed, usage: usageDeltas };
+    }
+  }
 
   // The exact-prompt path is the user's full control: the model draws
   // whatever the prompt says, text included, and nothing is composed on top.
@@ -523,15 +563,24 @@ async function renderFlyerVariants(
     draftId: string;
     usageDeltas: UsageDelta[];
     modelTier?: ImageModelTier;
+    /** With a look, each option is AI-designed to follow it, falling back to
+     * the code-set layout only if its text can't be verified. */
+    look?: ResolvedLook | null;
   },
 ): Promise<FlyerVariant[]> {
   const model = resolveImageModel(
     opts.modelTier ?? ctx.brand.visual_identity?.image_gen?.model,
   );
   const results = await Promise.allSettled(
-    copies.map((copy, i) =>
-      renderFlyer(ctx, copy, { ...opts, style: styles[i], model, layout: pickLayout(i) }),
-    ),
+    copies.map(async (copy, i) => {
+      if (opts.look) {
+        const designed = await renderDesignedFlyer(ctx, copy, { ...opts, look: opts.look, model });
+        if (designed) return { image: designed, layout: undefined };
+      }
+      const layout = pickLayout(i);
+      const image = await renderFlyer(ctx, copy, { ...opts, style: styles[i], model, layout });
+      return { image, layout };
+    }),
   );
 
   const variants: FlyerVariant[] = [];
@@ -546,8 +595,8 @@ async function renderFlyerVariants(
       ...(styles[i] ? { style: styles[i] } : {}),
       copy: toFlyerCopy(copies[i]),
       scene: copies[i].scene,
-      image: result.value,
-      layout: pickLayout(i),
+      image: result.value.image,
+      ...(result.value.layout ? { layout: result.value.layout } : {}),
     });
   });
 
@@ -707,6 +756,164 @@ async function generateFlyerVariants(
     logError("pipeline:generate-flyer:copy", err);
     return await call("flyer-copy-retry");
   }
+}
+
+/** A look ready to render with: its profile and up to 3 example images. */
+interface ResolvedLook {
+  id: string;
+  profile: DesignLookProfile | null;
+  images: { data: string; mimeType: string }[];
+}
+
+/** Examples sent per render: with the product photo that's 4 references,
+ * inside every image model's limit. */
+const LOOK_EXAMPLES_PER_RENDER = 3;
+
+/**
+ * The look a flyer follows: its own (meta.look_id), else the brand's default
+ * ("none" opts out of the default).
+ * Non-fatal: a deleted look, a pre-031 DB, or unreadable examples all mean
+ * "no look", and the flyer renders the code-set way.
+ */
+async function resolveLook(
+  lookId: string | undefined,
+  brandId: string,
+  draftId: string,
+): Promise<ResolvedLook | null> {
+  // "none": the owner picked the code-set layouts over the brand default.
+  if (lookId === "none") return null;
+  try {
+    const look = lookId
+      ? await getDesignLook(lookId, brandId)
+      : await getDefaultDesignLook(brandId);
+    if (!look?.examples.length) return null;
+    const images = await loadLookImages(look.examples, LOOK_EXAMPLES_PER_RENDER);
+    if (!images.length) return null;
+    return { id: look.id, profile: look.profile, images };
+  } catch (err) {
+    logWarn("pipeline:generate-flyer:look", err instanceof Error ? err.message : String(err), {
+      draftId,
+    });
+    return null;
+  }
+}
+
+/** Tells the copy writer how much text the look carries, so a minimal look
+ * gets a short headline instead of a paragraph squeezed into the design. */
+function withLookNote(brief: string | undefined, profile: DesignLookProfile | null | undefined): string | undefined {
+  if (!profile) return brief;
+  const length =
+    profile.text_amount === "minimal"
+      ? "Keep the headline very short (a few words) and the supporting line optional."
+      : profile.text_amount === "heavy"
+        ? "The look carries more text: a headline plus a fuller supporting line is fine."
+        : "A short headline and one supporting line.";
+  return [brief, `DESIGN LOOK this flyer follows: ${profile.summary} ${length}`].filter(Boolean).join("\n");
+}
+
+/** Read-back attempts per option before falling back to the code-set layout. */
+const DESIGN_ATTEMPTS = 2;
+
+/**
+ * Renders one option as a full AI design that follows the look, then reads
+ * the text back. Returns null when the text can't be verified after
+ * DESIGN_ATTEMPTS, and the caller uses the code-set layout instead, so a
+ * misspelled flyer is never shown. Each render is billed whether or not it
+ * passes, since it was made.
+ */
+async function renderDesignedFlyer(
+  ctx: TopicContext,
+  copy: FlyerCopyOutput,
+  opts: {
+    aspect: FlyerAspect;
+    look: ResolvedLook;
+    model: string;
+    productPhoto?: { data: string; mimeType: string } | null;
+    draftId: string;
+    usageDeltas: UsageDelta[];
+  },
+): Promise<ContentImage | null> {
+  const tokens = resolveBrandTokens(ctx.brand);
+  const profile = opts.look.profile;
+  const roles = mapBrandColors(tokens.colors, profile?.color_roles.background ?? "photo");
+  const references = [
+    ...(opts.productPhoto ? [opts.productPhoto] : []),
+    ...opts.look.images,
+  ];
+  const expected = [
+    copy.headline,
+    copy.subtext ?? "",
+    copy.cta && profile?.cta_style !== "none" ? copy.cta : "",
+  ].filter(Boolean);
+  const size = FLYER_ASPECTS[opts.aspect];
+
+  // The logo is stamped wherever the look puts it (top-left when unknown), so
+  // the prompt keeps exactly that corner clear.
+  const corner = profile?.logo_placement === "none" ? null : (profile?.logo_placement ?? "top-left");
+  let misspelled: string[] | undefined;
+  for (let attempt = 0; attempt < DESIGN_ATTEMPTS; attempt++) {
+    const prompt = buildFlyerDesignPrompt(
+      copy,
+      tokens,
+      opts.aspect,
+      { profile, exampleCount: opts.look.images.length, roles },
+      { hasProduct: Boolean(opts.productPhoto), misspelled, logoCorner: corner },
+    );
+    const rendered = await renderImage({
+      model: opts.model,
+      prompt,
+      aspectRatio: opts.aspect,
+      references,
+      minSize: "2K",
+    });
+    opts.usageDeltas.push({ model: rendered.billedModel, images: 1 });
+    logImageUsage("flyer-design", rendered.billedModel, 1, {
+      brandId: ctx.brand.id,
+      draftId: opts.draftId,
+      metered: true,
+    });
+
+    const preview = await sharp(rendered.data)
+      .resize({ width: 1024, withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    const seen = await readImageText(preview, {
+      brandId: ctx.brand.id,
+      draftId: opts.draftId,
+      usageDeltas: opts.usageDeltas,
+    });
+    if (seen === null) break; // Can't verify: use the safe layout.
+    const check = checkRenderedText(expected, seen);
+    if (!check.ok) {
+      logWarn("pipeline:generate-flyer:text-check", "designed flyer text didn't match", {
+        draftId: opts.draftId,
+        missing: check.missing,
+        extra: check.extra.slice(0, 12),
+      });
+      misspelled = check.missing.length ? check.missing : undefined;
+      continue;
+    }
+
+    const finished =
+      corner === null
+        ? rendered.data
+        : await stampLogo({ image: rendered.data, tokens, width: size.width, height: size.height, corner });
+    const optimized = await optimizeFlyerImage(finished, size);
+    const { url, path } = await uploadContentImage(optimized.data);
+    const alt = stripEmDashes(copy.headline).slice(0, 160);
+    recordFlyerMediaAsset({
+      brandId: ctx.brand.id,
+      url,
+      storagePath: path,
+      alt,
+      prompt,
+      width: optimized.width,
+      height: optimized.height,
+      draftId: opts.draftId,
+    });
+    return { url, alt, width: optimized.width, height: optimized.height, style: "illustration", prompt };
+  }
+  return null;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   FLYER_STYLE_DIRECTIONS,
   FLYER_VARIANT_COUNT,
   buildFlyerCopyMessages,
+  buildFlyerDesignPrompt,
   buildFlyerImagePrompt,
   flyerVariantsTool,
   isFlyerAspect,
@@ -382,5 +383,51 @@ describe("buildFlyerCopyMessages", () => {
     });
     expect(user).not.toContain("PER VARIANT");
     expect(user).toContain(FLYER_STYLE_DIRECTIONS.minimal);
+  });
+});
+
+describe("buildFlyerDesignPrompt", () => {
+  const profile = {
+    summary: "Punchy print-shop ads.",
+    layout: "product centered on a flat field",
+    text_placement: "headline top",
+    text_amount: "minimal" as const,
+    headline_treatment: "huge condensed sans",
+    color_roles: { background: "dark" as const, accent_usage: "only on the button" },
+    imagery: "studio product shot",
+    cta_style: "pill" as const,
+    logo_placement: "top-right" as const,
+    mood: ["bold"],
+  };
+  const roles = { background: "#08080A", text: "#FAFAF8", accent: "#FFAE3C" };
+
+  it("typesets the exact copy, follows the examples, and maps brand colors", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "4:5", { profile, exampleCount: 3, roles }, { logoCorner: "top-right" });
+    expect(prompt).toContain('"Your website is losing you clients"');
+    expect(prompt).toContain('"Book a call"');
+    expect(prompt).toContain("the 3 attached example images");
+    expect(prompt).toContain("#08080A");
+    expect(prompt).toContain("#FFAE3C as the one accent (only on the button)");
+    expect(prompt).toContain("Keep the top-right corner completely empty");
+    expect(prompt).toContain("no placeholder text anywhere");
+    expect(prompt).toContain("Never copy their words, logos, brand names, products, or people");
+  });
+
+  it("drops the button when the look uses none, and names a previous misspelling", () => {
+    const prompt = buildFlyerDesignPrompt(
+      copy,
+      tokens,
+      "1:1",
+      { profile: { ...profile, cta_style: "none" }, exampleCount: 1, roles },
+      { misspelled: ["Your website is losing you clients"] },
+    );
+    expect(prompt).not.toContain('"Book a call"');
+    expect(prompt).toContain("A previous attempt got this text wrong");
+  });
+
+  it("puts the product photo first when there is one", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { hasProduct: true });
+    expect(prompt).toContain("(the images after the product photo)");
+    expect(prompt).toContain("The first attached image is the real product");
   });
 });

@@ -8,6 +8,7 @@ import {
   ensureDefaultCluster,
   getBrandStrategy,
   getBrandForUser,
+  getDesignLook,
   getTopicContext,
 } from "@/lib/db/queries";
 import {
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
   let flyerFormat: FlyerFormat = "post";
   let campaignId: string | undefined;
   let flyerModel: ImageModelTier | undefined;
+  let lookId: string | undefined;
   try {
     const body = await request.json();
     topicId = body?.topicId || undefined;
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
     // A model this deployment can't render (GPT without a key) falls back
     // at render time, so any known choice is safe to store.
     if (isImageModelTier(body?.model)) flyerModel = body.model;
+    lookId = typeof body?.lookId === "string" ? body.lookId || undefined : undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -128,6 +131,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Topic ${topicId} not found.` }, { status: 404 });
     }
 
+    // A look id from the client must be one of this brand's looks.
+    if (lookId && lookId !== "none" && brand && !(await getDesignLook(lookId, brand.id))) {
+      return NextResponse.json({ error: "That look doesn't exist." }, { status: 404 });
+    }
+
     const draftId = await createDraftShell({
       ctx,
       campaignId,
@@ -139,6 +147,7 @@ export async function POST(request: Request) {
       competitorReferenceId,
       flyerFormat,
       ...(flyerModel ? { flyerModel } : {}),
+      ...(lookId ? { lookId } : {}),
     });
     return NextResponse.json({ draftId });
   } catch (err) {

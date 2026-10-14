@@ -326,6 +326,7 @@ export async function POST(
       ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
       ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
       ...(meta.product_photo_url ? { productPhotoUrl: meta.product_photo_url } : {}),
+      ...(meta.look_id ? { lookId: meta.look_id } : {}),
       draftId: id,
     });
 

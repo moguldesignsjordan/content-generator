@@ -5,6 +5,7 @@ import {
   createCampaign,
   deleteCampaign,
   getBrandWithIcps,
+  getDesignLook,
   listBrandMemory,
   listProducts,
   updateCampaign,
@@ -84,6 +85,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No brand found" }, { status: 404 });
   }
   const { brand, icps } = data;
+  // "none" opts out of the brand default; any other id must be this brand's look.
+  const rawLook = typeof body.look_id === "string" ? body.look_id : "";
+  const lookId =
+    rawLook === "none" || (rawLook && (await getDesignLook(rawLook, brand.id))) ? rawLook : undefined;
   const guard = await guardAiRoute("factory", { brandId: brand.id, limit: 3 });
   if (!guard.ok) {
     return NextResponse.json(
@@ -110,6 +115,7 @@ export async function POST(req: NextRequest) {
     size,
     days,
     ...(photoUrl ? { photo_url: photoUrl } : {}),
+    ...(lookId ? { look_id: lookId } : {}),
   };
   await updateCampaign(campaign.id, {
     brief: { goal: sentence, conversation_notes: sentence },
