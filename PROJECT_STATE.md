@@ -47,6 +47,12 @@ are in git history (`git log -p PROJECT_STATE.md`).
 - Flyers: art is text-free and code sets the text, except with a design look,
   where the image model designs the whole flyer and Haiku checks the spelling
   (one retry, then the code-set layout as a fallback).
+- Flyer styles (Jordan's call, 2026-10-15): "Our style" always follows
+  reference images (the default look, else approved or thumbs-up flyers,
+  stored as `look_id: "house"`). When it has none, the chat says so and asks
+  for examples instead of falling back. "No reference" (`"none"`) is the AI's
+  free pick, a fresh preset per option. Uploaded "flyers" in the media
+  library are not used: they're often raw photos.
 
 ## Current state
 
@@ -83,7 +89,8 @@ are in git history (`git log -p PROJECT_STATE.md`).
    (spends roughly $0.15-0.40 plus the pieces), design looks and designed
    flyers, composed flyers on a brand whose font isn't on Google Fonts
    (falls back to Inter). Also the Create chat's web search (Oct 15):
-   ask it to research something mid-interview.
+   ask it to research something mid-interview. And the flyer style picker
+   (Our style, No reference, Add examples) on Create and /flyers/new.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

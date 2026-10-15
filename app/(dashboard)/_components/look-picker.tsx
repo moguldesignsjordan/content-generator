@@ -6,9 +6,9 @@ import { cn } from "@/lib/cn";
 import type { DesignLook } from "@/lib/db/types";
 import { LookBuilder } from "./look-builder";
 
-// Picks the design look flyers follow. null = automatic (the brand's default
-// look when it has one, else the code-set layouts); "none" = the code-set
-// layouts even when a default exists; otherwise a look id.
+// Picks the design look flyers follow. null = Our style (the default look,
+// else the flyers the brand approved or liked); "none" = No reference
+// (the AI picks a fresh style per option); otherwise a saved look's id.
 
 export function LookPicker({
   value,
@@ -21,18 +21,37 @@ export function LookPicker({
 }) {
   const toast = useToast();
   const [looks, setLooks] = useState<DesignLook[] | null>(null);
-  const [building, setBuilding] = useState(false);
+  const [house, setHouse] = useState<string[]>([]);
+  // "default": opened to add examples to Our style, so saving makes it the default.
+  const [building, setBuilding] = useState<"new" | "default" | null>(null);
 
   useEffect(() => {
     fetch("/api/looks")
       .then((r) => r.json())
-      .then((d: { looks?: DesignLook[] }) => setLooks(d.looks ?? []))
+      .then((d: { looks?: DesignLook[]; house?: string[] }) => {
+        setLooks(d.looks ?? []);
+        setHouse(d.house ?? []);
+      })
       .catch(() => setLooks([]));
   }, []);
 
   const defaultLook = looks?.find((l) => l.is_default) ?? null;
-  const activeId = value === null ? (defaultLook?.id ?? "none") : value;
-  const active = looks?.find((l) => l.id === activeId) ?? null;
+  const ourExamples = defaultLook ? defaultLook.examples.map((e) => e.url) : house;
+  const savedLooks = looks?.filter((l) => !l.is_default) ?? [];
+  // A look id that points at the default is the same thing as Our style.
+  const activeId = value === null || value === defaultLook?.id ? null : value;
+  const active = activeId === null ? defaultLook : (looks?.find((l) => l.id === activeId) ?? null);
+
+  const hint =
+    activeId === "none"
+      ? "No reference: the AI picks a fresh style for each option, in your brand colors."
+      : activeId !== null
+        ? (active?.profile?.summary ?? "Flyers follow these examples, in your brand colors.")
+        : defaultLook
+          ? (defaultLook.profile?.summary ?? `Follows your "${defaultLook.name}" look.`)
+          : house.length
+            ? "Follows flyers you approved or liked. Add examples to set it exactly."
+            : "Our style needs examples. Add 2 or 3 of your own designs, or pick No reference.";
 
   async function setDefault(look: DesignLook, isDefault: boolean) {
     const res = await fetch(`/api/looks/${look.id}`, {
@@ -66,23 +85,47 @@ export function LookPicker({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
+          aria-pressed={activeId === null}
+          disabled={disabled}
+          onClick={() => onChange(null)}
+          className={cn(
+            "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
+            activeId === null ? "border-accent" : "border-border hover:border-border-strong",
+          )}
+        >
+          {ourExamples.length ? (
+            <span className="flex h-11 w-full">
+              {ourExamples.slice(0, 3).map((url) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={url} src={url} alt="" className="h-full min-w-0 flex-1 object-cover" loading="lazy" />
+              ))}
+            </span>
+          ) : (
+            <span className="flex h-11 w-full items-center justify-center bg-surface-2 text-[11px] text-muted">
+              No examples yet
+            </span>
+          )}
+          <span className="truncate px-2 py-1 text-[12px] font-medium text-foreground">Our style</span>
+        </button>
+        <button
+          type="button"
           aria-pressed={activeId === "none"}
           disabled={disabled}
-          onClick={() => onChange(defaultLook ? "none" : null)}
+          onClick={() => onChange("none")}
           className={cn(
             "flex h-[72px] w-28 items-center justify-center rounded-[var(--radius-md)] border px-2 text-center text-[12px] font-medium transition-colors",
             activeId === "none" ? "border-accent bg-accent/[0.08] text-foreground" : "border-border text-muted hover:text-foreground",
           )}
         >
-          Our layouts
+          No reference
         </button>
-        {looks?.map((look) => (
+        {savedLooks.map((look) => (
           <button
             key={look.id}
             type="button"
             aria-pressed={activeId === look.id}
             disabled={disabled}
-            onClick={() => onChange(look.is_default ? null : look.id)}
+            onClick={() => onChange(look.id)}
             className={cn(
               "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
               activeId === look.id ? "border-accent" : "border-border hover:border-border-strong",
@@ -94,41 +137,44 @@ export function LookPicker({
                 <img key={ex.url} src={ex.url} alt="" className="h-full min-w-0 flex-1 object-cover" loading="lazy" />
               ))}
             </span>
-            <span className="flex items-center gap-1.5 truncate px-2 py-1 text-[12px] font-medium text-foreground">
-              <span className="truncate">{look.name}</span>
-              {look.is_default && <span className="shrink-0 text-[10px] text-accent">Default</span>}
-            </span>
+            <span className="truncate px-2 py-1 text-[12px] font-medium text-foreground">{look.name}</span>
           </button>
         ))}
         <button
           type="button"
           disabled={disabled}
-          onClick={() => setBuilding(true)}
+          onClick={() => setBuilding("new")}
           className="flex h-[72px] w-28 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border-strong text-[12px] font-medium text-accent transition-colors hover:bg-accent/[0.06]"
         >
           + New look
         </button>
       </div>
 
-      <p className="text-[12px] text-muted">
-        {active
-          ? active.profile?.summary ?? "Flyers follow these examples, in your brand colors."
-          : "Our own layouts, with your colors and logo. Add a look to match ads you like."}
-      </p>
-      {active && !disabled && (
+      <p className="text-[12px] text-muted">{hint}</p>
+      {!disabled && (
         <div className="flex gap-4 text-[12px]">
-          <button type="button" className="font-medium text-accent hover:text-accent-press" onClick={() => void setDefault(active, !active.is_default)}>
-            {active.is_default ? "Stop using as default" : "Make default"}
-          </button>
-          <button type="button" className="text-muted hover:text-danger" onClick={() => void remove(active)}>
-            Delete look
-          </button>
+          {activeId === null && !defaultLook && (
+            <button type="button" className="font-medium text-accent hover:text-accent-press" onClick={() => setBuilding("default")}>
+              Add examples
+            </button>
+          )}
+          {active && (
+            <>
+              <button type="button" className="font-medium text-accent hover:text-accent-press" onClick={() => void setDefault(active, !active.is_default)}>
+                {active.is_default ? "Stop using as our style" : "Make this our style"}
+              </button>
+              <button type="button" className="text-muted hover:text-danger" onClick={() => void remove(active)}>
+                Delete look
+              </button>
+            </>
+          )}
         </div>
       )}
 
       <LookBuilder
-        open={building}
-        onClose={() => setBuilding(false)}
+        open={building !== null}
+        startAsDefault={building === "default"}
+        onClose={() => setBuilding(null)}
         onSaved={(look) => {
           setLooks((cur) => [
             look,

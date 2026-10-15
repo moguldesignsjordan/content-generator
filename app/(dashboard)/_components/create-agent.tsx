@@ -872,10 +872,10 @@ export function CreateAgent({
                       onClick={() =>
                         send(
                           lookId === "none"
-                            ? "No saved look, use your own layouts."
+                            ? "No reference, you pick the style."
                             : lookId
-                              ? "I picked a look to follow."
-                              : "Go with my default look.",
+                              ? "I picked a saved look to follow."
+                              : "Use our style.",
                         )
                       }
                     />

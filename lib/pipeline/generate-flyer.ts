@@ -15,6 +15,7 @@ import {
   getCompetitorReference,
   getDefaultDesignLook,
   getDesignLook,
+  getHouseStyleExamples,
   getStyleReference,
   getTopicContext,
   patchDraftGeneration,
@@ -769,9 +770,28 @@ interface ResolvedLook {
  * inside every image model's limit. */
 const LOOK_EXAMPLES_PER_RENDER = 3;
 
+/** meta.look_id for "our style" served by the brand's own flyers (no default
+ * look), so a re-render follows the same references. */
+const HOUSE_LOOK_ID = "house";
+
+/** What "our style" will follow right now: the default look, else the
+ * brand's own flyers, else nothing. Shared by the render path and the chat's
+ * check before generating, so the two never disagree. */
+export async function describeOurStyle(
+  brandId: string,
+): Promise<{ lookId: string; name: string; urls: string[]; profile: DesignLookProfile | null } | null> {
+  const look = await getDefaultDesignLook(brandId);
+  if (look?.examples.length) {
+    return { lookId: look.id, name: look.name, urls: look.examples.map((e) => e.url), profile: look.profile };
+  }
+  const urls = await getHouseStyleExamples(brandId, LOOK_EXAMPLES_PER_RENDER);
+  return urls.length ? { lookId: HOUSE_LOOK_ID, name: "flyers they approved or liked", urls, profile: null } : null;
+}
+
 /**
- * The look a flyer follows: its own (meta.look_id), else the brand's default
- * ("none" opts out of the default).
+ * The look a flyer follows: an explicit saved look, else "our style" (see
+ * describeOurStyle). "none" is No reference: the code-set layouts with a
+ * fresh preset per option.
  * Non-fatal: a deleted look, a pre-031 DB, or unreadable examples all mean
  * "no look", and the flyer renders the code-set way.
  */
@@ -780,16 +800,21 @@ async function resolveLook(
   brandId: string,
   draftId: string,
 ): Promise<ResolvedLook | null> {
-  // "none": the owner picked the code-set layouts over the brand default.
   if (lookId === "none") return null;
   try {
-    const look = lookId
-      ? await getDesignLook(lookId, brandId)
-      : await getDefaultDesignLook(brandId);
-    if (!look?.examples.length) return null;
-    const images = await loadLookImages(look.examples, LOOK_EXAMPLES_PER_RENDER);
-    if (!images.length) return null;
-    return { id: look.id, profile: look.profile, images };
+    if (lookId && lookId !== HOUSE_LOOK_ID) {
+      const look = await getDesignLook(lookId, brandId);
+      if (!look?.examples.length) return null;
+      const images = await loadLookImages(look.examples, LOOK_EXAMPLES_PER_RENDER);
+      return images.length ? { id: look.id, profile: look.profile, images } : null;
+    }
+    const ours = await describeOurStyle(brandId);
+    if (!ours) return null;
+    const images = await loadLookImages(
+      ours.urls.map((url) => ({ url, source: "library" as const })),
+      LOOK_EXAMPLES_PER_RENDER,
+    );
+    return images.length ? { id: ours.lookId, profile: ours.profile, images } : null;
   } catch (err) {
     logWarn("pipeline:generate-flyer:look", err instanceof Error ? err.message : String(err), {
       draftId,

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createDesignLook, getSingleBrand, listDesignLooks } from "@/lib/db/queries";
+import {
+  createDesignLook,
+  getHouseStyleExamples,
+  getSingleBrand,
+  listDesignLooks,
+} from "@/lib/db/queries";
 import { extractLookProfile } from "@/lib/pipeline/extract-look";
 import { cleanExamples, cleanLookName, storageHostFromEnv } from "@/lib/looks";
 import { guardAiRoute } from "@/lib/ai-guard";
@@ -9,14 +14,19 @@ import { getSessionUser } from "@/lib/supabase/server";
 // Reading a look's examples is one Sonnet vision call over up to 6 images.
 export const maxDuration = 120;
 
-/** GET: the brand's saved looks, default first. */
+/** GET: the brand's saved looks, default first, plus `house`: the brand's own
+ * flyers, which "our style" follows whenever no look is the default. */
 export async function GET() {
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     const brand = await getSingleBrand(user.id);
-    if (!brand) return NextResponse.json({ looks: [] });
-    return NextResponse.json({ looks: await listDesignLooks(brand.id) });
+    if (!brand) return NextResponse.json({ looks: [], house: [] });
+    const [looks, house] = await Promise.all([
+      listDesignLooks(brand.id),
+      getHouseStyleExamples(brand.id),
+    ]);
+    return NextResponse.json({ looks, house });
   } catch (err) {
     logError("api:/api/looks:get", err);
     return NextResponse.json({ error: "Couldn't load your looks." }, { status: 500 });

@@ -67,6 +67,7 @@ import { buildBriefStateBlock } from "@/prompts/brand-voice";
 import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
 import { extractCompetitorProfile } from "@/lib/pipeline/extract-competitor";
+import { describeOurStyle } from "@/lib/pipeline/generate-flyer";
 import { scrapeCompetitorAdUrl } from "@/lib/scrape";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
@@ -106,6 +107,18 @@ interface StartedCampaign {
   days: number;
   research: boolean;
   photo_url?: string;
+}
+
+const NO_OUR_STYLE =
+  "Our style has no reference images yet, so it can't be used. Say so in one " +
+  "line, and ask them to tap Add examples under Our style in the picker below " +
+  "your reply (2 or 3 of their own designs), or pick No reference to let you " +
+  "choose a fresh style.";
+
+/** Flyers follow a saved look, No reference, or Our style; only the last can
+ * be empty, and an empty one must never fall back silently. */
+async function canUseOurStyle(ctx: { brand: Brand; lookId?: string }): Promise<boolean> {
+  return Boolean(ctx.lookId) || (await describeOurStyle(ctx.brand.id)) !== null;
 }
 
 /** What the chat shows while a tool runs; null for tools that only save. */
@@ -827,6 +840,10 @@ async function dispatchTool(
       }
       const topicCtx = await getTopicContext(state.topicId);
       if (!topicCtx) return "That topic no longer exists.";
+      if (input.channel === "social" && !(await canUseOurStyle(ctx))) {
+        state.showLookPicker = true;
+        return `Not made yet. ${NO_OUR_STYLE}`;
+      }
       // A standalone social image rides the flyer pipeline: the brief's
       // message/angle/goal become the flyer brief the same way the /flyers/new
       // form's free-text brief does.
@@ -877,6 +894,11 @@ async function dispatchTool(
       const summary = stripEmDashes(input.summary ?? "").trim().slice(0, 500);
       if (!summary) return "start_campaign needs a summary of the campaign.";
       const kinds = FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
+      const hasImages = !kinds.length || kinds.includes("social") || kinds.includes("ad");
+      if (hasImages && !(await canUseOurStyle(ctx))) {
+        state.showLookPicker = true;
+        return `Not planned yet. ${NO_OUR_STYLE}`;
+      }
       state.campaign = {
         summary,
         kinds: kinds.length ? kinds : [...FACTORY_KINDS],
@@ -890,7 +912,10 @@ async function dispatchTool(
     }
     case "show_look_picker": {
       state.showLookPicker = true;
-      return "The look picker is showing under your reply.";
+      const ours = await describeOurStyle(ctx.brand.id);
+      return ours
+        ? `The look picker is showing under your reply. Our style (the default pick) follows ${ours.name} (${ours.urls.length} reference images).`
+        : `The look picker is showing under your reply. ${NO_OUR_STYLE}`;
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;

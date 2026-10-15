@@ -2728,6 +2728,31 @@ export async function getDesignLook(id: string, brandId: string): Promise<Design
   return (data as DesignLook) ?? null;
 }
 
+/**
+ * "Our style" when the brand has no default look: its approved or thumbs-up
+ * flyers, newest first. Not uploaded "flyers" from the media library: those
+ * are often raw photos swapped in for a design. Never throws: a read failure
+ * just means no references.
+ */
+export async function getHouseStyleExamples(brandId: string, limit = 3): Promise<string[]> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select(`meta, content_jobs!inner ( brand_id )`)
+    .eq("content_jobs.brand_id", brandId)
+    .or("state.eq.approved,feedback.eq.up")
+    .not("meta->flyer_image", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    logWarn("db:getHouseStyleExamples", error.message, { brandId });
+    return [];
+  }
+  return ((data ?? []) as { meta: DraftMeta | null }[])
+    .map((r) => r.meta?.flyer_image?.url)
+    .filter((u): u is string => Boolean(u));
+}
+
 /** The brand's default look, if it set one. */
 export async function getDefaultDesignLook(brandId: string): Promise<DesignLook | null> {
   const db = getAdminClient();

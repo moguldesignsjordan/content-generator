@@ -25,17 +25,23 @@ export function LookBuilder({
   open,
   onClose,
   onSaved,
+  startAsDefault = false,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: (look: DesignLook) => void;
+  /** Opened from "add examples to our style": saving makes it the default. */
+  startAsDefault?: boolean;
 }) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Tab>("upload");
   const [examples, setExamples] = useState<LookExample[]>([]);
   const [name, setName] = useState("");
-  const [makeDefault, setMakeDefault] = useState(false);
+  const [makeDefault, setMakeDefault] = useState(startAsDefault);
+  useEffect(() => {
+    if (open) setMakeDefault(startAsDefault);
+  }, [open, startAsDefault]);
   const [busy, setBusy] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryItem[] | null>(null);
   const [adsUrl, setAdsUrl] = useState("");
