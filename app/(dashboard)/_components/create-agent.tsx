@@ -89,8 +89,9 @@ const PROMPT_IDEAS = [
   "Write a blog post about how we work",
 ];
 
-/** The landing's starter chips: picking one sets the kind and a describe-it
- * hint; the kind rides at the front of their description when they send. */
+/** The landing's starter chips: clicking one starts the conversation with its
+ * text (plus anything already typed). A preset startKind instead shows the
+ * describe-it hint and rides at the front of their description on send. */
 type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
 
 const STARTERS: Record<StarterKind, { label: string; text: string; hint: string }> = {
@@ -452,8 +453,9 @@ export function CreateAgent({
   }
 
   function pickKind(kind: StarterKind) {
-    setPicked((k) => (k === kind ? null : kind));
-    inputRef.current?.focus();
+    const typed = input.trim();
+    send(typed ? `${STARTERS[kind].text}. ${typed}` : STARTERS[kind].text);
+    setPicked(null);
   }
 
   async function postToAgent(text: string, imageUrls: string[]) {
