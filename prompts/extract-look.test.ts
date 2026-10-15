@@ -35,4 +35,10 @@ describe("parseLookProfile", () => {
     expect(p.text_slots![0]).not.toContain(EM_DASH);
     expect(parseLookProfile(valid)!.text_slots).toBeUndefined();
   });
+
+  it("trims long mood and text spot lists instead of rejecting the profile", () => {
+    const p = parseLookProfile({ ...valid, mood: ["a", "b", "c", "d", "e", "f", "g"], text_slots: ["1", "2", "3", "4", "5"] })!;
+    expect(p.mood).toHaveLength(6);
+    expect(p.text_slots).toHaveLength(4);
+  });
 });

@@ -8,7 +8,7 @@ blow) belongs in git history and the code itself, not here. `git log
 what's genuinely still open. When a session ends, edit the sections below
 rather than appending a new session log.
 
-Last updated: 2026-10-14. Everything is committed and pushed to `main`
+Last updated: 2026-10-15. Everything is committed and pushed to `main`
 (latest `0406130`). Trimmed from a 1,700-line session log; the old entries
 are in git history (`git log -p PROJECT_STATE.md`).
 
@@ -44,9 +44,17 @@ are in git history (`git log -p PROJECT_STATE.md`).
 - Competitor ads: only distilled strategy reaches copy prompts; competitor
   images reach the image model only inside a look the owner built, with a
   no-copying instruction.
-- Flyers: art is text-free and code sets the text, except with a design look,
-  where the image model designs the whole flyer and Haiku checks the spelling
-  (one retry, then the code-set layout as a fallback).
+- Flyers (Jordan's call, 2026-10-15, replaces "code sets the text"): every
+  option is designed by the image model, following a look or attached design,
+  or with No reference a preset direction per option. Haiku reads the text
+  back; a design fails only on a missing or misspelled line, a word pair
+  copied from the examples, or more than about 8 extra words. One retry, then
+  the code-set layout. A showcased designed item (sign, card, packaging) may
+  carry made-up sample text (copy field `mockup`).
+- Everything made is for the account's own brand (Jordan, 2026-10-15): the
+  chat no longer sets `client_brand`; that plumbing is now unused.
+- Campaigns: the planner picks one `flyer_style` for all posts and ads, and
+  each campaign post renders 2 options (`CAMPAIGN_FLYER_OPTIONS`).
 - Flyer styles (Jordan's call, 2026-10-15): "Our style" always follows
   reference images (the default look, else approved or thumbs-up flyers,
   stored as `look_id: "house"`). When it has none, the chat says so and asks
@@ -131,9 +139,12 @@ are in git history (`git log -p PROJECT_STATE.md`).
    publish one real blog from here and confirm it's live with its FAQ;
    submit the sitemap in Search Console; redirect www to the apex.
 7. **Optional:** `OPENAI_API_KEY` (local + Vercel) to turn on GPT Image.
-8. **Local Gemini key returns 402 (Payment Required)** since 2026-10-15
-   afternoon; renders worked earlier that day. Check the Google AI billing
-   or prepaid credits, and whether production uses the same key.
+8. **Setup for good flyers:** upload the transparent PNG logo in Settings
+   (the one on file is a JPG with a black square); add the print products
+   with photos in Settings, Products & services; build a default look from
+   the best past designs (Flyers, New, Our style, Add examples) once the
+   strict look read is deployed. Duplicate packages deleted 2026-10-15.
+   (Gemini 402 resolved: renders worked at 17:40 UTC 2026-10-15.)
 
 ## Open: code (not started)
 

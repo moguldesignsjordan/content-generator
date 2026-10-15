@@ -195,6 +195,7 @@ export async function POST(req: NextRequest) {
               ...(offerSlug ? { offer_slug: offerSlug } : {}),
               ...(research ? { research: research.research } : {}),
               ...(referenceProfile ? { reference_profile: referenceProfile } : {}),
+              ...(planned.flyerStyle ? { flyer_style: planned.flyerStyle } : {}),
               plan: planned.plan,
               quote,
               planning_usd: Number(((research?.usd ?? 0) + planned.usd).toFixed(4)),

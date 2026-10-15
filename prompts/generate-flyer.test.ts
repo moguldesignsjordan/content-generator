@@ -165,6 +165,14 @@ describe("parseFlyerVariants", () => {
     scene: "A stopwatch on a desk",
   };
 
+  it("keeps short mockup lines and drops overlong ones", () => {
+    const [v] = parseFlyerVariants(
+      { variants: [{ ...good, mockup: ["Impact Sign Co", "x".repeat(60), "555-0142"] }] },
+      1,
+    );
+    expect(v.mockup).toEqual(["Impact Sign Co", "555-0142"]);
+  });
+
   it("keeps complete variants, drops incomplete ones, and caps at count", () => {
     const out = parseFlyerVariants(
       {
@@ -450,6 +458,21 @@ describe("buildFlyerDesignPrompt", () => {
     expect(prompt).toContain("Keep the top-right corner completely empty");
     expect(prompt).toContain("no placeholder text anywhere");
     expect(prompt).toContain("Never copy their words, logos, brand names, products, or people");
+  });
+
+  it("prints sample text on a showcased item and keeps everything else blank", () => {
+    const withMockup = { ...copy, mockup: ["Impact Sign Co", "555-0142"] };
+    const prompt = buildFlyerDesignPrompt(withMockup, tokens, "1:1", { profile, exampleCount: 1, roles });
+    expect(prompt).toContain('exactly this text printed on it and nothing else: "Impact Sign Co", "555-0142"');
+    expect(prompt).toContain("Every other printed item, screen, sign, and package in the scene stays blank");
+    expect(prompt).not.toContain("Printed items, screens, signs, and packaging in the scene stay blank");
+  });
+
+  it("designs from a preset direction when there are no examples", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile: null, exampleCount: 0, roles, style: "bold_type" });
+    expect(prompt).toContain(FLYER_STYLE_DIRECTIONS.bold_type);
+    expect(prompt).toContain('"Your website is losing you clients"');
+    expect(prompt).not.toContain("example");
   });
 
   it("drops the button when the look uses none, and names a previous misspelling", () => {

@@ -13,7 +13,7 @@ import type { FactoryPlanItem, FactoryState } from "@/lib/db/types";
 import { loadOwnFactoryCampaign } from "@/lib/factory/access";
 import { buildFlyerBriefText, buildPieceBrief } from "@/lib/factory/brief";
 import { pickTestItems } from "@/lib/factory/plan";
-import { loadUnitCosts, quotePlan } from "@/lib/pipeline/campaign-factory";
+import { CAMPAIGN_FLYER_OPTIONS, loadUnitCosts, quotePlan } from "@/lib/pipeline/campaign-factory";
 import { getCampaignFormat } from "@/prompts/campaign-formats";
 import { logError } from "@/lib/log";
 
@@ -128,6 +128,8 @@ function createShell(
     flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research),
     ...(args.photoUrl ? { productPhotoUrl: args.photoUrl } : {}),
     ...(args.factory.look_id ? { lookId: args.factory.look_id } : {}),
+    ...(args.factory.flyer_style ? { flyerStyle: args.factory.flyer_style } : {}),
+    flyerVariantCount: CAMPAIGN_FLYER_OPTIONS,
     ...(args.factory.reference_urls?.length ? { referenceUrls: args.factory.reference_urls } : {}),
     ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),
     ...(args.factory.client_brand ? { clientBrand: args.factory.client_brand } : {}),

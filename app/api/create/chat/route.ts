@@ -244,7 +244,7 @@ function withImageBlocks(
   return [
     {
       type: "text",
-      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order). If one is a design the flyer should look like, call update_brief with style_reference_urls set to its exact URL; if one shows the logo of the business the flyer is for (not this brand), set client_brand.logo_url to it. If a flyer is ON SCREEN and the photo is for it, call edit_flyer with photo_url set to that exact URL instead.`,
+      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order). If one is a design the flyer should look like, call update_brief with style_reference_urls set to its exact URL. If a flyer is ON SCREEN and the photo is for it, call edit_flyer with photo_url set to that exact URL instead.`,
     },
     ...images.map((url) => ({
       type: "image" as const,
@@ -957,7 +957,6 @@ async function dispatchTool(
                 ? { productPhotoUrl: state.brief.product_photo_url }
                 : {}),
               ...(references?.length ? { referenceUrls: references } : {}),
-              ...(state.brief.client_brand ? { clientBrand: state.brief.client_brand } : {}),
             }
           : {}),
       });
@@ -993,7 +992,6 @@ async function dispatchTool(
         research: input.research === true && userAskedForResearch(ctx.userMessages),
         ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
         ...(references?.length ? { reference_urls: references } : {}),
-        ...(state.brief.client_brand ? { client_brand: state.brief.client_brand } : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
     }

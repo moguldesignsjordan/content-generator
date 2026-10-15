@@ -14,9 +14,11 @@ import type {
   FactoryPlanItem,
   FactoryQuote,
   FactoryResearch,
+  FlyerStyleId,
   Icp,
   Product,
 } from "@/lib/db/types";
+import { isFlyerStyle } from "@/prompts/generate-flyer";
 import {
   RESEARCH_TOOLS,
   SAVE_RESEARCH_TOOL,
@@ -50,15 +52,18 @@ export interface FactoryBrandContext {
 
 /** What each piece costs when the brand has no history for that kind yet, on
  * the default image model (Nano Banana 2.1). Email/blog: draft + QA + a 1K
- * hero. Social/ad: Haiku copy + 4 options at 2K. Rough on purpose; real
+ * hero. Social/ad: Haiku copy + CAMPAIGN_FLYER_OPTIONS designs at 2K. Rough on purpose; real
  * history (which also reflects a pricier model choice) replaces them after a
  * few drafts. */
 export const DEFAULT_UNIT_USD: Record<FactoryKind, number> = {
   email: 0.25,
   blog: 0.25,
-  social: 0.22,
-  ad: 0.22,
+  social: 0.12,
+  ad: 0.12,
 };
+
+/** Options each campaign post or ad renders (a single flyer makes 4). */
+export const CAMPAIGN_FLYER_OPTIONS = 2;
 
 /** At most this many pause_turn resumes before giving up on the research turn. */
 const MAX_RESEARCH_ROUNDS = 4;
@@ -176,7 +181,7 @@ export async function planCampaign(
     days: number;
     startDate: string;
   },
-): Promise<{ plan: FactoryPlanItem[]; usd: number }> {
+): Promise<{ plan: FactoryPlanItem[]; flyerStyle?: FlyerStyleId; usd: number }> {
   const counts = splitEvenly(args.size, args.kinds);
   const { system, user } = buildPlanMessages({
     ...ctx,
@@ -207,7 +212,9 @@ export async function planCampaign(
   const tu = resp.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === SAVE_PLAN_TOOL.name,
   );
-  const rawItems = ((tu?.input as { items?: RawPlanItem[] } | undefined)?.items ?? []);
+  const input = tu?.input as { items?: RawPlanItem[]; flyer_style?: unknown } | undefined;
+  const rawItems = input?.items ?? [];
+  const flyerStyle = isFlyerStyle(input?.flyer_style) ? input.flyer_style : undefined;
   const cleaned = cleanPlanItems(rawItems, {
     counts,
     productSlugs: new Set(ctx.products.map((p) => p.slug)),
@@ -221,7 +228,7 @@ export async function planCampaign(
       { brandId: ctx.brand.id },
     );
   }
-  return { plan: assignDates(cleaned, args.startDate, args.days), usd };
+  return { plan: assignDates(cleaned, args.startDate, args.days), flyerStyle, usd };
 }
 
 /** Per-kind unit costs: this brand's real averages where it has history. */

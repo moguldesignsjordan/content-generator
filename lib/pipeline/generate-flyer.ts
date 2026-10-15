@@ -108,6 +108,7 @@ export async function generateFlyerForTopicStreamed(
     const styles = resolveVariantStyles(draftId, {
       fixedStyle: meta.flyer_style,
       hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
+      count: meta.flyer_variant_count,
     });
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
@@ -250,6 +251,7 @@ export async function regenerateFlyerDraft(
   const styles = resolveVariantStyles(`${draftId}:${latestVersion + 1}`, {
     fixedStyle,
     hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
+    count: meta.flyer_variant_count,
   });
 
   const competitorRef = await loadCompetitorRef(
@@ -322,6 +324,7 @@ export async function regenerateFlyerDraft(
       ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
       ...(meta.product_photo_url ? { product_photo_url: meta.product_photo_url } : {}),
       ...(meta.flyer_model ? { flyer_model: meta.flyer_model } : {}),
+      ...(meta.flyer_variant_count ? { flyer_variant_count: meta.flyer_variant_count } : {}),
       ...(look && look.id !== ATTACHED_LOOK_ID ? { look_id: look.id } : {}),
       ...(meta.reference_urls?.length ? { reference_urls: meta.reference_urls } : {}),
       ...(look?.id === ATTACHED_LOOK_ID && look.profile ? { reference_profile: look.profile } : {}),
@@ -399,9 +402,11 @@ export async function regenerateFlyerImage(args: {
       usageDeltas,
     );
     if (look) {
+      const examplesText = await readExamplesText(look, { brandId: args.ctx.brand.id, draftId: args.draftId, usageDeltas });
       const designed = await renderDesignedFlyer(args.ctx, args.copy, {
         aspect: args.aspect,
         look,
+        examplesText,
         model: args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model),
         productPhoto: await loadProductPhoto(
           args.productPhotoUrl ?? args.ctx.product?.image_url ?? undefined,
@@ -414,6 +419,22 @@ export async function regenerateFlyerImage(args: {
       });
       if (designed) return { image: designed, usage: usageDeltas };
     }
+  } else if (!args.exactPrompt && !reference && !args.layout) {
+    // An option designed without a reference re-renders the same way.
+    const designed = await renderDesignedFlyer(args.ctx, args.copy, {
+      aspect: args.aspect,
+      look: NO_REFERENCE_LOOK,
+      style: args.style,
+      model: args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model),
+      productPhoto: await loadProductPhoto(
+        args.productPhotoUrl ?? args.ctx.product?.image_url ?? undefined,
+        args.draftId,
+      ),
+      draftId: args.draftId,
+      usageDeltas,
+      client,
+    });
+    if (designed) return { image: designed, usage: usageDeltas };
   }
 
   // The exact-prompt path is the user's full control: the model draws
@@ -548,7 +569,7 @@ export async function placeImageInFlyer(args: {
 
     const seen = await readImageText(await toPreview(rendered.data), readOpts);
     if (seen !== null) {
-      const check = checkRenderedText(expected, seen, logoText);
+      const check = checkRenderedText(expected, seen, [...logoText, ...(before ? [before] : [])]);
       if (!check.ok) {
         logWarn("pipeline:generate-flyer:place-text-check", "edited flyer text didn't match", {
           draftId: args.draftId,
@@ -698,6 +719,9 @@ async function renderFlyerVariants(
   const model = resolveImageModel(
     opts.modelTier ?? ctx.brand.visual_identity?.image_gen?.model,
   );
+  const examplesText = opts.look
+    ? await readExamplesText(opts.look, { brandId: ctx.brand.id, draftId: opts.draftId, usageDeltas: opts.usageDeltas })
+    : "";
   const results = await Promise.allSettled(
     copies.map(async (copy, i) => {
       if (opts.look) {
@@ -706,6 +730,16 @@ async function renderFlyerVariants(
           look: opts.look,
           model,
           riff: opts.look.riffs ? i : undefined,
+          examplesText,
+        });
+        if (designed) return { image: designed, layout: undefined };
+      } else if (!opts.styleReferenceId) {
+        // No reference: still a real design, each option in its own direction.
+        const designed = await renderDesignedFlyer(ctx, copy, {
+          ...opts,
+          look: NO_REFERENCE_LOOK,
+          style: styles[i],
+          model,
         });
         if (designed) return { image: designed, layout: undefined };
       }
@@ -791,6 +825,7 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
     ...(copy.hashtags?.length ? { hashtags: copy.hashtags } : {}),
     ...(copy.ad ? { ad: copy.ad } : {}),
     ...(copy.extras?.length ? { extras: copy.extras } : {}),
+    ...(copy.mockup?.length ? { mockup: copy.mockup } : {}),
   };
 }
 
@@ -905,6 +940,35 @@ interface ResolvedLook {
 
 /** ResolvedLook.id for designs attached in chat (never stored as look_id). */
 const ATTACHED_LOOK_ID = "attached";
+
+/** No examples: the design follows the option's preset direction instead. */
+const NO_REFERENCE_LOOK: ResolvedLook = { id: "none", profile: null, images: [] };
+
+/** What the examples themselves say, read once per generation, so the text
+ * check can tell a design that copied their words from one that added its own
+ * sample text. Empty when nothing could be read. */
+async function readExamplesText(
+  look: ResolvedLook,
+  opts: { brandId: string; draftId: string; usageDeltas: UsageDelta[] },
+): Promise<string> {
+  const reads = await Promise.all(
+    look.images.map((img) => readImageText(Buffer.from(img.data, "base64"), opts)),
+  );
+  return reads.filter(Boolean).join("\n");
+}
+
+/** The kind of field each preset direction puts behind the text, for the
+ * brand color mapping when there's no look profile to say. */
+const STYLE_BACKGROUND: Record<FlyerStyleId, DesignLookProfile["color_roles"]["background"]> = {
+  bold_type: "vivid",
+  minimal: "light",
+  photo_backdrop: "photo",
+  illustrated: "vivid",
+  collage: "light",
+  retro_print: "vivid",
+  gradient_glow: "dark",
+  elegant: "dark",
+};
 
 /**
  * The look a flyer follows: designs attached in chat win (read once, with
@@ -1064,12 +1128,19 @@ async function renderDesignedFlyer(
     client?: LoadedClient | null;
     /** Index into DESIGN_RIFFS for this option. */
     riff?: number;
+    /** The preset direction, when there are no examples to follow. */
+    style?: FlyerStyleId;
+    /** What the examples say (readExamplesText). */
+    examplesText?: string;
   },
 ): Promise<ContentImage | null> {
   const client = opts.client ?? null;
   const tokens = flyerTokens(ctx, client?.brand);
   const profile = opts.look.profile;
-  const roles = mapBrandColors(tokens.colors, profile?.color_roles.background ?? "photo");
+  const roles = mapBrandColors(
+    tokens.colors,
+    profile?.color_roles.background ?? (opts.style ? STYLE_BACKGROUND[opts.style] : "photo"),
+  );
   // Product, examples, then the client's logo: the order the prompt numbers them.
   const references = [
     ...(opts.productPhoto ? [opts.productPhoto] : []),
@@ -1096,7 +1167,7 @@ async function renderDesignedFlyer(
       copy,
       tokens,
       opts.aspect,
-      { profile, exampleCount: opts.look.images.length, roles },
+      { profile, exampleCount: opts.look.images.length, roles, style: opts.style },
       {
         hasProduct: Boolean(opts.productPhoto),
         misspelled,
@@ -1137,11 +1208,17 @@ async function renderDesignedFlyer(
       usageDeltas: opts.usageDeltas,
     });
     if (seen === null) break; // Can't verify: use the safe layout.
-    const check = checkRenderedText(expected, seen, client ? [client.brand.name] : []);
+    const check = checkRenderedText(
+      expected,
+      seen,
+      [...(client ? [client.brand.name] : []), ...(copy.mockup ?? [])],
+      opts.examplesText,
+    );
     if (!check.ok) {
       logWarn("pipeline:generate-flyer:text-check", "designed flyer text didn't match", {
         draftId: opts.draftId,
         missing: check.missing,
+        copied: check.copied,
         extra: check.extra.slice(0, 12),
       });
       misspelled = check.missing.length ? check.missing : undefined;

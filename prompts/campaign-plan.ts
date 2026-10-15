@@ -14,6 +14,7 @@ import {
   buildPositioningBlock,
   buildProductLines,
 } from "./brand-voice";
+import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import {
   CAMPAIGN_FORMATS,
   FACTORY_KINDS,
@@ -97,6 +98,12 @@ export const SAVE_PLAN_TOOL: Anthropic.Tool = {
             "needs_detail",
           ],
         },
+      },
+      flyer_style: {
+        type: "string",
+        enum: FLYER_STYLE_CATALOG.map((s) => s.id),
+        description:
+          "One design direction every social post and ad in this campaign shares, so they look like a set. Pick what fits the brand and the offer.",
       },
     },
     required: ["items"],
@@ -188,6 +195,10 @@ export function buildPlanMessages(args: {
       : []),
     "- State as true only the REAL FACTS above and the brand info. Never invent numbers, results, testimonials, client names, prices, or deadlines. When a piece would be stronger with proof that isn't there, set needs_detail true and write detail_prompt as the one question to ask the owner.",
     "- Social and ad visuals show the real product or work when there is one, in a setting that fits the brand. No stock-photo cliches (handshakes, people pointing at laptops, lightbulbs).",
+    "- When a visual shows off a designed item the business makes or sells (a sign, card, banner, packaging, a screen), say what sample design is on it (e.g. 'a yard sign for a fictional roofing company'), so it isn't shown blank.",
+    ...(kinds.some((k) => k === "social" || k === "ad")
+      ? [`- Set flyer_style to the one design direction all posts and ads share: ${FLYER_STYLE_CATALOG.map((s) => `${s.id} (${s.description})`).join("; ")}`]
+      : []),
     "- Plain words, short sentences, the brand's voice. Never use em dashes.",
     "",
     "Call save_campaign_plan once with all the items.",

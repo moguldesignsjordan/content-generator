@@ -336,6 +336,8 @@ export async function createDraftShell(args: {
   flyerModel?: ImageModelTier;
   /** Social only: the design look to follow (meta.look_id). */
   lookId?: string;
+  /** Social only: options to render (meta.flyer_variant_count). */
+  flyerVariantCount?: number;
   /** Social only: designs attached in chat to match (meta.reference_urls),
    * and their profile when it was already read (a campaign reads it once). */
   referenceUrls?: string[];
@@ -364,6 +366,7 @@ export async function createDraftShell(args: {
     productPhotoUrl,
     flyerModel,
     lookId,
+    flyerVariantCount,
     referenceUrls,
     referenceProfile,
     clientBrand,
@@ -409,6 +412,7 @@ export async function createDraftShell(args: {
     ...(productPhotoUrl ? { product_photo_url: productPhotoUrl } : {}),
     ...(flyerModel ? { flyer_model: flyerModel } : {}),
     ...(lookId ? { look_id: lookId } : {}),
+    ...(flyerVariantCount ? { flyer_variant_count: flyerVariantCount } : {}),
     ...(referenceUrls?.length ? { reference_urls: referenceUrls } : {}),
     ...(referenceUrls?.length && referenceProfile ? { reference_profile: referenceProfile } : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),

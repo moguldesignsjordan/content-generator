@@ -141,7 +141,17 @@ export async function generateGeminiImage(
         image_size: size,
       },
     }),
-  );
+  ).catch((err: unknown) => {
+    // A 402 is the Google account's billing, not the request: say so plainly
+    // instead of surfacing the SDK's empty httpMeta JSON.
+    if (err instanceof Error && /^402\b/.test(err.message)) {
+      throw new Error(
+        "Image generation is paused: the Gemini account's billing or prepaid credits need attention (402).",
+        { cause: err },
+      );
+    }
+    throw err;
+  });
 
   const image = interaction.output_image;
   if (!image?.data) {

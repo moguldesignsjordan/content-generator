@@ -25,7 +25,32 @@ describe("checkRenderedText", () => {
     expect(checkRenderedText(expected, `${base}\nACME PRO`).ok).toBe(true);
     const r = checkRenderedText(expected, `${base}\nshop the summer sale today with free shipping on every order`);
     expect(r.ok).toBe(false);
-    expect(r.extra.length).toBeGreaterThan(4);
+    expect(r.extra.length).toBeGreaterThan(8);
+  });
+
+  it("passes sample text the model put on a showcased product", () => {
+    const seen = `${expected.join("\n")}\nIMPACT SIGN CO\n555-0199`;
+    expect(checkRenderedText(expected, seen).ok).toBe(true);
+  });
+
+  const examples = "yard sign design\nAXE-TRA BOLD\nFEARLESS ROOFING\n570-212-ROOF\nSERVING NORTHEASTERN PENNSYLVANIA";
+
+  it("fails when the design repeats the examples' own words", () => {
+    const seen = `${expected.join("\n")}\nFearless Roofing\n570-212-ROOF`;
+    const r = checkRenderedText(expected, seen, [], examples);
+    expect(r.ok).toBe(false);
+    expect(r.copied).toContain("fearless roofing");
+    expect(r.copied).toContain("570 212");
+  });
+
+  it("doesn't call a shared common word copying", () => {
+    const seen = `${expected.join("\n")}\nImpact Sign Co`;
+    expect(checkRenderedText(expected, seen, [], examples).ok).toBe(true);
+  });
+
+  it("doesn't flag an example phrase that our own copy uses", () => {
+    const ours = ["Yard sign design that sells"];
+    expect(checkRenderedText(ours, "YARD SIGN DESIGN THAT SELLS", [], examples).ok).toBe(true);
   });
 
   it("treats apostrophes and dollar signs sensibly", () => {

@@ -610,6 +610,9 @@ export interface FactoryState {
   reference_profile?: DesignLookProfile;
   /** The business the campaign's posts and ads are for, when not this brand. */
   client_brand?: ClientBrand;
+  /** One design direction for every post and ad, so the set looks related
+   * when no look or attached design leads. Picked by the planner. */
+  flyer_style?: FlyerStyleId;
   research?: FactoryResearch;
   plan?: FactoryPlanItem[];
   quote?: FactoryQuote;
@@ -982,6 +985,9 @@ export interface FlyerCopy {
   /** Text for the look's extra text spots (DesignLookProfile.text_slots),
    * rendered in the image on the designed path. */
   extras?: FlyerExtra[];
+  /** Made-up sample text printed on the item the picture shows off (a sign,
+   * a card), so a showcase doesn't look blank. Designed path only. */
+  mockup?: string[];
 }
 
 export interface FlyerExtra {
@@ -1278,6 +1284,9 @@ export interface DraftMeta {
   /** The image model the flyer's options were made with (picked on the
    * create form). Unset means the brand's default. */
   flyer_model?: ImageModelTier;
+  /** How many options to render; unset means FLYER_VARIANT_COUNT. Campaign
+   * posts make fewer. */
+  flyer_variant_count?: number;
   /** The picked option's text layout, mirrored like flyer_style, so an
    * image-only re-render (edit sheet, Finalize in Pro) keeps it. */
   flyer_layout?: FlyerLayout;

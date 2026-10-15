@@ -1,7 +1,7 @@
 import "server-only";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { DRAFT_MODEL, getAnthropic, logUsage } from "@/lib/clients/anthropic";
-import { EXTRACT_LOOK_TOOL, buildExtractLookMessages, parseLookProfile } from "@/prompts/extract-look";
+import { EXTRACT_LOOK_TOOL, LookProfileSchema, buildExtractLookMessages, parseLookProfile } from "@/prompts/extract-look";
 import type { DesignLookProfile, LookExample } from "@/lib/db/types";
 import { prepareReferenceImage } from "@/lib/images/optimize";
 import { logError, logWarn } from "@/lib/log";
@@ -74,7 +74,10 @@ export async function extractLookProfile(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === EXTRACT_LOOK_TOOL.name,
     );
     const profile = tu ? parseLookProfile(tu.input) : null;
-    if (!profile) logWarn("pipeline:extract-look:invalid", "look profile failed validation", { brandId });
+    if (!profile) {
+      const issues = tu ? LookProfileSchema.safeParse(tu.input).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`) : ["no tool call"];
+      logWarn("pipeline:extract-look:invalid", "look profile failed validation", { brandId, issues });
+    }
     return profile;
   } catch (err) {
     logError("pipeline:extract-look", err, { brandId });

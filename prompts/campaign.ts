@@ -284,29 +284,6 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "images, so never just describe them in constraints instead. Pass " +
           "the complete list (it replaces the saved one); [] clears it.",
       },
-      client_brand: {
-        type: "object",
-        description:
-          "Flyers and ads: set when the piece is for a DIFFERENT business than " +
-          "the brand you work for (the user's client, or a business they " +
-          "named). Its colors and logo replace the brand's on the flyer.",
-        properties: {
-          name: { type: "string", description: "The business's name, as it appears on its logo." },
-          colors: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Their brand colors as #RRGGBB hex, most dominant first, read off " +
-              "their logo or materials or as the user stated them (2 to 4).",
-          },
-          logo_url: {
-            type: "string",
-            description:
-              "EXACT URL of the attached image that shows their logo (a logo " +
-              "file, business card, sign). NEVER invent or guess a URL.",
-          },
-        },
-      },
     },
   },
 };

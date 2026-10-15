@@ -22,16 +22,22 @@ export const LookProfileSchema = z.object({
   imagery: z.string().min(1),
   cta_style: z.enum(["pill", "box", "underline", "text", "none"]),
   logo_placement: z.enum(["top-left", "top-right", "bottom-left", "bottom-right", "none"]),
-  mood: z.array(z.string()).max(6),
-  text_slots: z.array(z.string()).max(4).optional(),
+  // Lists are trimmed, not rejected: one extra mood word or text spot
+  // shouldn't throw the whole read away.
+  mood: z.array(z.string()).transform((m) => m.slice(0, 6)),
+  text_slots: z.array(z.string()).transform((t) => t.slice(0, 4)).optional(),
 });
 
 export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
   name: "save_look_profile",
   description:
     "Return the shared design profile of the example ads/posts you were shown.",
+  // Strict: the arguments always match the schema, so a read can't come back
+  // unusable (list lengths aren't enforceable here; parseLookProfile trims).
+  strict: true,
   input_schema: {
     type: "object",
+    additionalProperties: false,
     properties: {
       summary: {
         type: "string",
@@ -56,6 +62,7 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
       },
       color_roles: {
         type: "object",
+        additionalProperties: false,
         properties: {
           background: {
             type: "string",
@@ -81,15 +88,13 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
       mood: {
         type: "array",
         items: { type: "string" },
-        maxItems: 6,
         description: "3 to 6 mood words.",
       },
       text_slots: {
         type: "array",
         items: { type: "string" },
-        maxItems: 4,
         description:
-          "Every text element BESIDES the headline, one supporting line, the button, and the logo, by its job and form, e.g. 'date and time in two side-by-side pills', 'location line with a pin icon', 'three short values in a footer bar separated by dots', 'short slogan of three parts under the headline'. Never their actual words. Empty when there are none.",
+          "Every text element BESIDES the headline, one supporting line, the button, and the logo, by its job and form, e.g. 'date and time in two side-by-side pills', 'location line with a pin icon', 'three short values in a footer bar separated by dots', 'short slogan of three parts under the headline'. Never their actual words. At most 4. Empty when there are none.",
       },
     },
     required: [

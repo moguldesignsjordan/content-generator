@@ -15,6 +15,7 @@ import {
 import type { BrandTokens } from "@/lib/email/templates/types";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
 import { buildCompetitorReferenceBlock } from "./brand-voice";
+import { AI_TELL_WRITER_RULES } from "./ai-tells";
 import { stripEmDashes, stripMarkdown } from "@/lib/text";
 
 // Flyer prompt assembly: one FAST_MODEL call produces several alternative
@@ -110,11 +111,12 @@ export function pickFlyerStyleSet(seed: string, count: number): FlyerStyleId[] {
  */
 export function resolveVariantStyles(
   seed: string,
-  opts: { fixedStyle?: FlyerStyleId; hasReference: boolean },
+  opts: { fixedStyle?: FlyerStyleId; hasReference: boolean; count?: number },
 ): (FlyerStyleId | undefined)[] {
-  if (opts.hasReference) return Array(FLYER_VARIANT_COUNT).fill(undefined);
-  if (opts.fixedStyle) return Array(FLYER_VARIANT_COUNT).fill(opts.fixedStyle);
-  return pickFlyerStyleSet(seed, FLYER_VARIANT_COUNT);
+  const count = opts.count ?? FLYER_VARIANT_COUNT;
+  if (opts.hasReference) return Array(count).fill(undefined);
+  if (opts.fixedStyle) return Array(count).fill(opts.fixedStyle);
+  return pickFlyerStyleSet(seed, count);
 }
 
 /** What the copy call returns via forced tool use. */
@@ -163,6 +165,16 @@ const FLYER_COPY_PROPERTIES = {
       "One or two sentences describing the flyer's imagery and background " +
       "composition: concrete subjects, setting, layout feel. NO text " +
       "content, no color or font words (the render prompt adds those).",
+  },
+  mockup: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "Only when the picture shows off a designed item this brand makes or " +
+      "sells (a sign, business card, banner, door hanger, packaging, a " +
+      "screen): 1 to 3 short lines of made-up sample text printed on that " +
+      "item, e.g. a fictional business name, a short tagline, and a phone " +
+      "number in the 555-01XX range. Never a real business. Omit otherwise.",
   },
 };
 
@@ -317,7 +329,11 @@ export function buildFlyerCopyMessages(args: {
       : ["- caption: 1 to 3 sentences in the brand voice with a clear next step."]),
     "- scene: imagery and composition only. Never describe the text, colors,",
     "  or fonts; the render prompt handles those.",
+    "- mockup: only when the scene shows off a designed item the brand makes",
+    "  or sells, so it looks finished instead of blank. A made-up business",
+    "  that fits the item, never a real one; phone numbers in 555-01XX.",
     "- NEVER use em dashes anywhere.",
+    ...AI_TELL_WRITER_RULES,
     `Call save_flyer_variants once with exactly ${variants.count} variants. ` +
       "Each needs a genuinely different hook and headline, not a rewording " +
       "of another, so the reviewer has real alternatives to choose from.",
@@ -448,7 +464,21 @@ export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
       .map((h) => (h.startsWith("#") ? h : `#${h}`)),
     scene: plain(out.scene.trim()),
     ...cleanExtras(out.extras),
+    ...cleanMockup(out.mockup),
   };
+}
+
+/** Cap per mockup line: a name, a tagline, or a phone number. */
+const MAX_MOCKUP_CHARS = 40;
+
+function cleanMockup(raw: unknown): { mockup?: string[] } {
+  if (!Array.isArray(raw)) return {};
+  const lines = raw
+    .filter((l): l is string => typeof l === "string")
+    .map((l) => plain(l.trim()))
+    .filter((l) => l && l.length <= MAX_MOCKUP_CHARS)
+    .slice(0, 3);
+  return lines.length ? { mockup: lines } : {};
 }
 
 /** Keeps extras with a slot and short text, deduped by slot. */
@@ -494,6 +524,7 @@ export function parseFlyerVariants(
           caption: ad.primary_text,
           scene: c.scene,
           extras: c.extras,
+          mockup: c.mockup,
         });
         return { ...copy, ad };
       })
@@ -588,8 +619,10 @@ export function buildFlyerDesignPrompt(
   aspect: FlyerAspect,
   look: {
     profile: DesignLookProfile | null;
+    /** 0 designs from `style` alone (No reference). */
     exampleCount: number;
     roles: { background: string; text: string; accent: string };
+    style?: FlyerStyleId;
   },
   opts: {
     hasProduct?: boolean;
@@ -614,17 +647,18 @@ export function buildFlyerDesignPrompt(
   const productImage = opts.hasProduct ? ++n : null;
   const firstExample = n + 1;
   n += look.exampleCount;
+  const hasExamples = look.exampleCount > 0;
   const exampleRange =
     look.exampleCount === 1 ? `Image ${firstExample} is` : `Images ${firstExample} to ${n} are`;
   const logoImage = opts.client?.hasLogo ? ++n : null;
   const roles = [
     productImage ? `Image ${productImage} is the real product photo.` : "",
-    `${exampleRange} the design ${look.exampleCount === 1 ? "example" : "examples"} to match.`,
+    hasExamples ? `${exampleRange} the design ${look.exampleCount === 1 ? "example" : "examples"} to match.` : "",
     logoImage ? `Image ${logoImage} shows ${owner} logo.` : "",
   ].filter(Boolean);
 
   const font = tokens.fonts.heading.split(",")[0].replace(/['"]/g, "").trim();
-  const headlineType = opts.client
+  const headlineType = opts.client && hasExamples
     ? "in the examples' headline type treatment"
     : `${p ? `${p.headline_treatment}, ` : ""}in the spirit of ${font || "a bold modern sans serif"}`;
   const lines = [
@@ -639,7 +673,7 @@ export function buildFlyerDesignPrompt(
       ? logoImage
         ? `Colors: take ${owner} colors from their logo (Image ${logoImage}) and use them in the roles the examples use.`
         : `Colors: a restrained palette of ${look.roles.background} and ${look.roles.text}, with ${look.roles.accent} as the one accent.`
-      : `Colors: use ${opts.client ? owner : "the brand's"} colors in the roles the examples use. Main background or dominant color ${look.roles.background}, text ${look.roles.text}, and ${look.roles.accent} as the one accent${p ? ` (${p.color_roles.accent_usage})` : ""}.`;
+      : `Colors: use ${opts.client ? owner : "the brand's"} colors${hasExamples ? " in the roles the examples use" : ""}. Main background or dominant color ${look.roles.background}, text ${look.roles.text}, and ${look.roles.accent} as the one accent${p ? ` (${p.color_roles.accent_usage})` : ""}.`;
 
   const logo = logoImage
     ? `Reproduce ${owner} logo from Image ${logoImage} exactly (same letters, colors, and shapes), cleanly and at a readable size, ${opts.logoCorner ? `in the ${opts.logoCorner} corner` : "where the examples place a logo"}. It is the only logo on the flyer.`
@@ -649,20 +683,33 @@ export function buildFlyerDesignPrompt(
         ? `Keep the ${opts.logoCorner} corner completely empty of text and key subjects: the brand logo is added there afterwards.`
         : "";
 
+  const mockup = copy.mockup?.length
+    ? `The item this piece shows off carries its own finished sample design, with exactly this text printed on it and nothing else: ${copy.mockup.map((m) => `"${m}"`).join(", ")}.`
+    : "";
+  const design = hasExamples
+    ? [
+        `Use Image${look.exampleCount === 1 ? ` ${firstExample}` : `s ${firstExample} to ${firstExample + look.exampleCount - 1}`} as the design to follow: match its layout, typographic treatment, color use, composition, density, and overall feel as closely as possible, and fill it with entirely new content: a new background, new imagery, and none of its photos, people, objects, or words. Everything below adapts that design to this message.`,
+      ]
+    : [
+        "Design it the way a top agency art director would: one bold idea, a clear hierarchy with the headline dominant, confident type, and generous breathing room.",
+        ...(look.style ? [FLYER_STYLE_DIRECTIONS[look.style]] : []),
+      ];
+
   return [
     `Design a finished, professional social media ${opts.client ? "flyer" : "ad"}, ${FLYER_ASPECTS[aspect].label.toLowerCase()}${opts.client ? `, for ${opts.client.name}` : ""}.`,
     "The image IS the flyer, filling the entire frame edge to edge: not a photo or mockup of a flyer, with no border or backdrop around it.",
     roles.join(" "),
-    `Use Image${look.exampleCount === 1 ? ` ${firstExample}` : `s ${firstExample} to ${firstExample + look.exampleCount - 1}`} as the design to follow: match its layout, typographic treatment, color use, composition, density, and overall feel as closely as possible, and fill it with entirely new content: a new background, new imagery, and none of its photos, people, objects, or words. Everything below adapts that design to this message.`,
+    ...design,
     ...(p
       ? [
           `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Imagery: ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
         ]
       : []),
-    ...(opts.riff !== undefined ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
-    `Subject for this piece, shown the way the examples show theirs: ${copy.scene.trim().replace(/\.$/, "")}.`,
-    `Typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
-    "Any other text element the examples have (taglines, footers, lists, labels) is left out of this design entirely.",
+    ...(opts.riff !== undefined && hasExamples ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
+    `Subject for this piece${hasExamples ? ", shown the way the examples show theirs" : ""}: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    mockup,
+    `On the flyer itself, typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
+    hasExamples ? "Any other text element the examples have (taglines, footers, lists, labels) is left out of this design entirely." : "",
     ...(opts.misspelled?.length
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
       : []),
@@ -673,8 +720,12 @@ export function buildFlyerDesignPrompt(
         ]
       : []),
     logo,
-    "The examples are style references only. Never copy their words, logos, brand names, products, or people, and never reuse their photos, backgrounds, or decorative objects: draw all imagery new.",
-    "Printed items, screens, signs, and packaging in the scene stay blank (only a real product photo keeps its own label). No watermarks and no placeholder text anywhere.",
+    hasExamples
+      ? "The examples are style references only. Never copy their words, logos, brand names, products, or people, and never reuse their photos, backgrounds, or decorative objects: draw all imagery new."
+      : "",
+    mockup
+      ? "Every other printed item, screen, sign, and package in the scene stays blank. No watermarks and no placeholder text anywhere else."
+      : "Printed items, screens, signs, and packaging in the scene stay blank (only a real product photo keeps its own label). No watermarks and no placeholder text anywhere.",
   ]
     .filter(Boolean)
     .join(" ");
