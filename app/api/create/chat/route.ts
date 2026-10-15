@@ -36,6 +36,7 @@ import {
 import type {
   Brand,
   CampaignBrief,
+  FactoryKind,
   FunnelStage,
   Product,
   SeriesDraftRef,
@@ -70,6 +71,8 @@ import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 import { buildConversationNotes, isHttpUrl, mergeBrief } from "./brief-merge";
+import { userAskedForResearch } from "./research-consent";
+import { FACTORY_KINDS } from "@/prompts/campaign-formats";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -85,6 +88,7 @@ const MAX_STEPS = 8;
 // them. select_topic is the one that can fail (a bad id); the loop checks for
 // that before ending the turn.
 const INTERVIEW_ONLY_TOOLS = new Set([
+  "show_look_picker",
   "update_brief",
   "suggest_options",
   "remember",
@@ -92,6 +96,61 @@ const INTERVIEW_ONLY_TOOLS = new Set([
   "select_topic",
   "create_topic",
 ]);
+
+/** A campaign the agent handed off, with the settings the planner needs. */
+interface StartedCampaign {
+  summary: string;
+  kinds: FactoryKind[];
+  size: number;
+  days: number;
+  research: boolean;
+  photo_url?: string;
+}
+
+/** What the chat shows while a tool runs; null for tools that only save. */
+function toolStatusLabel(block: Anthropic.Messages.ToolUseBlock): string | null {
+  switch (block.name) {
+    case "update_brief":
+      return "Saving the details";
+    case "select_topic":
+    case "create_topic":
+      return "Lining up the topic";
+    case "generate_content": {
+      const channel = (block.input as GenerateContentInput).channel;
+      return channel === "social"
+        ? "Setting up your flyer"
+        : channel === "blog"
+          ? "Setting up your blog post"
+          : "Setting up your email";
+    }
+    case "start_campaign":
+      return "Handing it to the planner";
+    case "list_recent_content":
+    case "get_content":
+      return "Looking through your past content";
+    case "create_blog_from_email":
+    case "create_flyer_from_email":
+      return "Setting it up";
+    case "save_competitor_reference":
+      return "Studying that ad";
+    case "remember":
+    case "forget":
+      return "Remembering that";
+    default:
+      return null;
+  }
+}
+
+/** Adds an instruction for the model after its last step, keeping roles
+ * alternating (a tool-result turn takes it as an extra text block). */
+function pushUserNote(messages: Anthropic.MessageParam[], text: string) {
+  const last = messages[messages.length - 1];
+  if (last?.role === "user" && Array.isArray(last.content)) {
+    last.content = [...last.content, { type: "text", text }];
+  } else {
+    messages.push({ role: "user", content: text });
+  }
+}
 
 interface ChatMsg {
   role: "user" | "assistant";
@@ -195,9 +254,10 @@ interface TurnState {
   // Drafts from the retired email-series tool, kept so old chats still show
   // their series card on resume.
   series: SeriesDraftRef[] | null;
-  // Set by start_campaign: the factory description the client hands to
-  // /api/factory along with the settings picked in the app.
-  campaignSummary: string | null;
+  // Set by start_campaign: what the client hands to /api/factory.
+  campaign: StartedCampaign | null;
+  // Set by show_look_picker: the client shows the look picker under the reply.
+  showLookPicker: boolean;
 }
 
 /**
@@ -338,7 +398,8 @@ export async function POST(req: NextRequest) {
       draftId: null,
       channel: null,
       series: null,
-      campaignSummary: null,
+      campaign: null,
+      showLookPicker: false,
     };
     const dispatchCtx = {
       brand,
@@ -347,6 +408,10 @@ export async function POST(req: NextRequest) {
       products,
       campaignId: campaign.id,
       lookId: lookId || undefined,
+      userMessages: [
+        ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
+        message.trim(),
+      ],
     };
 
     // Snapshot readiness BEFORE this turn: if the brief was already complete
@@ -361,193 +426,268 @@ export async function POST(req: NextRequest) {
       campaign.topic_id
     );
 
-    const call = () =>
-      getAnthropic().messages.create({
-        model: DRAFT_MODEL,
-        // 2048, not 1024: a turn can chain several tool calls of brief
-        // fields alongside the reply text.
-        max_tokens: 2048,
-        // Automatic caching: moves a breakpoint onto the newest block each
-        // step, so later tool round-trips in this turn read the earlier ones
-        // from cache instead of re-paying full input for them.
-        cache_control: { type: "ephemeral" },
-        system,
-        messages,
-        tools: CREATE_TOOLS,
-        tool_choice: { type: "auto" },
-      });
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: string, data: unknown) => {
+          try {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            // The client went away; the turn still finishes and saves.
+          }
+        };
+        try {
+          // Streams each step so the reply appears word by word; a blank line goes
+          // between steps that both speak.
+          let needsGap = false;
+          const call = () => {
+            const stream = getAnthropic().messages.stream({
+              model: DRAFT_MODEL,
+              // 2048, not 1024: a turn can chain several tool calls of brief
+              // fields alongside the reply text.
+              max_tokens: 2048,
+              // Automatic caching: moves a breakpoint onto the newest block each
+              // step, so later tool round-trips in this turn read the earlier ones
+              // from cache instead of re-paying full input for them.
+              cache_control: { type: "ephemeral" },
+              system,
+              messages,
+              tools: CREATE_TOOLS,
+              tool_choice: { type: "auto" },
+            });
+            stream.on("text", (delta) => {
+              send("delta", { text: needsGap ? `\n\n${delta}` : delta });
+              needsGap = false;
+            });
+            return stream.finalMessage();
+          };
 
-    // One turn can span several tool round-trips, each with its own text block.
-    // Collected, then joined (see joinReplySegments): raw concatenation ran them
-    // together and printed a repeated question twice.
-    const replyParts: string[] = [];
-    let calledAnyTool = false;
-    for (let step = 0; step < MAX_STEPS; step++) {
-      let response;
-      try {
-        response = await call();
-      } catch (err) {
-        logError("api:/api/create/chat", err, { step });
-        response = await call();
-      }
-      logUsage("create-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
+          send("status", { label: sanitizedImages ? "Looking at your photos" : "Thinking" });
 
-      for (const block of response.content) {
-        if (block.type === "text") replyParts.push(block.text);
-      }
-      messages.push({ role: "assistant", content: response.content });
+          // One turn can span several tool round-trips, each with its own text block.
+          // Collected, then joined (see joinReplySegments): raw concatenation ran them
+          // together and printed a repeated question twice.
+          const replyParts: string[] = [];
+          let calledAnyTool = false;
+          for (let step = 0; step < MAX_STEPS; step++) {
+            if (step > 0) send("status", { label: "Thinking" });
+            let response;
+            try {
+              response = await call();
+            } catch (err) {
+              logError("api:/api/create/chat", err, { step });
+              // Whatever streamed before the failure is about to be said again.
+              send("reset", {});
+              response = await call();
+            }
+            logUsage("create-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
 
-      if (response.stop_reason !== "tool_use") break;
+            for (const block of response.content) {
+              if (block.type === "text") replyParts.push(block.text);
+            }
+            if (response.content.some((b) => b.type === "text" && b.text.trim())) needsGap = true;
+            messages.push({ role: "assistant", content: response.content });
 
-      const toolResults: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
-      const draftBefore = state.draftId;
-      let topicLookupFailed = false;
-      for (const block of response.content) {
-        if (block.type !== "tool_use") continue;
-        calledAnyTool = true;
-        const content = await dispatchTool(block, state, dispatchCtx);
-        toolResults.push({ type: "tool_result", tool_use_id: block.id, content });
-        if (
-          block.name === "select_topic" &&
-          state.topicId !== (block.input as SelectTopicInput).topic_id
-        ) {
-          topicLookupFailed = true;
-        }
-      }
-      messages.push({ role: "user", content: toolResults });
+            if (response.stop_reason !== "tool_use") break;
 
-      // A draft now exists and the client opens it straight away, so a reply
-      // call would only produce "opening your draft" (the fallback below says
-      // exactly that).
-      if (state.draftId && state.draftId !== draftBefore) break;
-      // Same for a campaign: the client takes over and runs the planner.
-      if (state.campaignSummary) break;
+            const toolResults: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
+            const draftBefore = state.draftId;
+            let topicLookupFailed = false;
+            for (const block of response.content) {
+              if (block.type !== "tool_use") continue;
+              calledAnyTool = true;
+              const label = toolStatusLabel(block);
+              if (label) send("status", { label });
+              const content = await dispatchTool(block, state, dispatchCtx);
+              toolResults.push({ type: "tool_result", tool_use_id: block.id, content });
+              if (
+                block.name === "select_topic" &&
+                state.topicId !== (block.input as SelectTopicInput).topic_id
+              ) {
+                topicLookupFailed = true;
+              }
+            }
+            messages.push({ role: "user", content: toolResults });
 
-      // The follow-up call after an interview step is nearly always an empty
-      // reply (the question was already asked alongside the tool call), yet it
-      // re-reads the whole ~18k-token prompt. Skip it when the turn is plainly
-      // waiting on the user. Not when the brief just became ready or a
-      // campaign is being planned: those turns chain on into generate_content
-      // or start_campaign.
-      const waitingOnUser =
-        response.content.some((b) => b.type === "text" && b.text.trim()) &&
-        response.content.every(
-          (b) => b.type !== "tool_use" || INTERVIEW_ONLY_TOOLS.has(b.name),
-        ) &&
-        !topicLookupFailed &&
-        !state.brief.campaign_kind &&
-        !(state.brief.goal && state.brief.key_message && state.topicId);
-      if (waitingOnUser) break;
-    }
+            // A draft now exists and the client opens it straight away, so a reply
+            // call would only produce "opening your draft" (the fallback below says
+            // exactly that).
+            if (state.draftId && state.draftId !== draftBefore) break;
+            // Same for a campaign: the client takes over and runs the planner.
+            if (state.campaign) break;
 
-    // Stall recovery: brief was already ready going into this turn but
-    // nothing happened. Force one more step; if that
-    // still doesn't produce a tool call, at least readyToGenerate (computed
-    // below from state.brief/topicId, unaffected by whether a tool fired)
-    // will be true so the client's manual Generate button is there instead of
-    // requiring another message.
-    if (briefWasReady && !calledAnyTool && !state.draftId) {
-      try {
-        const forced = await getAnthropic().messages.create({
-          model: FAST_MODEL,
-          max_tokens: 1024,
-          system,
-          messages,
-          tools: CREATE_TOOLS,
-          tool_choice: { type: "any" },
-        });
-        logUsage("create-chat-forced", FAST_MODEL, forced.usage, {
-          brandId: brand.id,
-        });
-        messages.push({ role: "assistant", content: forced.content });
-        const forcedParts: string[] = [];
-        for (const block of forced.content) {
-          if (block.type === "text") forcedParts.push(block.text);
-          if (block.type === "tool_use") {
-            await dispatchTool(block, state, dispatchCtx);
+            // The follow-up call after an interview step is nearly always an empty
+            // reply (the question was already asked alongside the tool call), yet it
+            // re-reads the whole ~18k-token prompt. Skip it when the turn is plainly
+            // waiting on the user. Not when the brief just became ready or a
+            // campaign is being planned: those turns chain on into generate_content
+            // or start_campaign.
+            const waitingOnUser =
+              response.content.some((b) => b.type === "text" && b.text.trim()) &&
+              response.content.every(
+                (b) => b.type !== "tool_use" || INTERVIEW_ONLY_TOOLS.has(b.name),
+              ) &&
+              !topicLookupFailed &&
+              !state.brief.campaign_kind &&
+              !(state.brief.goal && state.brief.key_message && state.topicId);
+            if (waitingOnUser) break;
+          }
+
+          // Stall recovery: brief was already ready going into this turn but
+          // nothing happened. Force one more step; if that
+          // still doesn't produce a tool call, at least readyToGenerate (computed
+          // below from state.brief/topicId, unaffected by whether a tool fired)
+          // will be true so the client's manual Generate button is there instead of
+          // requiring another message.
+          if (briefWasReady && !calledAnyTool && !state.draftId) {
+            try {
+              const forced = await getAnthropic().messages.create({
+                model: FAST_MODEL,
+                max_tokens: 1024,
+                system,
+                messages,
+                tools: CREATE_TOOLS,
+                tool_choice: { type: "any" },
+              });
+              logUsage("create-chat-forced", FAST_MODEL, forced.usage, {
+                brandId: brand.id,
+              });
+              messages.push({ role: "assistant", content: forced.content });
+              const forcedParts: string[] = [];
+              for (const block of forced.content) {
+                if (block.type === "text") forcedParts.push(block.text);
+                if (block.type === "tool_use") {
+                  await dispatchTool(block, state, dispatchCtx);
+                }
+              }
+              const forcedReply = joinReplySegments(forcedParts);
+              if (forcedReply) {
+                replyParts.length = 0;
+                replyParts.push(forcedReply);
+              }
+            } catch (err) {
+              logError("api:/api/create/chat:forced-action", err);
+            }
+          }
+
+          // Never leave the user hanging: a turn that made nothing, offered no
+          // choices, and asked nothing gets one more step to ask the next question.
+          const askedSomething =
+            /\?/.test(joinReplySegments(replyParts)) ||
+            Boolean(state.options?.length) ||
+            state.showLookPicker;
+          if (!state.draftId && !state.campaign && !askedSomething) {
+            try {
+              pushUserNote(
+                messages,
+                "SYSTEM NOTE: your reply didn't ask anything or move things forward, so the user " +
+                  "has nothing to answer. Continue now: ask the next question you need, with " +
+                  "tappable options when real choices exist. One short reply, no recap.",
+              );
+              send("status", { label: "Thinking" });
+              const nudged = await call();
+              logUsage("create-chat-nudge", DRAFT_MODEL, nudged.usage, { brandId: brand.id });
+              for (const block of nudged.content) {
+                if (block.type === "text") replyParts.push(block.text);
+                if (block.type === "tool_use") await dispatchTool(block, state, dispatchCtx);
+              }
+            } catch (err) {
+              logError("api:/api/create/chat:nudge", err);
+            }
+          }
+
+          let reply = joinReplySegments(replyParts);
+          if (!reply) {
+            reply = state.draftId
+              ? "Done, opening your draft now."
+              : state.campaign
+                ? "Planning it now."
+                : "What's the one thing this email needs to land?";
+          }
+          // Chat bubbles render as plain text, so any markdown the model slipped in
+          // would reach the user as literal asterisks. The prompt forbids it; this
+          // enforces it.
+          reply = stripMarkdown(stripEmDashes(reply));
+
+          const readyToGenerate = !!(
+            state.brief.goal &&
+            state.brief.key_message &&
+            state.topicId
+          );
+
+          // Mirror the exchange into chat_state so a page reload can resume the
+          // thread (getLatestActiveCampaign + hydration in page.tsx/CreateAgent).
+          // Only the plain text is kept, not the intermediate tool_use/tool_result
+          // blocks: their effects are already captured in brief/topic_id/memory,
+          // which are re-injected fresh every turn, so replaying tool minutiae adds
+          // tokens without adding information.
+          const transcript: ChatMsg[] = [
+            ...(history ?? []).slice(-38),
+            {
+              role: "user" as const,
+              content: message.trim(),
+              ...(sanitizedImages ? { images: sanitizedImages } : {}),
+            },
+            { role: "assistant" as const, content: reply },
+          ].slice(-40);
+
+          // series persists across turns (a follow-up message must not wipe the
+          // card): keep whatever this turn produced, else what the campaign had.
+          const series = state.series ?? campaign.chat_state?.series ?? null;
+
+          await updateCampaign(campaign.id, {
+            brief: state.brief,
+            topic_id: state.topicId,
+            chat_state: { messages: transcript, auto: autoMode, ...(series ? { series } : {}) },
+            ...(state.draftId || state.series
+              ? { status: "generating" as const }
+              : {}),
+          });
+
+          const card = buildBriefCard({
+            brand,
+            strategy,
+            primaryIcp,
+            products,
+            brief: state.brief,
+            topicTitle: state.topicTitle,
+            funnelStage: state.funnelStage,
+          });
+
+          send("done", {
+            reply,
+            campaignId: campaign.id,
+            topicId: state.topicId,
+            brief: state.brief,
+            card,
+            options: state.options,
+            readyToGenerate,
+            draftId: state.draftId,
+            channel: state.channel,
+            series,
+            campaign: state.campaign,
+            showLookPicker: state.showLookPicker,
+            auto: autoMode,
+          });
+        } catch (err) {
+          logError("api:/api/create/chat", err);
+          send("error", { message: "The create agent hit a snag. Try again." });
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            // already closed
           }
         }
-        const forcedReply = joinReplySegments(forcedParts);
-        if (forcedReply) {
-          replyParts.length = 0;
-          replyParts.push(forcedReply);
-        }
-      } catch (err) {
-        logError("api:/api/create/chat:forced-action", err);
-      }
-    }
-
-    let reply = joinReplySegments(replyParts);
-    if (!reply) {
-      reply = state.draftId
-        ? "Done, opening your draft now."
-        : state.campaignSummary
-          ? "Planning it now."
-          : "What's the one thing this email needs to land?";
-    }
-    // Chat bubbles render as plain text, so any markdown the model slipped in
-    // would reach the user as literal asterisks. The prompt forbids it; this
-    // enforces it.
-    reply = stripMarkdown(stripEmDashes(reply));
-
-    const readyToGenerate = !!(
-      state.brief.goal &&
-      state.brief.key_message &&
-      state.topicId
-    );
-
-    // Mirror the exchange into chat_state so a page reload can resume the
-    // thread (getLatestActiveCampaign + hydration in page.tsx/CreateAgent).
-    // Only the plain text is kept, not the intermediate tool_use/tool_result
-    // blocks: their effects are already captured in brief/topic_id/memory,
-    // which are re-injected fresh every turn, so replaying tool minutiae adds
-    // tokens without adding information.
-    const transcript: ChatMsg[] = [
-      ...(history ?? []).slice(-38),
-      {
-        role: "user" as const,
-        content: message.trim(),
-        ...(sanitizedImages ? { images: sanitizedImages } : {}),
       },
-      { role: "assistant" as const, content: reply },
-    ].slice(-40);
-
-    // series persists across turns (a follow-up message must not wipe the
-    // card): keep whatever this turn produced, else what the campaign had.
-    const series = state.series ?? campaign.chat_state?.series ?? null;
-
-    await updateCampaign(campaign.id, {
-      brief: state.brief,
-      topic_id: state.topicId,
-      chat_state: { messages: transcript, auto: autoMode, ...(series ? { series } : {}) },
-      ...(state.draftId || state.series
-        ? { status: "generating" as const }
-        : {}),
     });
 
-    const card = buildBriefCard({
-      brand,
-      strategy,
-      primaryIcp,
-      products,
-      brief: state.brief,
-      topicTitle: state.topicTitle,
-      funnelStage: state.funnelStage,
-    });
-
-    return NextResponse.json({
-      reply,
-      campaignId: campaign.id,
-      topicId: state.topicId,
-      brief: state.brief,
-      card,
-      options: state.options,
-      readyToGenerate,
-      draftId: state.draftId,
-      channel: state.channel,
-      series,
-      campaign: state.campaignSummary ? { summary: state.campaignSummary } : null,
-      auto: autoMode,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
     });
   } catch (err) {
     logError("api:/api/create/chat", err);
@@ -575,6 +715,8 @@ async function dispatchTool(
     campaignId: string;
     /** The flyer look picked on Create; social drafts only. */
     lookId?: string;
+    /** Every user message this conversation, oldest first. */
+    userMessages: string[];
   },
 ): Promise<string> {
   switch (block.name) {
@@ -712,8 +854,21 @@ async function dispatchTool(
       const input = block.input as StartCampaignInput;
       const summary = stripEmDashes(input.summary ?? "").trim().slice(0, 500);
       if (!summary) return "start_campaign needs a summary of the campaign.";
-      state.campaignSummary = summary;
+      const kinds = FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
+      state.campaign = {
+        summary,
+        kinds: kinds.length ? kinds : [...FACTORY_KINDS],
+        size: input.size === 6 || input.size === 20 ? input.size : 12,
+        days: input.days === 14 ? 14 : 30,
+        // Research spends money: only with the owner's own yes in this chat.
+        research: input.research === true && userAskedForResearch(ctx.userMessages),
+        ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
+      };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
+    }
+    case "show_look_picker": {
+      state.showLookPicker = true;
+      return "The look picker is showing under your reply.";
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;

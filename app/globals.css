@@ -452,6 +452,46 @@ html.light .composer-glow:focus-within {
   animation: dot-pulse 1.15s ease-in-out infinite;
 }
 
+/* The agent's live status line ("Thinking", "Setting up your flyer"): a
+   highlight sweeps across the words while it works. */
+@keyframes text-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    var(--muted) 40%,
+    var(--foreground) 50%,
+    var(--muted) 60%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 1.8s linear infinite;
+}
+
+/* A streaming reply ends in a blinking caret until it's finished. */
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.caret-blink {
+  animation: caret-blink 1s step-end infinite;
+}
+
 /* Cycling composer placeholder: each example fades up as it swaps in.
    Rendered as an overlay span (never blocks the caret); base opacity is 1
    so reduced-motion users simply see the current example. */

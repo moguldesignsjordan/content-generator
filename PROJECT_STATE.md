@@ -49,6 +49,32 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-15: Create chat feels like ChatGPT
+
+- **Claude leads the conversation.** The built-in button steps (and
+  `lib/create-intake.ts`) are gone. Starter cards just send "I want to make a
+  flyer" etc.; the prompt's THE CONVERSATION section covers what it's
+  making, what it's for, photos and what to do with them, then per-kind
+  follow-ups. Campaign settings (what to include, how big) are asked in chat
+  and passed on `start_campaign`; the look picker shows in-thread via a new
+  `show_look_picker` tool.
+- **Research consent is enforced in code too:** `start_campaign.research`
+  only sticks when a user message in the chat asked for research
+  (`research-consent.ts`, tested). The prompt always asks.
+- **`/api/create/chat` streams SSE:** `delta` (reply text), `status`
+  (Thinking, Saving the details, Setting up your flyer...), `reset`, `done`
+  (old JSON payload), `error`. The client shows a live bubble with a caret
+  and a shimmering status line; "Opening your draft" stays up until the
+  draft page loads.
+- **Stall fix (seen live 2026-10-14):** after the opening the agent said
+  "I'll build yours..." with no question and the chat sat waiting. Now a
+  turn that asks nothing, offers nothing, and makes nothing gets one more
+  step to ask the next question.
+- Brief card is collapsed behind "What I have so far" (auto-shown when Auto
+  mode is waiting on Generate).
+- Typecheck + 723 tests + build green. UNCOMMITTED. Not run live: the local
+  Anthropic key is invalid, so this needs a production click-through.
+
 ## Session 2026-10-14 (late night): Create is one guided chat
 
 - **Create is only the chat now** (the One piece | Campaign switch and

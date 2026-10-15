@@ -27,19 +27,6 @@ import {
 import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { readSse } from "@/lib/read-sse";
-import {
-  CAMPAIGN_DAYS,
-  CAMPAIGN_SIZES,
-  CREATE_KIND_LABELS,
-  INTAKE_QUESTIONS,
-  PHOTO_USE_OPTIONS,
-  composeIntakeMessage,
-  nextIntakeStep,
-  type CampaignSettings,
-  type CreateKind,
-  type IntakeStep,
-} from "@/lib/create-intake";
-import { FACTORY_KINDS, FACTORY_KIND_LABELS } from "@/prompts/campaign-formats";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 import type {
   BlogType,
@@ -75,11 +62,6 @@ interface Msg {
   role: "user" | "assistant";
   content: string;
   images?: string[];
-  /** A built-in opening question or answer: shown, never sent to the agent. */
-  local?: boolean;
-  /** The combined opening answers: sent to the agent, not shown (the local
-   * bubbles already show them). */
-  hidden?: boolean;
 }
 
 /** An image staged on the composer, uploaded and hosted but not yet sent. */
@@ -99,62 +81,38 @@ const PROMPT_IDEAS = [
   "Write a blog post about how we work",
 ];
 
-const KIND_QUESTION = "What are we creating?";
+/** The landing's starter cards: each just sends a natural first message. */
+type StarterKind = "email" | "flyer" | "blog" | "campaign";
 
-/** Opening steps answered by typing; the rest are tap-only. */
-const TYPED_STEPS = new Set<IntakeStep>(["purpose", "photos", "photoNote"]);
-
-const STEP_PLACEHOLDERS: Record<IntakeStep, string> = {
-  purpose: "e.g. Our $49 website care plan, starts Nov 1",
-  photos: "Attach photos with the paperclip, or tap an answer",
-  photoNote: "Say what to do with them, or tap an answer",
-  look: "Tap an answer above",
-  campaignKinds: "Tap an answer above",
-  campaignSize: "Tap an answer above",
-  campaignDays: "Tap an answer above",
-  research: "Tap an answer above",
+const STARTERS: Record<StarterKind, { label: string; text: string }> = {
+  email: { label: "Email", text: "I want to write an email" },
+  flyer: { label: "Flyer design", text: "I want to make a flyer" },
+  blog: { label: "Blog post", text: "I want to write a blog post" },
+  campaign: { label: "Campaign", text: "I want to plan a campaign" },
 };
 
-/** Answers to the built-in opening, collected before the agent joins. */
-interface IntakeDraft {
-  kind: CreateKind;
-  purpose: string;
-  photos: string[];
-  photoNote?: string;
-  campaign: CampaignSettings;
+/** A campaign the agent handed to the planner, with its settings. */
+interface CampaignHandoff {
+  summary: string;
+  kinds: FactoryKind[];
+  size: number;
+  days: number;
+  research: boolean;
+  photo_url?: string;
 }
 
-// Research stays off until the owner says yes on the research step.
-const DEFAULT_CAMPAIGN: CampaignSettings = {
-  kinds: [...FACTORY_KINDS],
-  size: 12,
-  days: 30,
-  research: false,
-};
+interface CampaignRun {
+  handoff: CampaignHandoff;
+  campaignId: string;
+  phase: string | null;
+  error: { message: string; outOfCredits?: boolean } | null;
+}
 
 const FACTORY_STEPS = [
   { phase: "researching", label: "Researching trends and competitors" },
   { phase: "planning", label: "Planning the pieces" },
   { phase: "pricing", label: "Pricing the batch" },
 ];
-
-const ask = (content: string): Msg => ({ role: "assistant", content, local: true });
-const answer = (content: string, images?: string[]): Msg => ({
-  role: "user",
-  content,
-  local: true,
-  ...(images?.length ? { images } : {}),
-});
-
-/** The opening bubbles up to the purpose question (and its answer, when known). */
-function openingMessages(kind: CreateKind, purpose?: string): Msg[] {
-  return [
-    ask(KIND_QUESTION),
-    answer(CREATE_KIND_LABELS[kind]),
-    ask(INTAKE_QUESTIONS.purpose),
-    ...(purpose ? [answer(purpose), ask(INTAKE_QUESTIONS.photos)] : []),
-  ];
-}
 
 export interface CreateAgentSuggestion {
   label: string;
@@ -202,7 +160,9 @@ interface CreateResponse {
   draftId?: string | null;
   series?: SeriesDraftRef[] | null;
   /** Set when the agent hands a campaign to the planner. */
-  campaign?: { summary: string } | null;
+  campaign?: CampaignHandoff | null;
+  /** The agent asked the user to pick a design look. */
+  showLookPicker?: boolean;
   auto?: boolean;
   error?: string;
 }
@@ -237,18 +197,16 @@ export function CreateAgent({
   className?: string;
   initial?: CreateAgentInitialState;
   suggestions?: CreateAgentSuggestion[];
-  /** Skips "what are we creating?" (e.g. a "New campaign" link). */
-  startKind?: CreateKind;
+  /** Prefills the composer (e.g. a "New campaign" link). */
+  startKind?: StarterKind;
 }) {
   const router = useRouter();
   const toast = useToast();
-  // A link that names the kind starts past Q1, unless a thread is resuming.
-  const preset = initial?.messages.length ? undefined : startKind;
 
-  const [messages, setMessages] = useState<Msg[]>(
-    () => initial?.messages ?? (preset ? openingMessages(preset) : []),
+  const [messages, setMessages] = useState<Msg[]>(initial?.messages ?? []);
+  const [input, setInput] = useState(
+    startKind && !initial?.messages.length ? `${STARTERS[startKind].text} for ` : "",
   );
-  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -286,23 +244,20 @@ export function CreateAgent({
   // "" (Auto), generation derives the type from the topic as before.
   const [emailType, setEmailType] = useState<EmailType | "">("");
   const [blogType, setBlogType] = useState<BlogType | "">("");
-  // The built-in opening: the current step (null once the agent has taken
-  // over, or when they typed instead of tapping) and the answers so far.
-  const [step, setStep] = useState<IntakeStep | null>(preset ? "purpose" : null);
-  const [intake, setIntake] = useState<IntakeDraft | null>(
-    preset ? { kind: preset, purpose: "", photos: [], campaign: DEFAULT_CAMPAIGN } : null,
-  );
+  // The reply as it streams in, and what the agent is doing right now.
+  const [liveText, setLiveText] = useState("");
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  // Set once a draft is made: stays up until the draft page replaces this one.
+  const [navigating, setNavigating] = useState<string | null>(null);
+  // The agent asked for a design look; the picker shows under its reply.
+  const [lookPickerOpen, setLookPickerOpen] = useState(false);
   // null = the brand default look, same as the factory.
   const [lookId, setLookId] = useState<string | null>(null);
+  // The brief card stays out of the thread unless opened (or Auto mode is
+  // waiting on Generate).
+  const [briefOpen, setBriefOpen] = useState(false);
   // A campaign the agent handed to the planner: progress, or the error to retry.
-  const [campaignRun, setCampaignRun] = useState<{
-    summary: string;
-    campaignId: string;
-    research: boolean;
-    phase: string | null;
-    error: { message: string; outOfCredits?: boolean } | null;
-  } | null>(null);
-  const stepFileRef = useRef<HTMLInputElement>(null);
+  const [campaignRun, setCampaignRun] = useState<CampaignRun | null>(null);
 
   // Which example prompt the empty composer is showing (landing only).
   const [phIndex, setPhIndex] = useState(0);
@@ -422,7 +377,7 @@ export function CreateAgent({
   useEffect(() => {
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, card, options, series]);
+  }, [messages, loading, card, options, series, liveText, liveStatus, lookPickerOpen, campaignRun]);
 
   useEffect(() => {
     if (!confirmClear) return;
@@ -438,116 +393,39 @@ export function CreateAgent({
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
 
-  // runFactory reads the answers after the agent's reply lands, a render or
-  // more after the closure that sent the message was made.
-  const intakeRef = useRef(intake);
-  intakeRef.current = intake;
-
   function send(text: string) {
     const t = text.trim();
     const imageUrls = pendingImages.map((p) => p.url);
     if ((!t && imageUrls.length === 0) || loading || generating) return;
-    if (step) {
-      answerStep(t, imageUrls);
-      return;
-    }
     const displayText =
       t || (imageUrls.length === 1 ? "(attached a photo)" : "(attached photos)");
-    void postToAgent(displayText, imageUrls, false);
-  }
-
-  /** Starts the built-in opening at the purpose question, or past it. */
-  function beginIntake(kind: CreateKind, purpose?: string) {
-    if (loading || generating) return;
-    if (kind === "email" || kind === "blog") setChannel(kind);
-    setIntake({ kind, purpose: purpose ?? "", photos: [], campaign: DEFAULT_CAMPAIGN });
-    setStep(purpose ? "photos" : "purpose");
-    setOptions(null);
-    setActionsOpen(false);
-    setError(null);
-    setMessages((m) => [...m, ...openingMessages(kind, purpose)]);
-  }
-
-  /** A typed (or attached) answer to the current opening step. */
-  function answerStep(text: string, imageUrls: string[]) {
-    if (!step || !intake) return;
-    let draft = intake;
-    let from: IntakeStep = step;
-    let shown = text;
-    if (step === "purpose") {
-      if (!text) return;
-      draft = { ...draft, purpose: text };
-    } else if (step === "photos") {
-      if (imageUrls.length) {
-        draft = { ...draft, photos: imageUrls, ...(text ? { photoNote: text } : {}) };
-        // A note typed alongside the photos answers the next question too.
-        if (text) from = "photoNote";
-        shown =
-          text || (imageUrls.length === 1 ? "(attached a photo)" : `(attached ${imageUrls.length} photos)`);
-      } else {
-        if (!text) return;
-        draft = { ...draft, purpose: `${draft.purpose}\n${text}` };
-      }
-    } else if (step === "photoNote") {
-      draft = { ...draft, photoNote: text };
-    } else {
-      return;
-    }
-    advance(from, draft, answer(shown, step === "photos" ? imageUrls : undefined));
-  }
-
-  /** A tapped answer to the current opening step. */
-  function chooseStep(label: string, patch: Partial<IntakeDraft> = {}) {
-    if (!step || !intake || loading || generating) return;
-    advance(step, { ...intake, ...patch }, answer(label));
-  }
-
-  function advance(from: IntakeStep, draft: IntakeDraft, reply: Msg) {
-    setInput("");
-    setPendingImages([]);
-    setIntake(draft);
-    const next = nextIntakeStep(from, {
-      kind: draft.kind,
-      photoCount: draft.photos.length,
-      campaignKinds: draft.campaign.kinds,
-    });
-    setMessages((m) => [...m, reply, ...(next ? [ask(INTAKE_QUESTIONS[next])] : [])]);
-    setStep(next);
-    if (!next) {
-      const message = composeIntakeMessage({
-        kind: draft.kind,
-        purpose: draft.purpose,
-        photoCount: draft.photos.length,
-        photoNote: draft.photoNote,
-        lookPicked: Boolean(lookId && lookId !== "none"),
-        ...(draft.kind === "campaign" ? { campaign: draft.campaign } : {}),
-      });
-      void postToAgent(message, draft.photos, true);
-    }
-  }
-
-  async function postToAgent(text: string, imageUrls: string[], hidden: boolean) {
     setInput("");
     setPendingImages([]);
     setError(null);
     setHint(false);
     setOptions(null);
     setActionsOpen(false);
+    setLookPickerOpen(false);
     setMessages((m) => [
       ...m,
       {
         role: "user",
-        content: text,
+        content: displayText,
         ...(imageUrls.length ? { images: imageUrls } : {}),
-        ...(hidden ? { hidden: true } : {}),
       },
     ]);
+    void postToAgent(displayText, imageUrls);
+  }
+
+  async function postToAgent(text: string, imageUrls: string[]) {
     setLoading(true);
-    const hintTimer = setTimeout(() => setHint(true), 6000);
+    setLiveText("");
+    setLiveStatus(imageUrls.length ? "Looking at your photos" : "Thinking");
+    const hintTimer = setTimeout(() => setHint(true), 8000);
     const controller = new AbortController();
     // This route can chain several tool round-trips server-side (up to
     // maxDuration = 300s); abort a good margin before that so a hung request
-    // surfaces as an error instead of spinning the typing indicator forever.
+    // surfaces as an error instead of spinning forever.
     const timeoutTimer = setTimeout(() => controller.abort(), 280_000);
 
     try {
@@ -556,13 +434,7 @@ export function CreateAgent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          history: messages
-            .filter((m) => !m.local)
-            .map((m) => ({
-              role: m.role,
-              content: m.content,
-              ...(m.images ? { images: m.images } : {}),
-            })),
+          history: messages,
           campaignId,
           images: imageUrls.length ? imageUrls : undefined,
           auto: mode === "auto",
@@ -570,25 +442,48 @@ export function CreateAgent({
         }),
         signal: controller.signal,
       });
-      const data = (await res.json()) as CreateResponse;
-      if (!res.ok || !data.reply) {
-        throw new Error(data.error ?? "Something went wrong.");
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Something went wrong.");
       }
+      // Holders, not lets: TypeScript can't see assignments made in the callback.
+      const out: { data?: CreateResponse; failure?: string } = {};
+      await readSse(res, (event, payload) => {
+        if (event === "delta" && typeof payload.text === "string") {
+          const delta = payload.text;
+          setLiveStatus(null);
+          setLiveText((cur) => cur + delta);
+        } else if (event === "reset") {
+          setLiveText("");
+        } else if (event === "status" && typeof payload.label === "string") {
+          setLiveStatus(payload.label);
+        } else if (event === "done") {
+          out.data = payload as CreateResponse;
+        } else if (event === "error") {
+          out.failure = String(payload.message ?? "Something went wrong.");
+        }
+      });
+      if (out.failure) throw new Error(out.failure);
+      const data = out.data;
+      if (!data?.reply) throw new Error("The connection dropped. Try sending that again.");
+
       setMessages((m) => [...m, { role: "assistant", content: data.reply! }]);
       if (data.campaignId) setCampaignId(data.campaignId);
       setTopicId(data.topicId ?? null);
       setCard(data.card ?? null);
       setOptions(data.options ?? null);
+      setLookPickerOpen(Boolean(data.showLookPicker));
       if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
       if (typeof data.auto === "boolean") setMode(data.auto ? "auto" : "guided");
-      // The agent already generated (or reused) a draft this turn; skip the
-      // manual Generate fallback and open it directly.
+      // The agent already made a draft this turn: open it, and keep the
+      // working line up until the draft page takes over.
       if (data.draftId) {
+        setNavigating("Opening your draft");
         router.push(`/drafts/${data.draftId}`);
       }
-      if (data.campaign?.summary && data.campaignId) {
-        void runFactory(data.campaign.summary, data.campaignId);
+      if (data.campaign && data.campaignId) {
+        void runFactory(data.campaign, data.campaignId);
       }
     } catch (err) {
       const timedOut = err instanceof Error && err.name === "AbortError";
@@ -612,6 +507,8 @@ export function CreateAgent({
       clearTimeout(hintTimer);
       clearTimeout(timeoutTimer);
       setLoading(false);
+      setLiveText("");
+      setLiveStatus(null);
       setHint(false);
       inputRef.current?.focus();
     }
@@ -638,21 +535,18 @@ export function CreateAgent({
     setError(null);
     setActionsOpen(true);
     setPendingImages([]);
-    setStep(null);
-    setIntake(null);
+    setLookPickerOpen(false);
     setLookId(null);
+    setBriefOpen(false);
     setCampaignRun(null);
   }
 
   /** Runs the planner on a campaign the agent handed off, then opens its plan. */
-  async function runFactory(summary: string, chatCampaignId: string) {
-    const draft = intakeRef.current;
-    const settings = draft?.campaign ?? DEFAULT_CAMPAIGN;
+  async function runFactory(handoff: CampaignHandoff, chatCampaignId: string) {
     setCampaignRun({
-      summary,
+      handoff,
       campaignId: chatCampaignId,
-      research: settings.research,
-      phase: settings.research ? "researching" : "planning",
+      phase: handoff.research ? "researching" : "planning",
       error: null,
     });
     try {
@@ -660,13 +554,13 @@ export function CreateAgent({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sentence: summary,
-          kinds: settings.kinds,
-          size: settings.size,
-          days: settings.days,
-          research: settings.research,
+          sentence: handoff.summary,
+          kinds: handoff.kinds,
+          size: handoff.size,
+          days: handoff.days,
+          research: handoff.research,
           campaign_id: chatCampaignId,
-          ...(draft?.photos[0] ? { photo_url: draft.photos[0] } : {}),
+          ...(handoff.photo_url ? { photo_url: handoff.photo_url } : {}),
           ...(lookId ? { look_id: lookId } : {}),
         }),
       });
@@ -679,21 +573,21 @@ export function CreateAgent({
           outOfCredits: data.outOfCredits,
         });
       }
-      let planned: string | null = null;
-      let failure: string | null = null;
+      const out: { planned?: string; failure?: string } = {};
       await readSse(res, (event, data) => {
         if (event === "phase" && typeof data.phase === "string") {
           const phase = data.phase;
           setCampaignRun((r) => (r ? { ...r, phase } : r));
         } else if (event === "done" && typeof data.campaignId === "string") {
-          planned = data.campaignId;
+          out.planned = data.campaignId;
         } else if (event === "error") {
-          failure = String(data.message ?? "Couldn't plan the campaign.");
+          out.failure = String(data.message ?? "Couldn't plan the campaign.");
         }
       });
-      if (failure) throw new Error(failure);
-      if (!planned) throw new Error("The connection dropped before the plan was ready. Try again.");
-      router.push(`/campaigns/${planned}`);
+      if (out.failure) throw new Error(out.failure);
+      if (!out.planned) throw new Error("The connection dropped before the plan was ready. Try again.");
+      setCampaignRun((r) => (r ? { ...r, phase: "opening" } : r));
+      router.push(`/campaigns/${out.planned}`);
     } catch (e) {
       const err = e as Error & { outOfCredits?: boolean };
       setCampaignRun((r) =>
@@ -783,7 +677,7 @@ export function CreateAgent({
             />
             {actionsOpen && (
               <ActionGrid
-                onPick={(kind) => beginIntake(kind)}
+                onPick={(kind) => send(STARTERS[kind].text)}
                 disabled={loading || generating}
                 className="mt-3"
               />
@@ -798,7 +692,7 @@ export function CreateAgent({
                     <button
                       key={s.text}
                       type="button"
-                      onClick={() => beginIntake("email", s.text)}
+                      onClick={() => send(s.text)}
                       disabled={loading || generating}
                       className="max-w-full truncate rounded-full border border-border bg-surface-2 px-3.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
                     >
@@ -815,6 +709,16 @@ export function CreateAgent({
         <>
           <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
             <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
+            {card && (
+              <button
+                type="button"
+                onClick={() => setBriefOpen((v) => !v)}
+                aria-expanded={briefOpen}
+                className="ml-auto mr-1 shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+              >
+                {briefOpen ? "Hide what I have" : "What I have so far"}
+              </button>
+            )}
             <button
               type="button"
               onClick={clearChat}
@@ -827,7 +731,7 @@ export function CreateAgent({
             ref={scrollRef}
             className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
           >
-            {card && (
+            {card && (briefOpen || (ready && mode === "auto")) && (
               <BriefCardView
                 card={card}
                 disabled={loading || generating}
@@ -871,145 +775,9 @@ export function CreateAgent({
 
             {series && series.length > 0 && <SeriesCardView items={series} />}
 
-            {messages.map((m, i) => (m.hidden ? null : <Bubble key={i} msg={m} />))}
-
-            {step && intake && !loading && (
-              <div className="bubble-in space-y-3">
-                {step === "photos" && (
-                  <div className="flex flex-wrap gap-2">
-                    {pendingImages.length > 0 ? (
-                      <StepChip
-                        primary
-                        label={`Continue with ${pendingImages.length} photo${pendingImages.length === 1 ? "" : "s"}`}
-                        onClick={() => answerStep(input.trim(), pendingImages.map((p) => p.url))}
-                        disabled={uploading}
-                      />
-                    ) : null}
-                    <StepChip
-                      label={uploading ? "Uploading..." : "Upload photos"}
-                      onClick={() => stepFileRef.current?.click()}
-                      disabled={uploading}
-                    />
-                    <StepChip label="Pick from saved" onClick={() => setLibraryOpen(true)} />
-                    {pendingImages.length === 0 && (
-                      <StepChip label="No photos" onClick={() => chooseStep("No photos")} />
-                    )}
-                    <input
-                      ref={stepFileRef}
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        if (files.length) void uploadPendingImages(files);
-                        e.target.value = "";
-                      }}
-                    />
-                  </div>
-                )}
-                {step === "photoNote" && (
-                  <div className="flex flex-wrap gap-2">
-                    {PHOTO_USE_OPTIONS[intake.kind].map((opt) => (
-                      <StepChip key={opt} label={opt} onClick={() => chooseStep(opt, { photoNote: opt })} />
-                    ))}
-                    <StepChip label="Skip" onClick={() => chooseStep("Skip")} />
-                  </div>
-                )}
-                {step === "look" && (
-                  <div className="space-y-3">
-                    <LookPicker value={lookId} onChange={setLookId} />
-                    <StepChip primary label="Continue" onClick={() => chooseStep("Continue with this look")} />
-                  </div>
-                )}
-                {step === "campaignKinds" && (
-                  <div className="flex flex-wrap gap-2">
-                    {FACTORY_KINDS.map((k) => {
-                      const on = intake.campaign.kinds.includes(k);
-                      return (
-                        <StepChip
-                          key={k}
-                          label={FACTORY_KIND_LABELS[k]}
-                          pressed={on}
-                          onClick={() =>
-                            setIntake({
-                              ...intake,
-                              campaign: {
-                                ...intake.campaign,
-                                kinds: on
-                                  ? intake.campaign.kinds.filter((x) => x !== k)
-                                  : [...intake.campaign.kinds, k],
-                              },
-                            })
-                          }
-                        />
-                      );
-                    })}
-                    <StepChip
-                      primary
-                      label="Continue"
-                      disabled={intake.campaign.kinds.length === 0}
-                      onClick={() =>
-                        chooseStep(
-                          FACTORY_KINDS.filter((k) => intake.campaign.kinds.includes(k))
-                            .map((k: FactoryKind) => FACTORY_KIND_LABELS[k])
-                            .join(", "),
-                        )
-                      }
-                    />
-                  </div>
-                )}
-                {step === "campaignSize" && (
-                  <div className="flex flex-wrap gap-2">
-                    {CAMPAIGN_SIZES.map((size) => (
-                      <StepChip
-                        key={size}
-                        label={size === 12 ? "12 (recommended)" : String(size)}
-                        onClick={() =>
-                          chooseStep(`${size} pieces`, { campaign: { ...intake.campaign, size } })
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-                {step === "campaignDays" && (
-                  <div className="flex flex-wrap gap-2">
-                    {CAMPAIGN_DAYS.map((days) => {
-                      const label = days === 14 ? "2 weeks" : "30 days (recommended)";
-                      return (
-                        <StepChip
-                          key={days}
-                          label={label}
-                          onClick={() =>
-                            chooseStep(label, { campaign: { ...intake.campaign, days } })
-                          }
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-                {step === "research" && (
-                  <div className="flex flex-wrap gap-2">
-                    <StepChip
-                      label="Yes, research it"
-                      onClick={() =>
-                        chooseStep("Yes, research it", {
-                          campaign: { ...intake.campaign, research: true },
-                        })
-                      }
-                    />
-                    <StepChip
-                      label="No, just plan it"
-                      onClick={() =>
-                        chooseStep("No, just plan it", {
-                          campaign: { ...intake.campaign, research: false },
-                        })
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            {messages.map((m, i) => (
+              <Bubble key={i} msg={m} />
+            ))}
 
             {options && options.length > 0 && !loading && (
               <div className="bubble-in flex flex-wrap gap-2">
@@ -1027,12 +795,35 @@ export function CreateAgent({
               </div>
             )}
 
-            {loading && (
-              <div className="bubble-in flex items-end gap-2">
-                <AgentDot className="mb-0.5" />
-                <div className="rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
-                  <Typing hint={hint} />
-                </div>
+            {lookPickerOpen && !loading && (
+              <div className="bubble-in space-y-3 rounded-2xl border border-border p-3">
+                <LookPicker value={lookId} onChange={setLookId} />
+                <StepChip
+                  primary
+                  label="Use this"
+                  onClick={() =>
+                    send(
+                      lookId === "none"
+                        ? "No saved look, use your own layouts."
+                        : lookId
+                          ? "I picked a look to follow."
+                          : "Go with my default look.",
+                    )
+                  }
+                />
+              </div>
+            )}
+
+            {(loading || navigating) && (
+              <div className="space-y-2">
+                {liveText && <Bubble msg={{ role: "assistant", content: liveText }} live />}
+                {(!liveText || liveStatus || navigating) && (
+                  <WorkingLine
+                    label={navigating ?? liveStatus ?? "Thinking"}
+                    hint={hint && !navigating}
+                    showDot={!liveText}
+                  />
+                )}
               </div>
             )}
 
@@ -1057,8 +848,7 @@ export function CreateAgent({
               onOpenLibrary={() => setLibraryOpen(true)}
               uploading={uploading}
               ready={ready}
-              disabled={loading || generating || Boolean(campaignRun) || (step !== null && !TYPED_STEPS.has(step))}
-              placeholder={step ? STEP_PLACEHOLDERS[step] : undefined}
+              disabled={loading || generating || Boolean(campaignRun) || Boolean(navigating)}
               pendingImages={pendingImages}
               onRemoveImage={(url) =>
                 setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
@@ -1174,7 +964,6 @@ function ComposerBar({
   ready,
   disabled,
   placeholderCycle,
-  placeholder,
   pendingImages,
   onRemoveImage,
 }: {
@@ -1198,8 +987,6 @@ function ComposerBar({
   /** When set (landing), the placeholder cycles through example prompts as a
    * faded-in overlay; the native placeholder is suppressed in its favor. */
   placeholderCycle?: string;
-  /** Overrides the default placeholder (the opening steps say what to type). */
-  placeholder?: string;
   /** Images uploaded and staged, waiting to ride with the next send. */
   pendingImages?: PendingImage[];
   onRemoveImage?: (url: string) => void;
@@ -1295,8 +1082,9 @@ function ComposerBar({
           placeholder={
             cycling
               ? undefined
-              : placeholder ??
-                (ready ? "Tweak the brief, or hit Generate" : "What do you want to make?")
+              : ready
+                ? "Tweak the brief, or hit Generate"
+                : "Message"
           }
           className="max-h-32 min-h-[40px] w-full resize-none bg-transparent py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
         />
@@ -1333,7 +1121,7 @@ function ActionGrid({
   disabled,
   className,
 }: {
-  onPick: (kind: CreateKind) => void;
+  onPick: (kind: StarterKind) => void;
   disabled: boolean;
   className?: string;
 }) {
@@ -1341,25 +1129,25 @@ function ActionGrid({
     <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}>
       <ActionButton
         icon={<MailIcon size={15} />}
-        label={CREATE_KIND_LABELS.email}
+        label={STARTERS.email.label}
         onClick={() => onPick("email")}
         disabled={disabled}
       />
       <ActionButton
         icon={<FlyerIcon size={15} />}
-        label={CREATE_KIND_LABELS.flyer}
+        label={STARTERS.flyer.label}
         onClick={() => onPick("flyer")}
         disabled={disabled}
       />
       <ActionButton
         icon={<BlogIcon size={15} />}
-        label={CREATE_KIND_LABELS.blog}
+        label={STARTERS.blog.label}
         onClick={() => onPick("blog")}
         disabled={disabled}
       />
       <ActionButton
         icon={<MegaphoneIcon size={15} />}
-        label={CREATE_KIND_LABELS.campaign}
+        label={STARTERS.campaign.label}
         onClick={() => onPick("campaign")}
         disabled={disabled}
       />
@@ -1407,14 +1195,8 @@ function CampaignRunView({
   run,
   onRetry,
 }: {
-  run: {
-    summary: string;
-    campaignId: string;
-    research: boolean;
-    phase: string | null;
-    error: { message: string; outOfCredits?: boolean } | null;
-  };
-  onRetry: (summary: string, campaignId: string) => void;
+  run: CampaignRun;
+  onRetry: (handoff: CampaignHandoff, campaignId: string) => void;
 }) {
   if (run.error) {
     return (
@@ -1427,14 +1209,14 @@ function CampaignRunView({
             </a>
           )}
         </p>
-        <StepChip primary label="Try again" onClick={() => onRetry(run.summary, run.campaignId)} />
+        <StepChip primary label="Try again" onClick={() => onRetry(run.handoff, run.campaignId)} />
       </div>
     );
   }
-  const steps = run.research
+  const steps = run.handoff.research
     ? FACTORY_STEPS
     : FACTORY_STEPS.filter((s) => s.phase !== "researching");
-  const active = steps.findIndex((s) => s.phase === run.phase);
+  const active = run.phase === "opening" ? steps.length : steps.findIndex((s) => s.phase === run.phase);
   return (
     <ol className="bubble-in space-y-2.5 rounded-2xl bg-surface-2 px-4 py-3" aria-live="polite">
       {steps.map((s, i) => (
@@ -1446,10 +1228,14 @@ function CampaignRunView({
           ) : (
             <span className="h-5 w-5" />
           )}
-          <span className={i <= active ? "text-foreground" : "text-muted"}>{s.label}</span>
+          <span className={i === active ? "text-shimmer" : i < active ? "text-foreground" : "text-muted"}>
+            {s.label}
+          </span>
         </li>
       ))}
-      <li className="pl-8 text-[13px] text-muted">This takes a minute or two. The plan opens when it's ready.</li>
+      <li className="pl-8 text-[13px] text-muted">
+        {run.phase === "opening" ? "Opening your plan..." : "This takes a minute or two. The plan opens when it's ready."}
+      </li>
     </ol>
   );
 }
@@ -1497,7 +1283,8 @@ function AgentDot({ className }: { className?: string }) {
   );
 }
 
-function Bubble({ msg }: { msg: Msg }) {
+/** `live`: the reply is still streaming in, so it ends in a blinking caret. */
+function Bubble({ msg, live }: { msg: Msg; live?: boolean }) {
   const isUser = msg.role === "user";
   if (isUser) {
     return (
@@ -1526,6 +1313,9 @@ function Bubble({ msg }: { msg: Msg }) {
       <AgentDot className="mb-0.5" />
       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground">
         {msg.content}
+        {live && (
+          <span aria-hidden className="caret-blink ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[3px] bg-foreground" />
+        )}
       </div>
     </div>
   );
@@ -2119,21 +1909,34 @@ function EditableRow({
 
 /* Thinking state in brand color: the three spectral dots pulse in sequence,
    amber into magenta into cyan. Reduced motion collapses to steady dots. */
-function Typing({ hint }: { hint: boolean }) {
+/** What the agent is doing right now: pulsing spectrum dots and a shimmering
+ * label ("Thinking", "Setting up your flyer"), so a long step never looks
+ * frozen. */
+function WorkingLine({
+  label,
+  hint,
+  showDot,
+}: {
+  label: string;
+  hint: boolean;
+  showDot: boolean;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="inline-flex gap-1">
-        {(["bg-amber", "bg-magenta", "bg-cyan"] as const).map((tone, i) => (
-          <span
-            key={tone}
-            className={cn("dot-spectrum h-1.5 w-1.5 rounded-full", tone)}
-            style={{ animationDelay: `${i * 0.18}s` }}
-          />
-        ))}
-      </span>
-      <span className="text-[11px] text-muted-2">
-        {hint ? "drafting can take a minute…" : "thinking"}
-      </span>
+    <div className="bubble-in flex items-end gap-2" role="status" aria-live="polite">
+      {showDot ? <AgentDot className="mb-0.5" /> : <span className="w-7 shrink-0" />}
+      <div className="flex items-center gap-2.5 rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
+        <span className="inline-flex gap-1">
+          {(["bg-amber", "bg-magenta", "bg-cyan"] as const).map((tone, i) => (
+            <span
+              key={tone}
+              className={cn("dot-spectrum h-1.5 w-1.5 rounded-full", tone)}
+              style={{ animationDelay: `${i * 0.18}s` }}
+            />
+          ))}
+        </span>
+        <span className="text-shimmer text-[13px] font-medium">{label}</span>
+        {hint && <span className="text-[11px] text-muted-2">this can take a minute</span>}
+      </div>
     </div>
   );
 }

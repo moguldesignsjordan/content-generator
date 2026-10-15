@@ -76,13 +76,16 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
 
 export interface StartCampaignInput {
   summary: string;
+  kinds?: ("social" | "ad" | "email" | "blog")[];
+  size?: number;
+  days?: number;
+  research?: boolean;
 }
 
 /**
- * Ends a campaign interview: the summary becomes the factory's one-line
- * description, which feeds the optional research, the plan, and every piece's
- * brief. The settings picked in the app (what to make, how many, how long,
- * research or not) travel separately from the client.
+ * Ends a campaign conversation: the summary becomes the factory's one-line
+ * description, which feeds the plan and every piece's brief. The client runs
+ * the planner with these settings and opens the editable plan.
  */
 export const START_CAMPAIGN_TOOL: Anthropic.Tool = {
   name: "start_campaign",
@@ -100,9 +103,43 @@ export const START_CAMPAIGN_TOOL: Anthropic.Tool = {
           "every real detail the user gave (offer, price, deadline, who it's " +
           "for, a real result, what to do with their photos). Never invent one.",
       },
+      kinds: {
+        type: "array",
+        items: { type: "string", enum: ["social", "ad", "email", "blog"] },
+        description:
+          "What the campaign includes: social posts, paid ads, emails, blog posts. " +
+          "All four when they said everything or didn't care.",
+      },
+      size: {
+        type: "integer",
+        enum: [6, 12, 20],
+        description: "How many pieces. 12 when they didn't say.",
+      },
+      days: {
+        type: "integer",
+        enum: [14, 30],
+        description: "Spread over 14 or 30 days. 30 when they didn't say.",
+      },
+      research: {
+        type: "boolean",
+        description:
+          "True ONLY when the user said yes to researching the web first. " +
+          "False when they said no or were never asked.",
+      },
     },
-    required: ["summary"],
+    required: ["summary", "research"],
   },
+};
+
+/** Shows the design-look picker under the reply, so the user can pick one of
+ * their saved looks (example ads) for a flyer to follow. */
+export const SHOW_LOOK_PICKER_TOOL: Anthropic.Tool = {
+  name: "show_look_picker",
+  description:
+    "For a flyer only: shows their saved looks (example ads to follow) under " +
+    "your reply so they can tap one. Call it in the same turn you ask about " +
+    "the feel. Their pick arrives as their next message.",
+  input_schema: { type: "object", properties: {} },
 };
 
 export interface ListRecentContentInput {
@@ -301,6 +338,7 @@ export const FORGET_TOOL: Anthropic.Tool = {
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   GENERATE_CONTENT_TOOL,
   START_CAMPAIGN_TOOL,
+  SHOW_LOOK_PICKER_TOOL,
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,
