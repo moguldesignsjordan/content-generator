@@ -45,6 +45,8 @@ import type {
   SeriesDraftRef,
 } from "@/lib/db/types";
 import { LookPicker } from "./look-picker";
+import { ChatPreviewCard, type ChatPreview, type QueuedPreviewAction } from "./chat-preview-card";
+import type { PreviewAction } from "@/lib/chat-preview";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
 // unset, generation derives the type from the topic as before; picking one
@@ -194,6 +196,9 @@ interface CreateResponse {
   campaign?: CampaignHandoff | null;
   /** The agent asked the user to pick a design look. */
   showLookPicker?: boolean;
+  /** The piece shown live in the thread, and a change the agent asked for. */
+  preview?: ChatPreview | null;
+  previewAction?: PreviewAction | null;
   auto?: boolean;
   error?: string;
 }
@@ -207,6 +212,7 @@ export interface CreateAgentInitialState {
   topicId: string | null;
   ready: boolean;
   series: SeriesDraftRef[] | null;
+  preview: ChatPreview | null;
   auto: boolean;
 }
 
@@ -214,8 +220,8 @@ export interface CreateAgentInitialState {
  * The dashboard creation agent: a brief-then-generate chat that turns "what
  * are we creating today?" into an editable email brief and drives it all the
  * way to a generated draft. Posts to /api/create/chat; when the agent calls
- * generate_content, the response carries a draftId and this component
- * navigates to the draft review page automatically. The brief card + manual
+ * generate_content, the piece generates live in the thread (ChatPreviewCard),
+ * and later changes the agent asks for run on that card. The brief card + manual
  * Generate button remain as a fallback for turns where the agent asked a
  * clarifying question instead.
  */
@@ -250,6 +256,8 @@ export function CreateAgent({
   const [campaignId, setCampaignId] = useState<string | null>(initial?.campaignId ?? null);
   const [options, setOptions] = useState<Option[] | null>(null);
   const [series, setSeries] = useState<SeriesDraftRef[] | null>(initial?.series ?? null);
+  const [preview, setPreview] = useState<ChatPreview | null>(initial?.preview ?? null);
+  const [queued, setQueued] = useState<QueuedPreviewAction | null>(null);
   const [ready, setReady] = useState(initial?.ready ?? false);
   const [generating, setGenerating] = useState(false);
   // An attached image is uploaded before the user can send, so the paperclip
@@ -277,8 +285,6 @@ export function CreateAgent({
   // The reply as it streams in, and what the agent is doing right now.
   const [liveText, setLiveText] = useState("");
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
-  // Set once a draft is made: stays up until the draft page replaces this one.
-  const [navigating, setNavigating] = useState<string | null>(null);
   // The agent asked for a design look; the picker shows under its reply.
   const [lookPickerOpen, setLookPickerOpen] = useState(false);
   // null = the brand default look, same as the factory.
@@ -407,7 +413,7 @@ export function CreateAgent({
   useEffect(() => {
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, card, options, series, liveText, liveStatus, lookPickerOpen, campaignRun]);
+  }, [messages, loading, card, options, series, preview, liveText, liveStatus, lookPickerOpen, campaignRun]);
 
   useEffect(() => {
     if (!confirmClear) return;
@@ -517,12 +523,9 @@ export function CreateAgent({
       if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
       if (typeof data.auto === "boolean") setMode(data.auto ? "auto" : "guided");
-      // The agent already made a draft this turn: open it, and keep the
-      // working line up until the draft page takes over.
-      if (data.draftId) {
-        setNavigating("Opening your draft");
-        router.push(`/drafts/${data.draftId}`);
-      }
+      if (data.preview) setPreview(data.preview);
+      // Replaced every turn, so a new card never replays an old change.
+      setQueued(data.previewAction ? { action: data.previewAction, nonce: Date.now() } : null);
       if (data.campaign && data.campaignId) {
         void runFactory(data.campaign, data.campaignId);
       }
@@ -579,6 +582,8 @@ export function CreateAgent({
     setLookPickerOpen(false);
     setLookId(null);
     setBriefOpen(false);
+    setPreview(null);
+    setQueued(null);
     setCampaignRun(null);
   }
 
@@ -847,6 +852,8 @@ export function CreateAgent({
                   <Bubble key={i} msg={m} />
                 ))}
 
+                {preview && <ChatPreviewCard key={preview.draftId} preview={preview} queued={queued} />}
+
                 {options && options.length > 0 && !loading && (
                   <div className="bubble-in flex flex-wrap gap-2">
                     {options.map((opt) => (
@@ -882,13 +889,13 @@ export function CreateAgent({
                   </div>
                 )}
 
-                {(loading || navigating) && (
+                {loading && (
                   <div className="space-y-2">
                     {liveText && <Bubble msg={{ role: "assistant", content: liveText }} live />}
-                    {(!liveText || liveStatus || navigating) && (
+                    {(!liveText || liveStatus) && (
                       <WorkingLine
-                        label={navigating ?? liveStatus ?? "Thinking"}
-                        hint={hint && !navigating}
+                        label={liveStatus ?? "Thinking"}
+                        hint={hint}
                         showDot={!liveText}
                       />
                     )}
@@ -916,7 +923,7 @@ export function CreateAgent({
                   onOpenLibrary={() => setLibraryOpen(true)}
                   uploading={uploading}
                   ready={ready}
-                  disabled={loading || generating || Boolean(campaignRun) || Boolean(navigating)}
+                  disabled={loading || generating || Boolean(campaignRun)}
                   pendingImages={pendingImages}
                   onRemoveImage={(url) =>
                     setPendingImages((imgs) => imgs.filter((i) => i.url !== url))

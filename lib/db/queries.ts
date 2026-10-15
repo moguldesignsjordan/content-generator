@@ -1126,6 +1126,20 @@ export async function deleteBrandIntegration(
   if (error) throw error;
 }
 
+/** The newest draft (highest version) of a content job, or null. */
+export async function getLatestDraftIdForJob(jobId: string): Promise<string | null> {
+  const db = getAdminClient();
+  const { data, error } = await db
+    .from("drafts")
+    .select("id")
+    .eq("job_id", jobId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as string | undefined) ?? null;
+}
+
 /** Returns the highest draft version number for a content job. */
 export async function getLatestDraftVersion(jobId: string): Promise<number> {
   const db = getAdminClient();

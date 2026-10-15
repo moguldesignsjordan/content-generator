@@ -58,7 +58,10 @@ are in git history (`git log -p PROJECT_STATE.md`).
 
 - **Create (`/`) is one chat.** Kind chips (Flyer, Email, Campaign, Blog, Ad)
   then the owner describes it; Claude reflects the details back, asks at most
-  three missing items, and confirms. Streams over SSE. Campaigns hand off to
+  three missing items, and confirms. Streams over SSE. A made piece
+  generates as a live preview in the thread (no jump to the review page);
+  the agent changes it with edit_flyer / revise_piece, which the card runs
+  through the review page's own endpoints. Campaigns hand off to
   the factory (research optional, editable plan, quote, "Test 3 first" or
   "Make all", approve-all).
 - **Pipelines:** email (angle pick, draft, QA that revises once, optional
@@ -92,7 +95,10 @@ are in git history (`git log -p PROJECT_STATE.md`).
    ask it to research something mid-interview. And the flyer style picker
    (Our style, No reference, Add examples) on Create and /flyers/new. And
    the flyer edit sheet's "Add an image" tab (Put it in the design / Copy
-   its style).
+   its style). And the Create chat's live preview card: a flyer and an
+   email generating in the thread, tapping options, asking for a change,
+   attaching a photo for the flyer, and a reload keeping the card. None of
+   the card UI has been seen rendered yet.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

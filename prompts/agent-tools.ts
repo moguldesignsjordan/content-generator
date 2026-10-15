@@ -27,9 +27,11 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
   name: "generate_content",
   description:
     "Call ONCE the brief has a goal and key message and a topic is attached, to " +
-    "generate the draft right now. This creates the draft and opens it " +
-    "immediately, there is no further confirmation step, so only call it when " +
-    "you're actually ready to hand off, not preemptively or mid-clarification.",
+    "generate the draft right now. This creates the draft and it starts " +
+    "generating as a live preview in the chat, there is no further " +
+    "confirmation step, so only call it when you're actually ready, not " +
+    "preemptively or mid-clarification. Changes to a piece already ON SCREEN " +
+    "go through edit_flyer or revise_piece instead.",
   input_schema: {
     type: "object",
     properties: {
@@ -335,8 +337,66 @@ export const FORGET_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface RevisePieceInput {
+  feedback: string;
+}
+
+/** Changes to the flyer ON SCREEN; the chat's preview card applies them. */
+export const EDIT_FLYER_TOOL: Anthropic.Tool = {
+  name: "edit_flyer",
+  description:
+    "Change the flyer that's ON SCREEN in the chat's live preview. Use it for " +
+    "any change the owner asks for on that flyer: switch to another option, " +
+    "change its text, change what the art shows, put a photo from this chat " +
+    "into the design (or copy a photo's style), or re-render it on the Pro " +
+    "image model. Pass only what changes. The preview updates on its own.",
+  input_schema: {
+    type: "object",
+    properties: {
+      option: { type: "integer", description: "Switch to this option number (1-based)." },
+      headline: { type: "string", description: "New headline, exactly as it should appear." },
+      subtext: { type: "string", description: "New supporting line; empty string removes it." },
+      cta: { type: "string", description: "New call to action; empty string removes it." },
+      scene: { type: "string", description: "What the art should show instead, described visually." },
+      photo_url: {
+        type: "string",
+        description: "Exact URL of a photo attached in this chat, to put in the design or copy the style of.",
+      },
+      photo_use: {
+        type: "string",
+        enum: ["place", "style"],
+        description: "place: add the photo's subject into the design (default). style: redraw in the photo's style.",
+      },
+      note: { type: "string", description: "For place: where or how it goes, in their words." },
+      pro: { type: "boolean", description: "Re-render the current option on the Pro image model." },
+    },
+  },
+};
+
+/** A new version of the piece ON SCREEN, rewritten with the owner's notes. */
+export const REVISE_PIECE_TOOL: Anthropic.Tool = {
+  name: "revise_piece",
+  description:
+    "Rewrite the piece ON SCREEN as a new version with the owner's notes: any " +
+    "change to an email or blog post, or a flyer that needs new copy and new " +
+    "options rather than a tweak. The preview shows the new version when it's " +
+    "ready. Not for a different piece: that's generate_content.",
+  input_schema: {
+    type: "object",
+    properties: {
+      feedback: {
+        type: "string",
+        description: "What to change, specific and in the owner's own words.",
+      },
+    },
+    required: ["feedback"],
+  },
+};
+
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   GENERATE_CONTENT_TOOL,
+  EDIT_FLYER_TOOL,
+  REVISE_PIECE_TOOL,
   START_CAMPAIGN_TOOL,
   SHOW_LOOK_PICKER_TOOL,
   LIST_RECENT_CONTENT_TOOL,

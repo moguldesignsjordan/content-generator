@@ -490,9 +490,17 @@ export interface SeriesDraftRef {
   email_type?: string | null;
 }
 
+/** The piece the Create chat made and previews. Any version of its job: the
+ * newest one is what shows. */
+export interface ChatPreviewRef {
+  draft_id: string;
+  channel: "email" | "blog" | "social";
+}
+
 export interface CampaignChatState {
   messages?: OnboardingMessage[];
   series?: SeriesDraftRef[];
+  preview?: ChatPreviewRef;
   auto?: boolean;
   /** Set on campaigns started from the factory (Home): one sentence, then
    * research, a plan table, a quote, and a batch. Chat campaigns never have it. */

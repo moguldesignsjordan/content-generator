@@ -152,6 +152,12 @@ async function loadChat(
       messages: activeMessages,
       topicId: activeCampaign.topic_id,
       series: activeCampaign.chat_state?.series ?? null,
+      preview: activeCampaign.chat_state?.preview
+        ? {
+            draftId: activeCampaign.chat_state.preview.draft_id,
+            channel: activeCampaign.chat_state.preview.channel,
+          }
+        : null,
       auto: activeCampaign.chat_state?.auto ?? false,
       ready: !!(
         activeCampaign.brief.goal &&

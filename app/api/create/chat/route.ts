@@ -36,6 +36,7 @@ import {
 import type {
   Brand,
   CampaignBrief,
+  ChatPreviewRef,
   FactoryKind,
   FunnelStage,
   Product,
@@ -57,6 +58,7 @@ import {
   type ListRecentContentInput,
   type StartCampaignInput,
   type RememberInput,
+  type RevisePieceInput,
   type SaveCompetitorReferenceInput,
   type SelectTopicInput,
   type SuggestedOption,
@@ -68,6 +70,9 @@ import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
 import { extractCompetitorProfile } from "@/lib/pipeline/extract-competitor";
 import { describeOurStyle } from "@/lib/pipeline/generate-flyer";
+import { cleanFlyerEdit, type PreviewAction } from "@/lib/chat-preview";
+import { storageHostFromEnv } from "@/lib/looks";
+import { loadOnScreen, type OnScreen } from "@/lib/chat-on-screen";
 import { scrapeCompetitorAdUrl } from "@/lib/scrape";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
@@ -139,6 +144,9 @@ function toolStatusLabel(block: Anthropic.Messages.ToolUseBlock): string | null 
     }
     case "start_campaign":
       return "Handing it to the planner";
+    case "edit_flyer":
+    case "revise_piece":
+      return "Lining up the change";
     case "list_recent_content":
     case "get_content":
       return "Looking through your past content";
@@ -211,7 +219,7 @@ function withImageBlocks(
   return [
     {
       type: "text",
-      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order).`,
+      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order). If a flyer is ON SCREEN and the photo is for it, call edit_flyer with photo_url set to that exact URL instead.`,
     },
     ...images.map((url) => ({
       type: "image" as const,
@@ -262,7 +270,7 @@ interface TurnState {
   funnelStage: FunnelStage | null;
   options: SuggestedOption[] | null;
   // Set by generate_content or create_blog_from_email once a draft actually
-  // exists; the client auto-navigates to /drafts/[draftId] when present.
+  // exists; it becomes the piece the client previews in the thread.
   draftId: string | null;
   channel: "email" | "blog" | "social" | null;
   // Drafts from the retired email-series tool, kept so old chats still show
@@ -272,7 +280,10 @@ interface TurnState {
   campaign: StartedCampaign | null;
   // Set by show_look_picker: the client shows the look picker under the reply.
   showLookPicker: boolean;
+  // Set by edit_flyer / revise_piece: the client's preview card applies it.
+  previewAction: PreviewAction | null;
 }
+
 
 /**
  * One create-agent turn: a real agentic tool-use loop. Tool results are fed
@@ -281,7 +292,7 @@ interface TurnState {
  * each turn) and mirrored into campaigns.chat_state for resume-on-reload; the
  * campaign row is also the brief/topic holder, unchanged from before. The
  * human approval gate stays at publish only; generate_content here creates a
- * fast draft SHELL (real generation streams later on the review page), so
+ * fast draft SHELL (real generation then streams in the chat's preview card), so
  * driving straight to a draft is cheap.
  */
 export async function POST(req: NextRequest) {
@@ -375,6 +386,7 @@ export async function POST(req: NextRequest) {
       campaign.brief ?? {},
       campaign.topic_id,
     );
+    const onScreen = await loadOnScreen(campaign.chat_state?.preview, brand.id);
     const sanitizedImages = sanitizeImageUrls(images);
     // A bare URL in the message (and no attached image, which already has
     // its own handling) might be a competitor ad the user wants saved: scrape
@@ -389,7 +401,7 @@ export async function POST(req: NextRequest) {
       {
         role: "user",
         content: withImageBlocks(
-          `${briefState}\n\nUSER MESSAGE:\n${messageForModel}`,
+          `${briefState}${onScreen ? `\n\n${onScreen.line}` : ""}\n\nUSER MESSAGE:\n${messageForModel}`,
           sanitizedImages,
         ),
       },
@@ -414,6 +426,7 @@ export async function POST(req: NextRequest) {
       series: null,
       campaign: null,
       showLookPicker: false,
+      previewAction: null,
     };
     const dispatchCtx = {
       brand,
@@ -422,6 +435,7 @@ export async function POST(req: NextRequest) {
       products,
       campaignId: campaign.id,
       lookId: lookId || undefined,
+      onScreen,
       userMessages: [
         ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
         message.trim(),
@@ -550,6 +564,8 @@ export async function POST(req: NextRequest) {
             if (state.draftId && state.draftId !== draftBefore) break;
             // Same for a campaign: the client takes over and runs the planner.
             if (state.campaign) break;
+            // And for a change to the piece on screen, once it's been announced.
+            if (state.previewAction && response.content.some((b) => b.type === "text" && b.text.trim())) break;
 
             // The follow-up call after an interview step is nearly always an empty
             // reply (the question was already asked alongside the tool call), yet it
@@ -611,7 +627,7 @@ export async function POST(req: NextRequest) {
             /\?/.test(joinReplySegments(replyParts)) ||
             Boolean(state.options?.length) ||
             state.showLookPicker;
-          if (!state.draftId && !state.campaign && !askedSomething) {
+          if (!state.draftId && !state.campaign && !state.previewAction && !askedSomething) {
             try {
               pushUserNote(
                 messages,
@@ -634,10 +650,12 @@ export async function POST(req: NextRequest) {
           let reply = joinReplySegments(replyParts);
           if (!reply) {
             reply = state.draftId
-              ? "Done, opening your draft now."
+              ? "Making it now. It'll show up right here."
               : state.campaign
                 ? "Planning it now."
-                : "What's the one thing this email needs to land?";
+                : state.previewAction
+                  ? "On it, updating the preview now."
+                  : "What's the one thing this email needs to land?";
           }
           // Chat bubbles render as plain text, so any markdown the model slipped in
           // would reach the user as literal asterisks. The prompt forbids it; this
@@ -669,11 +687,21 @@ export async function POST(req: NextRequest) {
           // series persists across turns (a follow-up message must not wipe the
           // card): keep whatever this turn produced, else what the campaign had.
           const series = state.series ?? campaign.chat_state?.series ?? null;
+          // A piece made this turn replaces whatever was on screen.
+          const preview: ChatPreviewRef | null =
+            state.draftId && state.channel
+              ? { draft_id: state.draftId, channel: state.channel }
+              : (campaign.chat_state?.preview ?? null);
 
           await updateCampaign(campaign.id, {
             brief: state.brief,
             topic_id: state.topicId,
-            chat_state: { messages: transcript, auto: autoMode, ...(series ? { series } : {}) },
+            chat_state: {
+              messages: transcript,
+              auto: autoMode,
+              ...(series ? { series } : {}),
+              ...(preview ? { preview } : {}),
+            },
             ...(state.draftId || state.series
               ? { status: "generating" as const }
               : {}),
@@ -702,6 +730,12 @@ export async function POST(req: NextRequest) {
             series,
             campaign: state.campaign,
             showLookPicker: state.showLookPicker,
+            preview: state.draftId && state.channel
+              ? { draftId: state.draftId, channel: state.channel }
+              : onScreen
+                ? { draftId: onScreen.draftId, channel: onScreen.channel }
+                : null,
+            previewAction: state.previewAction,
             auto: autoMode,
           });
         } catch (err) {
@@ -750,6 +784,8 @@ async function dispatchTool(
     campaignId: string;
     /** The flyer look picked on Create; social drafts only. */
     lookId?: string;
+    /** The piece previewed in the chat, if any. */
+    onScreen: OnScreen | null;
     /** Every user message this conversation, oldest first. */
     userMessages: string[];
   },
@@ -909,6 +945,27 @@ async function dispatchTool(
         ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
+    }
+    case "edit_flyer":
+    case "revise_piece": {
+      const screen = ctx.onScreen;
+      if (!screen) return "Nothing is on screen to change. Make it first with generate_content.";
+      if (!screen.ready) return "It's still generating, so it can't change yet. Say it'll be ready in a moment.";
+      if (!screen.editable) return "It's already approved, so it can't change here. Offer to make a new one.";
+      if (block.name === "revise_piece") {
+        const feedback = stripEmDashes((block.input as RevisePieceInput).feedback ?? "").trim().slice(0, 1000);
+        if (!feedback) return "Say what to change in feedback.";
+        state.previewAction = { kind: "revise", feedback };
+        return "Rewriting it now as a new version; the preview shows it when it's ready, in about a minute. Reply with one short line.";
+      }
+      if (screen.channel !== "social") return "That's not a flyer: use revise_piece for this piece.";
+      const action = cleanFlyerEdit(block.input, {
+        optionCount: screen.optionCount,
+        storageHost: storageHostFromEnv(),
+      });
+      if (typeof action === "string") return action;
+      state.previewAction = action;
+      return "Applying it now; the preview updates on its own in a moment. Reply with one short line.";
     }
     case "show_look_picker": {
       state.showLookPicker = true;
