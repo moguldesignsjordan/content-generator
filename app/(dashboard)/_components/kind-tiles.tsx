@@ -18,7 +18,8 @@ const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 /**
  * The landing's big "what are we making?" buttons, one glass tile per kind.
- * Tapping one starts the chat for that kind, same as typing it. A sideways
+ * Tapping one picks that kind and asks for the details in the composer (or
+ * sends right away when something is already typed). A sideways
  * rail on phones, five across from sm up.
  */
 export function KindTiles({
@@ -27,7 +28,7 @@ export function KindTiles({
   disabled,
 }: {
   onPick: (kind: StarterKind) => void;
-  /** Lit when a link preset the kind (e.g. "New campaign"). */
+  /** Lit when tapped, or when a link preset the kind (e.g. "New campaign"). */
   picked: StarterKind | null;
   disabled: boolean;
 }) {

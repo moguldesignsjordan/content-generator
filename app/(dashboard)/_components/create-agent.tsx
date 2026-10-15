@@ -78,38 +78,40 @@ interface PendingImage {
    landing teaches by example instead of a static "type here". */
 const PROMPT_IDEAS = [
   "What do you want to make?",
-  "Draft a win-back email for past clients",
-  "Make a square flyer for Instagram",
-  "Announce a new service to the list",
+  "A fall sale flyer, 20% off through Nov 30",
+  "A win-back email for past clients",
+  "A two-week campaign to launch a new service",
+  "An Instagram ad for our starter package",
+  "A blog post on what a website really costs",
   "Turn our best email into a flyer",
-  "Write a blog post about how we work",
 ];
 
-/** The landing's kind tiles: tapping one starts the conversation with its
- * text (plus anything already typed). A preset startKind instead shows the
- * describe-it hint and rides at the front of their description on send. */
+/** The landing's kind tiles: with text typed, tapping one sends it with the
+ * kind's text in front. With nothing typed, the tile (like a preset
+ * startKind) only picks the kind and shows its describe-it hint, so the first
+ * message carries a real description. */
 export type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
 
 const STARTERS: Record<StarterKind, { text: string; hint: string }> = {
   flyer: {
     text: "I want to make a flyer",
-    hint: "Describe your flyer: what it's for, the offer, dates, where it'll post...",
+    hint: "Tell me about your flyer: what it's for, the offer, dates, where it'll post...",
   },
   email: {
     text: "I want to write an email",
-    hint: "Describe your email: what it's about, who it's for, any deal...",
+    hint: "Tell me about your email: what it's about, who it's for, any deal...",
   },
   campaign: {
     text: "I want to plan a campaign",
-    hint: "Describe your campaign: what you're promoting, the offer, how long...",
+    hint: "Tell me about your campaign: what you're promoting, the offer, how long...",
   },
   blog: {
     text: "I want to write a blog post",
-    hint: "Describe your post: the topic, who's reading, your take on it...",
+    hint: "Tell me about your post: the topic, who's reading, your take on it...",
   },
   ad: {
     text: "I want to make a paid Facebook or Instagram ad",
-    hint: "Describe your ad: what you're selling, the offer, who should see it...",
+    hint: "Tell me about your ad: what you're selling, the offer, who should see it...",
   },
 };
 
@@ -454,7 +456,12 @@ export function CreateAgent({
 
   function pickKind(kind: StarterKind) {
     const typed = input.trim();
-    send(typed ? `${STARTERS[kind].text}. ${typed}` : STARTERS[kind].text);
+    if (!typed) {
+      setPicked((p) => (p === kind ? null : kind));
+      inputRef.current?.focus();
+      return;
+    }
+    send(`${STARTERS[kind].text}. ${typed}`);
     setPicked(null);
   }
 
@@ -708,6 +715,13 @@ export function CreateAgent({
                   today?
                 </motion.span>
               </h2>
+              <motion.p
+                className="-mt-4 max-w-md text-center text-[15px] leading-relaxed text-muted [text-wrap:balance]"
+                {...rise(0.55)}
+              >
+                Tell me what it&apos;s for, the offer, any dates, and where it&apos;ll go. The more
+                you share, the better it turns out.
+              </motion.p>
               <div className="w-full max-w-xl">
                 <motion.div {...rise(0.6)}>
                   <div className="mb-2 flex justify-end">

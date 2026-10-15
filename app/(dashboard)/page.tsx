@@ -25,6 +25,9 @@ import { LandingRails, type RailPiece } from "./_components/landing-rails";
 // Always read fresh from the DB.
 export const dynamic = "force-dynamic";
 
+/** Indexed by quarter starting in December, for the seasonal campaign idea. */
+const SEASONS = ["winter", "spring", "summer", "fall"] as const;
+
 export default async function HomePage({
   searchParams,
 }: {
@@ -157,11 +160,47 @@ async function loadChat(
     ),
   );
 
-  const suggestions: CreateAgentSuggestion[] = pillars
+  // One idea per kind, so the landing shows everything the chat can make:
+  // queued topics feed the written pieces, products the visual ones.
+  const queued = pillars
     .flatMap((p) => p.clusters.flatMap((c) => c.topics))
-    .filter((t) => !t.archived && t.status === "queued")
-    .slice(0, 3)
-    .map((t) => ({ label: t.title, text: `Write an email about "${t.title}"` }));
+    .filter((t) => !t.archived && t.status === "queued");
+  const [lead, second] = products;
+  const flyerTopic = lead ? null : queued[1];
+  const blogTopic = queued[lead ? 1 : 2];
+  const season = SEASONS[Math.floor(((new Date().getMonth() + 1) % 12) / 3)];
+  const suggestions: CreateAgentSuggestion[] = [];
+  if (queued[0]) {
+    suggestions.push({
+      label: `Email: ${queued[0].title}`,
+      text: `Write an email about "${queued[0].title}"`,
+    });
+  }
+  if (lead) {
+    suggestions.push({ label: `Flyer: ${lead.name}`, text: `Make a flyer promoting ${lead.name}` });
+  } else if (flyerTopic) {
+    suggestions.push({
+      label: `Flyer: ${flyerTopic.title}`,
+      text: `Make a flyer about "${flyerTopic.title}"`,
+    });
+  }
+  suggestions.push({
+    label: `Campaign: a ${season} push`,
+    text: `Plan a ${season} campaign for ${brand.name}${lead ? `, leading with ${lead.name}` : ""}`,
+  });
+  const adProduct = second ?? lead;
+  if (adProduct) {
+    suggestions.push({
+      label: `Ad: ${adProduct.name}`,
+      text: `Make a Facebook and Instagram ad for ${adProduct.name}`,
+    });
+  }
+  if (blogTopic) {
+    suggestions.push({
+      label: `Blog post: ${blogTopic.title}`,
+      text: `Write a blog post about "${blogTopic.title}"`,
+    });
+  }
   const best = topEmails[0];
   if (best) {
     suggestions.push({
