@@ -5,6 +5,7 @@ import {
   createCampaign,
   deleteCampaign,
   getBrandWithIcps,
+  getCampaign,
   getDesignLook,
   listBrandMemory,
   listProducts,
@@ -47,8 +48,9 @@ function isOwnStorageUrl(value: string): boolean {
 }
 
 /**
- * POST { sentence, kinds, size, days, photo_url? }: starts a factory
- * campaign and streams its phases (researching, planning, pricing), ending in
+ * POST { sentence, kinds, size, days, photo_url?, look_id?, research?,
+ * campaign_id? }: starts a factory campaign and streams its phases
+ * (researching only when the owner said yes, planning, pricing), ending in
  * `done` with the campaign id. Nothing is generated here; the plan table is
  * the checkpoint before any spend on content.
  */
@@ -73,6 +75,8 @@ export async function POST(req: NextRequest) {
     typeof body.photo_url === "string" && isOwnStorageUrl(body.photo_url)
       ? body.photo_url
       : undefined;
+  // Web research costs real money and time, so it only runs when asked.
+  const doResearch = body.research === true;
   if (!sentence) {
     return NextResponse.json({ error: "Say what you're promoting." }, { status: 400 });
   }
@@ -108,7 +112,15 @@ export async function POST(req: NextRequest) {
     memories,
   };
 
-  const campaign = await createCampaign(brand.id);
+  // A campaign planned from the chat reuses that chat's row so it doesn't
+  // leave an empty one behind; on failure its chat is put back as it was.
+  const requested =
+    typeof body.campaign_id === "string" ? await getCampaign(body.campaign_id) : null;
+  const reused =
+    requested && requested.brand_id === brand.id && !requested.chat_state?.factory
+      ? requested
+      : null;
+  const campaign = reused ?? (await createCampaign(brand.id));
   const factory: FactoryState = {
     sentence,
     kinds: FACTORY_KINDS.filter((k) => kinds.includes(k)),
@@ -134,17 +146,20 @@ export async function POST(req: NextRequest) {
       };
       let saved = false;
       try {
-        send("phase", { phase: "researching", label: "Researching trends and competitors" });
-        const research = await researchCampaign(ctx, {
-          sentence,
-          kinds: factory.kinds,
-          today: new Date().toISOString().slice(0, 10),
-        });
+        let research: Awaited<ReturnType<typeof researchCampaign>> | null = null;
+        if (doResearch) {
+          send("phase", { phase: "researching", label: "Researching trends and competitors" });
+          research = await researchCampaign(ctx, {
+            sentence,
+            kinds: factory.kinds,
+            today: new Date().toISOString().slice(0, 10),
+          });
+        }
 
         send("phase", { phase: "planning", label: `Planning ${size} pieces` });
         const planned = await planCampaign(ctx, {
           sentence,
-          research: research.research,
+          research: research?.research,
           kinds: factory.kinds,
           size,
           days,
@@ -161,10 +176,10 @@ export async function POST(req: NextRequest) {
             factory: {
               ...factory,
               ...(offerSlug ? { offer_slug: offerSlug } : {}),
-              research: research.research,
+              ...(research ? { research: research.research } : {}),
               plan: planned.plan,
               quote,
-              planning_usd: Number((research.usd + planned.usd).toFixed(4)),
+              planning_usd: Number(((research?.usd ?? 0) + planned.usd).toFixed(4)),
             },
           },
         });
@@ -172,7 +187,15 @@ export async function POST(req: NextRequest) {
         send("done", { campaignId: campaign.id });
       } catch (err) {
         logError("api:/api/factory", err, { campaignId: campaign.id });
-        if (!saved) await deleteCampaign(campaign.id).catch(() => {});
+        if (!saved) {
+          await (reused
+            ? updateCampaign(campaign.id, {
+                brief: reused.brief,
+                chat_state: reused.chat_state,
+              })
+            : deleteCampaign(campaign.id)
+          ).catch(() => {});
+        }
         send("error", {
           message: err instanceof Error ? err.message : "Couldn't plan the campaign. Try again.",
         });

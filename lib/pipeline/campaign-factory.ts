@@ -169,7 +169,8 @@ export async function planCampaign(
   ctx: FactoryBrandContext,
   args: {
     sentence: string;
-    research: FactoryResearch;
+    /** Absent when the owner chose to skip web research. */
+    research?: FactoryResearch;
     kinds: FactoryKind[];
     size: number;
     days: number;

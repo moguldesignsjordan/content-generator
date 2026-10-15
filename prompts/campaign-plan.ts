@@ -141,7 +141,8 @@ export function buildPlanMessages(args: {
   products: Product[];
   memories: BrandMemory[];
   sentence: string;
-  research: FactoryResearch;
+  /** Absent when the owner chose to skip web research. */
+  research?: FactoryResearch;
   counts: Record<FactoryKind, number>;
 }): { system: string; user: string } {
   const kinds = FACTORY_KINDS.filter((k) => args.counts[k] > 0);
@@ -167,7 +168,12 @@ export function buildPlanMessages(args: {
   const user = [
     `The owner wants a campaign about: "${args.sentence}"`,
     "",
-    ...researchLines(args.research),
+    ...(args.research
+      ? researchLines(args.research)
+      : [
+          "No research for this one: plan from the owner's words and the brand info alone.",
+          "REAL FACTS ABOUT THIS BUSINESS: only what the owner said above and the brand info. Flag needs_detail wherever proof would help.",
+        ]),
     "",
     `PLAN EXACTLY ${total} PIECES: ${kinds.map((k) => `${args.counts[k]} ${k}`).join(", ")}.`,
     "",
@@ -177,7 +183,9 @@ export function buildPlanMessages(args: {
     "RULES",
     "- Every piece is a different idea. No two pieces share a hook, an opening word pattern, or a core idea. Rotate formats within each kind.",
     "- Hooks are concrete and specific to this business: a real detail, a number from the facts, a named situation the reader recognizes. Never generic openers like 'Unlock', 'Elevate', 'In today's world', 'Ever wondered', or 'Look no further'.",
-    "- Build on the research: use the hook patterns and trends where they fit, and set inspired_by to the source URL that sparked the piece.",
+    ...(args.research
+      ? ["- Build on the research: use the hook patterns and trends where they fit, and set inspired_by to the source URL that sparked the piece."]
+      : []),
     "- State as true only the REAL FACTS above and the brand info. Never invent numbers, results, testimonials, client names, prices, or deadlines. When a piece would be stronger with proof that isn't there, set needs_detail true and write detail_prompt as the one question to ask the owner.",
     "- Social and ad visuals show the real product or work when there is one, in a setting that fits the brand. No stock-photo cliches (handshakes, people pointing at laptops, lightbulbs).",
     "- Plain words, short sentences, the brand's voice. Never use em dashes.",

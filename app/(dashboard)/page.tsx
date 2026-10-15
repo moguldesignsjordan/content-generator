@@ -12,9 +12,7 @@ import {
 } from "@/lib/db/queries";
 import type { Icp } from "@/lib/db/types";
 import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
-import { cn } from "@/lib/cn";
 import { Card, LinkButton } from "@/components/ui";
-import { FactoryStart } from "./_components/factory-start";
 import {
   CreateAgent,
   type CreateAgentInitialState,
@@ -23,8 +21,6 @@ import {
 
 // Always read fresh from the DB.
 export const dynamic = "force-dynamic";
-
-type Mode = "piece" | "campaign";
 
 export default async function HomePage({
   searchParams,
@@ -60,10 +56,12 @@ export default async function HomePage({
     );
   }
 
-  const mode: Mode = (await searchParams).mode === "campaign" ? "campaign" : "piece";
+  // "New campaign" links land here with ?mode=campaign: skip straight past
+  // "what are we creating?".
+  const startKind = (await searchParams).mode === "campaign" ? "campaign" : undefined;
   const [awaitingReview, chat] = await Promise.all([
     countScheduledAwaitingReview(data.brand.id).catch(() => 0),
-    mode === "piece" ? loadChat(user.id, data.icps) : null,
+    loadChat(user.id, data.icps),
   ]);
 
   return (
@@ -73,15 +71,12 @@ export default async function HomePage({
 
       {data.brand.onboarding_state?.completed !== true && <FinishSetupBanner />}
 
-      <div className="flex justify-center">
-        <ModeSwitch mode={mode} />
-      </div>
-
-      {mode === "campaign" ? (
-        <FactoryStart hasWebsite={Boolean(data.brand.visual_identity?.footer?.website)} />
-      ) : (
-        <CreateAgent initial={chat?.initial} suggestions={chat?.suggestions ?? []} />
-      )}
+      <CreateAgent
+        // A "New campaign" link starts fresh instead of resuming the last chat.
+        initial={startKind ? undefined : chat.initial}
+        suggestions={chat.suggestions}
+        startKind={startKind}
+      />
 
       {awaitingReview > 0 && (
         <Link
@@ -101,42 +96,8 @@ export default async function HomePage({
   );
 }
 
-/** Links, not client state, so the mode lives in the URL and survives a reload. */
-function ModeSwitch({ mode }: { mode: Mode }) {
-  const options: { value: Mode; label: string; href: string }[] = [
-    { value: "piece", label: "One piece", href: "/" },
-    { value: "campaign", label: "Campaign", href: "/?mode=campaign" },
-  ];
-  return (
-    <div
-      role="tablist"
-      className="inline-flex items-center rounded-full border border-border bg-surface-2 p-1"
-    >
-      {options.map((opt) => {
-        const active = opt.value === mode;
-        return (
-          <Link
-            key={opt.value}
-            href={opt.href}
-            role="tab"
-            aria-selected={active}
-            className={cn(
-              "flex h-9 items-center rounded-full px-4 text-[13px] font-medium transition-colors",
-              active
-                ? "bg-surface text-foreground ring-1 ring-border-strong shadow-[0_1px_3px_rgba(0,0,0,0.10)]"
-                : "text-muted hover:text-foreground",
-            )}
-          >
-            {opt.label}
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
- * The one-piece chat's starters and resumable thread: the next queued topics,
+ * The Create chat's starters and resumable thread: the next queued topics,
  * "another like" the best performer, and the latest in-flight conversation.
  * Any failure just means a blank chat, never a broken page.
  */

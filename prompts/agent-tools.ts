@@ -74,132 +74,34 @@ export const GENERATE_CONTENT_TOOL: Anthropic.Tool = {
   },
 };
 
-export interface PlanSeriesItem {
-  title: string;
-  topic_id?: string;
-  /** The user-approved email name (subject line) from the confirmed plan;
-   * generation uses it verbatim as the subject. */
-  subject?: string;
-  /** The user-approved subheader (inbox preview text) from the confirmed
-   * plan; generation uses it near-verbatim as the preheader. */
-  preheader?: string;
-  angle?: string;
-  key_message?: string;
-  offer_slug?: string;
-  email_type?: "newsletter" | "product" | "service" | "promotional" | "announcement";
-  funnel_stage?: "awareness" | "consideration" | "decision" | "brand";
-  include_image?: boolean;
-  /** A real number, result, or story for THIS email specifically. Without a
-   * per-email proof, a 5-email series would otherwise point at the same one
-   * number five times, which reads worse than no proof at all. */
-  proof?: string;
-  /** A real deadline/scarcity detail for THIS email, when it differs from the
-   * campaign-wide offer terms. */
-  offer_deadline?: string;
-}
-
-export interface PlanSeriesInput {
-  items: PlanSeriesItem[];
+export interface StartCampaignInput {
+  summary: string;
 }
 
 /**
- * The multi-email counterpart to generate_content: creates every draft in a
- * campaign series (one per item) as instant shells that each write themselves
- * when opened. Per-item angle/message/offer land in meta.series_brief so the
- * emails don't all flatten onto the one shared campaign brief.
+ * Ends a campaign interview: the summary becomes the factory's one-line
+ * description, which feeds the optional research, the plan, and every piece's
+ * brief. The settings picked in the app (what to make, how many, how long,
+ * research or not) travel separately from the client.
  */
-export const PLAN_SERIES_TOOL: Anthropic.Tool = {
-  name: "plan_series",
+export const START_CAMPAIGN_TOOL: Anthropic.Tool = {
+  name: "start_campaign",
   description:
-    "Create a whole multi-email campaign series at once (2 to 12 emails), e.g. " +
-    "one or more emails per product, or a run of newsletters on different " +
-    "topics. Call it ONCE with every email in the series, and only after the " +
-    "user has agreed to the plan you proposed in a reply (including each " +
-    "email's name and subheader). Each item becomes its own draft that the " +
-    "user reviews, approves, and schedules individually; drafts appear " +
-    "instantly and each one writes itself when opened.",
+    "Call ONCE, only for a campaign, after the user confirms your one-line " +
+    "recap. Hands the campaign to the planner, which builds an editable plan " +
+    "of every piece. Never call generate_content for a campaign.",
   input_schema: {
     type: "object",
     properties: {
-      items: {
-        type: "array",
-        minItems: 2,
-        maxItems: 12,
-        items: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              description: "Working title / subject direction for this email.",
-            },
-            subject: {
-              type: "string",
-              description:
-                "The exact email name (subject line) the user approved in the " +
-                "plan. Generation uses it VERBATIM, so pass it exactly as agreed.",
-            },
-            preheader: {
-              type: "string",
-              description:
-                "The subheader (inbox preview text) the user approved for this " +
-                "email in the plan. Generation uses it near-verbatim.",
-            },
-            topic_id: {
-              type: "string",
-              description:
-                "Exact id of an existing topic from the TOPICS list to reuse. " +
-                "Omit to create a new topic from the title.",
-            },
-            angle: {
-              type: "string",
-              description: "The editorial lens/angle for THIS email specifically.",
-            },
-            key_message: {
-              type: "string",
-              description: "The one thing THIS email must land.",
-            },
-            offer_slug: {
-              type: "string",
-              description:
-                "Slug of the product/offer THIS email promotes, from the " +
-                "PRODUCTS list. Product campaigns: one per email.",
-            },
-            email_type: {
-              type: "string",
-              enum: ["newsletter", "product", "service", "promotional", "announcement"],
-              description:
-                "Optional purpose/length override for this email. Omit to derive it.",
-            },
-            funnel_stage: {
-              type: "string",
-              enum: ["awareness", "consideration", "decision", "brand"],
-              description: "Funnel stage this email serves, if a new topic is created.",
-            },
-            include_image: {
-              type: "boolean",
-              description:
-                "Whether THIS email gets a picture, when it should differ from " +
-                "the campaign-wide answer. Omit to follow the campaign answer.",
-            },
-            proof: {
-              type: "string",
-              description:
-                "A REAL number, result, or story for THIS email specifically, if the " +
-                "user gave one. Never invent one; never reuse the same proof across " +
-                "every email in the series.",
-            },
-            offer_deadline: {
-              type: "string",
-              description:
-                "A real deadline/scarcity detail for THIS email, when it differs from " +
-                "the campaign-wide offer terms.",
-            },
-          },
-          required: ["title"],
-        },
+      summary: {
+        type: "string",
+        description:
+          "Under 500 characters, plain words: what the campaign promotes and " +
+          "every real detail the user gave (offer, price, deadline, who it's " +
+          "for, a real result, what to do with their photos). Never invent one.",
       },
     },
-    required: ["items"],
+    required: ["summary"],
   },
 };
 
@@ -398,7 +300,7 @@ export const FORGET_TOOL: Anthropic.Tool = {
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   GENERATE_CONTENT_TOOL,
-  PLAN_SERIES_TOOL,
+  START_CAMPAIGN_TOOL,
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,

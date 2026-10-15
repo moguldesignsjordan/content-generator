@@ -26,10 +26,25 @@ import {
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
+import { readSse } from "@/lib/read-sse";
+import {
+  CAMPAIGN_DAYS,
+  CAMPAIGN_SIZES,
+  CREATE_KIND_LABELS,
+  INTAKE_QUESTIONS,
+  PHOTO_USE_OPTIONS,
+  composeIntakeMessage,
+  nextIntakeStep,
+  type CampaignSettings,
+  type CreateKind,
+  type IntakeStep,
+} from "@/lib/create-intake";
+import { FACTORY_KINDS, FACTORY_KIND_LABELS } from "@/prompts/campaign-formats";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 import type {
   BlogType,
   EmailType,
+  FactoryKind,
   FunnelStage,
   MediaAsset,
   SeriesDraftRef,
@@ -60,6 +75,11 @@ interface Msg {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  /** A built-in opening question or answer: shown, never sent to the agent. */
+  local?: boolean;
+  /** The combined opening answers: sent to the agent, not shown (the local
+   * bubbles already show them). */
+  hidden?: boolean;
 }
 
 /** An image staged on the composer, uploaded and hosted but not yet sent. */
@@ -79,16 +99,62 @@ const PROMPT_IDEAS = [
   "Write a blog post about how we work",
 ];
 
-/** The one-piece kinds the quick buttons start. Flyer and ad both ride the
- * standalone image flow; the agent picks social_format "ad" from the wording. */
-type PieceKind = "email" | "blog" | "flyer" | "ad";
+const KIND_QUESTION = "What are we creating?";
 
-const PIECE_OPENERS: Record<PieceKind, string> = {
-  email: "I want to create an email",
-  blog: "I want to create a blog post",
-  flyer: "I want to create an image: a social flyer",
-  ad: "I want to create an image: a paid Facebook or Instagram ad",
+/** Opening steps answered by typing; the rest are tap-only. */
+const TYPED_STEPS = new Set<IntakeStep>(["purpose", "photos", "photoNote"]);
+
+const STEP_PLACEHOLDERS: Record<IntakeStep, string> = {
+  purpose: "e.g. Our $49 website care plan, starts Nov 1",
+  photos: "Attach photos with the paperclip, or tap an answer",
+  photoNote: "Say what to do with them, or tap an answer",
+  look: "Tap an answer above",
+  campaignKinds: "Tap an answer above",
+  campaignSize: "Tap an answer above",
+  campaignDays: "Tap an answer above",
+  research: "Tap an answer above",
 };
+
+/** Answers to the built-in opening, collected before the agent joins. */
+interface IntakeDraft {
+  kind: CreateKind;
+  purpose: string;
+  photos: string[];
+  photoNote?: string;
+  campaign: CampaignSettings;
+}
+
+// Research stays off until the owner says yes on the research step.
+const DEFAULT_CAMPAIGN: CampaignSettings = {
+  kinds: [...FACTORY_KINDS],
+  size: 12,
+  days: 30,
+  research: false,
+};
+
+const FACTORY_STEPS = [
+  { phase: "researching", label: "Researching trends and competitors" },
+  { phase: "planning", label: "Planning the pieces" },
+  { phase: "pricing", label: "Pricing the batch" },
+];
+
+const ask = (content: string): Msg => ({ role: "assistant", content, local: true });
+const answer = (content: string, images?: string[]): Msg => ({
+  role: "user",
+  content,
+  local: true,
+  ...(images?.length ? { images } : {}),
+});
+
+/** The opening bubbles up to the purpose question (and its answer, when known). */
+function openingMessages(kind: CreateKind, purpose?: string): Msg[] {
+  return [
+    ask(KIND_QUESTION),
+    answer(CREATE_KIND_LABELS[kind]),
+    ask(INTAKE_QUESTIONS.purpose),
+    ...(purpose ? [answer(purpose), ask(INTAKE_QUESTIONS.photos)] : []),
+  ];
+}
 
 export interface CreateAgentSuggestion {
   label: string;
@@ -135,6 +201,8 @@ interface CreateResponse {
   readyToGenerate?: boolean;
   draftId?: string | null;
   series?: SeriesDraftRef[] | null;
+  /** Set when the agent hands a campaign to the planner. */
+  campaign?: { summary: string } | null;
   auto?: boolean;
   error?: string;
 }
@@ -164,15 +232,22 @@ export function CreateAgent({
   className,
   initial,
   suggestions = [],
+  startKind,
 }: {
   className?: string;
   initial?: CreateAgentInitialState;
   suggestions?: CreateAgentSuggestion[];
+  /** Skips "what are we creating?" (e.g. a "New campaign" link). */
+  startKind?: CreateKind;
 }) {
   const router = useRouter();
   const toast = useToast();
+  // A link that names the kind starts past Q1, unless a thread is resuming.
+  const preset = initial?.messages.length ? undefined : startKind;
 
-  const [messages, setMessages] = useState<Msg[]>(initial?.messages ?? []);
+  const [messages, setMessages] = useState<Msg[]>(
+    () => initial?.messages ?? (preset ? openingMessages(preset) : []),
+  );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState(false);
@@ -211,10 +286,23 @@ export function CreateAgent({
   // "" (Auto), generation derives the type from the topic as before.
   const [emailType, setEmailType] = useState<EmailType | "">("");
   const [blogType, setBlogType] = useState<BlogType | "">("");
-  // Set by the quick buttons. A flyer or ad shows the look picker beside the
-  // chat; null = the brand default look, same as the factory.
-  const [pieceKind, setPieceKind] = useState<PieceKind | null>(null);
+  // The built-in opening: the current step (null once the agent has taken
+  // over, or when they typed instead of tapping) and the answers so far.
+  const [step, setStep] = useState<IntakeStep | null>(preset ? "purpose" : null);
+  const [intake, setIntake] = useState<IntakeDraft | null>(
+    preset ? { kind: preset, purpose: "", photos: [], campaign: DEFAULT_CAMPAIGN } : null,
+  );
+  // null = the brand default look, same as the factory.
   const [lookId, setLookId] = useState<string | null>(null);
+  // A campaign the agent handed to the planner: progress, or the error to retry.
+  const [campaignRun, setCampaignRun] = useState<{
+    summary: string;
+    campaignId: string;
+    research: boolean;
+    phase: string | null;
+    error: { message: string; outOfCredits?: boolean } | null;
+  } | null>(null);
+  const stepFileRef = useRef<HTMLInputElement>(null);
 
   // Which example prompt the empty composer is showing (landing only).
   const [phIndex, setPhIndex] = useState(0);
@@ -350,12 +438,95 @@ export function CreateAgent({
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
 
-  async function send(text: string) {
+  // runFactory reads the answers after the agent's reply lands, a render or
+  // more after the closure that sent the message was made.
+  const intakeRef = useRef(intake);
+  intakeRef.current = intake;
+
+  function send(text: string) {
     const t = text.trim();
     const imageUrls = pendingImages.map((p) => p.url);
     if ((!t && imageUrls.length === 0) || loading || generating) return;
+    if (step) {
+      answerStep(t, imageUrls);
+      return;
+    }
     const displayText =
       t || (imageUrls.length === 1 ? "(attached a photo)" : "(attached photos)");
+    void postToAgent(displayText, imageUrls, false);
+  }
+
+  /** Starts the built-in opening at the purpose question, or past it. */
+  function beginIntake(kind: CreateKind, purpose?: string) {
+    if (loading || generating) return;
+    if (kind === "email" || kind === "blog") setChannel(kind);
+    setIntake({ kind, purpose: purpose ?? "", photos: [], campaign: DEFAULT_CAMPAIGN });
+    setStep(purpose ? "photos" : "purpose");
+    setOptions(null);
+    setActionsOpen(false);
+    setError(null);
+    setMessages((m) => [...m, ...openingMessages(kind, purpose)]);
+  }
+
+  /** A typed (or attached) answer to the current opening step. */
+  function answerStep(text: string, imageUrls: string[]) {
+    if (!step || !intake) return;
+    let draft = intake;
+    let from: IntakeStep = step;
+    let shown = text;
+    if (step === "purpose") {
+      if (!text) return;
+      draft = { ...draft, purpose: text };
+    } else if (step === "photos") {
+      if (imageUrls.length) {
+        draft = { ...draft, photos: imageUrls, ...(text ? { photoNote: text } : {}) };
+        // A note typed alongside the photos answers the next question too.
+        if (text) from = "photoNote";
+        shown =
+          text || (imageUrls.length === 1 ? "(attached a photo)" : `(attached ${imageUrls.length} photos)`);
+      } else {
+        if (!text) return;
+        draft = { ...draft, purpose: `${draft.purpose}\n${text}` };
+      }
+    } else if (step === "photoNote") {
+      draft = { ...draft, photoNote: text };
+    } else {
+      return;
+    }
+    advance(from, draft, answer(shown, step === "photos" ? imageUrls : undefined));
+  }
+
+  /** A tapped answer to the current opening step. */
+  function chooseStep(label: string, patch: Partial<IntakeDraft> = {}) {
+    if (!step || !intake || loading || generating) return;
+    advance(step, { ...intake, ...patch }, answer(label));
+  }
+
+  function advance(from: IntakeStep, draft: IntakeDraft, reply: Msg) {
+    setInput("");
+    setPendingImages([]);
+    setIntake(draft);
+    const next = nextIntakeStep(from, {
+      kind: draft.kind,
+      photoCount: draft.photos.length,
+      campaignKinds: draft.campaign.kinds,
+    });
+    setMessages((m) => [...m, reply, ...(next ? [ask(INTAKE_QUESTIONS[next])] : [])]);
+    setStep(next);
+    if (!next) {
+      const message = composeIntakeMessage({
+        kind: draft.kind,
+        purpose: draft.purpose,
+        photoCount: draft.photos.length,
+        photoNote: draft.photoNote,
+        lookPicked: Boolean(lookId && lookId !== "none"),
+        ...(draft.kind === "campaign" ? { campaign: draft.campaign } : {}),
+      });
+      void postToAgent(message, draft.photos, true);
+    }
+  }
+
+  async function postToAgent(text: string, imageUrls: string[], hidden: boolean) {
     setInput("");
     setPendingImages([]);
     setError(null);
@@ -366,8 +537,9 @@ export function CreateAgent({
       ...m,
       {
         role: "user",
-        content: displayText,
+        content: text,
         ...(imageUrls.length ? { images: imageUrls } : {}),
+        ...(hidden ? { hidden: true } : {}),
       },
     ]);
     setLoading(true);
@@ -383,8 +555,14 @@ export function CreateAgent({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: displayText,
-          history: messages,
+          message: text,
+          history: messages
+            .filter((m) => !m.local)
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+              ...(m.images ? { images: m.images } : {}),
+            })),
           campaignId,
           images: imageUrls.length ? imageUrls : undefined,
           auto: mode === "auto",
@@ -408,6 +586,9 @@ export function CreateAgent({
       // manual Generate fallback and open it directly.
       if (data.draftId) {
         router.push(`/drafts/${data.draftId}`);
+      }
+      if (data.campaign?.summary && data.campaignId) {
+        void runFactory(data.campaign.summary, data.campaignId);
       }
     } catch (err) {
       const timedOut = err instanceof Error && err.name === "AbortError";
@@ -457,14 +638,68 @@ export function CreateAgent({
     setError(null);
     setActionsOpen(true);
     setPendingImages([]);
-    setPieceKind(null);
+    setStep(null);
+    setIntake(null);
     setLookId(null);
+    setCampaignRun(null);
   }
 
-  function startPiece(kind: PieceKind) {
-    setPieceKind(kind);
-    if (kind === "email" || kind === "blog") setChannel(kind);
-    send(PIECE_OPENERS[kind]);
+  /** Runs the planner on a campaign the agent handed off, then opens its plan. */
+  async function runFactory(summary: string, chatCampaignId: string) {
+    const draft = intakeRef.current;
+    const settings = draft?.campaign ?? DEFAULT_CAMPAIGN;
+    setCampaignRun({
+      summary,
+      campaignId: chatCampaignId,
+      research: settings.research,
+      phase: settings.research ? "researching" : "planning",
+      error: null,
+    });
+    try {
+      const res = await fetch("/api/factory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sentence: summary,
+          kinds: settings.kinds,
+          size: settings.size,
+          days: settings.days,
+          research: settings.research,
+          campaign_id: chatCampaignId,
+          ...(draft?.photos[0] ? { photo_url: draft.photos[0] } : {}),
+          ...(lookId ? { look_id: lookId } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          outOfCredits?: boolean;
+        };
+        throw Object.assign(new Error(data.error ?? "Couldn't start the campaign."), {
+          outOfCredits: data.outOfCredits,
+        });
+      }
+      let planned: string | null = null;
+      let failure: string | null = null;
+      await readSse(res, (event, data) => {
+        if (event === "phase" && typeof data.phase === "string") {
+          const phase = data.phase;
+          setCampaignRun((r) => (r ? { ...r, phase } : r));
+        } else if (event === "done" && typeof data.campaignId === "string") {
+          planned = data.campaignId;
+        } else if (event === "error") {
+          failure = String(data.message ?? "Couldn't plan the campaign.");
+        }
+      });
+      if (failure) throw new Error(failure);
+      if (!planned) throw new Error("The connection dropped before the plan was ready. Try again.");
+      router.push(`/campaigns/${planned}`);
+    } catch (e) {
+      const err = e as Error & { outOfCredits?: boolean };
+      setCampaignRun((r) =>
+        r ? { ...r, phase: null, error: { message: err.message, outOfCredits: err.outOfCredits } } : r,
+      );
+    }
   }
 
   async function generate() {
@@ -548,7 +783,7 @@ export function CreateAgent({
             />
             {actionsOpen && (
               <ActionGrid
-                onPick={startPiece}
+                onPick={(kind) => beginIntake(kind)}
                 disabled={loading || generating}
                 className="mt-3"
               />
@@ -563,7 +798,7 @@ export function CreateAgent({
                     <button
                       key={s.text}
                       type="button"
-                      onClick={() => send(s.text)}
+                      onClick={() => beginIntake("email", s.text)}
                       disabled={loading || generating}
                       className="max-w-full truncate rounded-full border border-border bg-surface-2 px-3.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
                     >
@@ -636,9 +871,145 @@ export function CreateAgent({
 
             {series && series.length > 0 && <SeriesCardView items={series} />}
 
-            {messages.map((m, i) => (
-              <Bubble key={i} msg={m} />
-            ))}
+            {messages.map((m, i) => (m.hidden ? null : <Bubble key={i} msg={m} />))}
+
+            {step && intake && !loading && (
+              <div className="bubble-in space-y-3">
+                {step === "photos" && (
+                  <div className="flex flex-wrap gap-2">
+                    {pendingImages.length > 0 ? (
+                      <StepChip
+                        primary
+                        label={`Continue with ${pendingImages.length} photo${pendingImages.length === 1 ? "" : "s"}`}
+                        onClick={() => answerStep(input.trim(), pendingImages.map((p) => p.url))}
+                        disabled={uploading}
+                      />
+                    ) : null}
+                    <StepChip
+                      label={uploading ? "Uploading..." : "Upload photos"}
+                      onClick={() => stepFileRef.current?.click()}
+                      disabled={uploading}
+                    />
+                    <StepChip label="Pick from saved" onClick={() => setLibraryOpen(true)} />
+                    {pendingImages.length === 0 && (
+                      <StepChip label="No photos" onClick={() => chooseStep("No photos")} />
+                    )}
+                    <input
+                      ref={stepFileRef}
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        if (files.length) void uploadPendingImages(files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
+                )}
+                {step === "photoNote" && (
+                  <div className="flex flex-wrap gap-2">
+                    {PHOTO_USE_OPTIONS[intake.kind].map((opt) => (
+                      <StepChip key={opt} label={opt} onClick={() => chooseStep(opt, { photoNote: opt })} />
+                    ))}
+                    <StepChip label="Skip" onClick={() => chooseStep("Skip")} />
+                  </div>
+                )}
+                {step === "look" && (
+                  <div className="space-y-3">
+                    <LookPicker value={lookId} onChange={setLookId} />
+                    <StepChip primary label="Continue" onClick={() => chooseStep("Continue with this look")} />
+                  </div>
+                )}
+                {step === "campaignKinds" && (
+                  <div className="flex flex-wrap gap-2">
+                    {FACTORY_KINDS.map((k) => {
+                      const on = intake.campaign.kinds.includes(k);
+                      return (
+                        <StepChip
+                          key={k}
+                          label={FACTORY_KIND_LABELS[k]}
+                          pressed={on}
+                          onClick={() =>
+                            setIntake({
+                              ...intake,
+                              campaign: {
+                                ...intake.campaign,
+                                kinds: on
+                                  ? intake.campaign.kinds.filter((x) => x !== k)
+                                  : [...intake.campaign.kinds, k],
+                              },
+                            })
+                          }
+                        />
+                      );
+                    })}
+                    <StepChip
+                      primary
+                      label="Continue"
+                      disabled={intake.campaign.kinds.length === 0}
+                      onClick={() =>
+                        chooseStep(
+                          FACTORY_KINDS.filter((k) => intake.campaign.kinds.includes(k))
+                            .map((k: FactoryKind) => FACTORY_KIND_LABELS[k])
+                            .join(", "),
+                        )
+                      }
+                    />
+                  </div>
+                )}
+                {step === "campaignSize" && (
+                  <div className="flex flex-wrap gap-2">
+                    {CAMPAIGN_SIZES.map((size) => (
+                      <StepChip
+                        key={size}
+                        label={size === 12 ? "12 (recommended)" : String(size)}
+                        onClick={() =>
+                          chooseStep(`${size} pieces`, { campaign: { ...intake.campaign, size } })
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {step === "campaignDays" && (
+                  <div className="flex flex-wrap gap-2">
+                    {CAMPAIGN_DAYS.map((days) => {
+                      const label = days === 14 ? "2 weeks" : "30 days (recommended)";
+                      return (
+                        <StepChip
+                          key={days}
+                          label={label}
+                          onClick={() =>
+                            chooseStep(label, { campaign: { ...intake.campaign, days } })
+                          }
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {step === "research" && (
+                  <div className="flex flex-wrap gap-2">
+                    <StepChip
+                      label="Yes, research it"
+                      onClick={() =>
+                        chooseStep("Yes, research it", {
+                          campaign: { ...intake.campaign, research: true },
+                        })
+                      }
+                    />
+                    <StepChip
+                      label="No, just plan it"
+                      onClick={() =>
+                        chooseStep("No, just plan it", {
+                          campaign: { ...intake.campaign, research: false },
+                        })
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {options && options.length > 0 && !loading && (
               <div className="bubble-in flex flex-wrap gap-2">
@@ -664,24 +1035,11 @@ export function CreateAgent({
                 </div>
               </div>
             )}
+
+            {campaignRun && <CampaignRunView run={campaignRun} onRetry={runFactory} />}
           </div>
 
           {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
-
-          {(pieceKind === "flyer" || pieceKind === "ad") && (
-            <details open className="mx-3 border-t border-border pt-2">
-              <summary className="cursor-pointer text-[12.5px] font-medium text-foreground">
-                Make {pieceKind === "ad" ? "the ad" : "the flyer"} look like
-              </summary>
-              <div className="mt-2 max-h-48 overflow-y-auto">
-                <LookPicker
-                  value={lookId}
-                  onChange={setLookId}
-                  disabled={loading || generating}
-                />
-              </div>
-            </details>
-          )}
 
           <div className="p-3 pt-2">
             <ComposerBar
@@ -699,7 +1057,8 @@ export function CreateAgent({
               onOpenLibrary={() => setLibraryOpen(true)}
               uploading={uploading}
               ready={ready}
-              disabled={loading || generating}
+              disabled={loading || generating || Boolean(campaignRun) || (step !== null && !TYPED_STEPS.has(step))}
+              placeholder={step ? STEP_PLACEHOLDERS[step] : undefined}
               pendingImages={pendingImages}
               onRemoveImage={(url) =>
                 setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
@@ -815,6 +1174,7 @@ function ComposerBar({
   ready,
   disabled,
   placeholderCycle,
+  placeholder,
   pendingImages,
   onRemoveImage,
 }: {
@@ -838,6 +1198,8 @@ function ComposerBar({
   /** When set (landing), the placeholder cycles through example prompts as a
    * faded-in overlay; the native placeholder is suppressed in its favor. */
   placeholderCycle?: string;
+  /** Overrides the default placeholder (the opening steps say what to type). */
+  placeholder?: string;
   /** Images uploaded and staged, waiting to ride with the next send. */
   pendingImages?: PendingImage[];
   onRemoveImage?: (url: string) => void;
@@ -933,9 +1295,8 @@ function ComposerBar({
           placeholder={
             cycling
               ? undefined
-              : ready
-                ? "Tweak the brief, or hit Generate"
-                : "What do you want to make?"
+              : placeholder ??
+                (ready ? "Tweak the brief, or hit Generate" : "What do you want to make?")
           }
           className="max-h-32 min-h-[40px] w-full resize-none bg-transparent py-2 text-[15px] leading-relaxed text-foreground placeholder:text-muted focus:outline-none"
         />
@@ -972,7 +1333,7 @@ function ActionGrid({
   disabled,
   className,
 }: {
-  onPick: (kind: PieceKind) => void;
+  onPick: (kind: CreateKind) => void;
   disabled: boolean;
   className?: string;
 }) {
@@ -980,29 +1341,116 @@ function ActionGrid({
     <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}>
       <ActionButton
         icon={<MailIcon size={15} />}
-        label="Email"
+        label={CREATE_KIND_LABELS.email}
         onClick={() => onPick("email")}
         disabled={disabled}
       />
       <ActionButton
-        icon={<BlogIcon size={15} />}
-        label="Blog"
-        onClick={() => onPick("blog")}
-        disabled={disabled}
-      />
-      <ActionButton
         icon={<FlyerIcon size={15} />}
-        label="Flyer"
+        label={CREATE_KIND_LABELS.flyer}
         onClick={() => onPick("flyer")}
         disabled={disabled}
       />
       <ActionButton
+        icon={<BlogIcon size={15} />}
+        label={CREATE_KIND_LABELS.blog}
+        onClick={() => onPick("blog")}
+        disabled={disabled}
+      />
+      <ActionButton
         icon={<MegaphoneIcon size={15} />}
-        label="Ad"
-        onClick={() => onPick("ad")}
+        label={CREATE_KIND_LABELS.campaign}
+        onClick={() => onPick("campaign")}
         disabled={disabled}
       />
     </div>
+  );
+}
+
+/** One tappable answer in the built-in opening, styled like the agent's chips. */
+function StepChip({
+  label,
+  onClick,
+  disabled,
+  primary,
+  pressed,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  /** Set for multi-select chips. */
+  pressed?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={pressed}
+      className={cn(
+        "rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors disabled:opacity-50",
+        primary
+          ? "border-accent bg-accent text-white hover:bg-accent-press"
+          : pressed
+            ? "border-accent/40 bg-accent/[0.12] text-foreground"
+            : "border-border bg-surface-2 text-foreground hover:bg-surface-3",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** The planner's progress after the agent hands off a campaign, or its error. */
+function CampaignRunView({
+  run,
+  onRetry,
+}: {
+  run: {
+    summary: string;
+    campaignId: string;
+    research: boolean;
+    phase: string | null;
+    error: { message: string; outOfCredits?: boolean } | null;
+  };
+  onRetry: (summary: string, campaignId: string) => void;
+}) {
+  if (run.error) {
+    return (
+      <div className="bubble-in space-y-2" role="alert">
+        <p className="text-[14px] text-danger">
+          {run.error.message}{" "}
+          {run.error.outOfCredits && (
+            <a href="/billing" className="font-medium underline">
+              Top up credits
+            </a>
+          )}
+        </p>
+        <StepChip primary label="Try again" onClick={() => onRetry(run.summary, run.campaignId)} />
+      </div>
+    );
+  }
+  const steps = run.research
+    ? FACTORY_STEPS
+    : FACTORY_STEPS.filter((s) => s.phase !== "researching");
+  const active = steps.findIndex((s) => s.phase === run.phase);
+  return (
+    <ol className="bubble-in space-y-2.5 rounded-2xl bg-surface-2 px-4 py-3" aria-live="polite">
+      {steps.map((s, i) => (
+        <li key={s.phase} className="flex items-center gap-3 text-[14px]">
+          {i < active ? (
+            <span className="flex h-5 w-5 items-center justify-center text-success">✓</span>
+          ) : i === active ? (
+            <AccentSpinner size={18} className="mx-px" />
+          ) : (
+            <span className="h-5 w-5" />
+          )}
+          <span className={i <= active ? "text-foreground" : "text-muted"}>{s.label}</span>
+        </li>
+      ))}
+      <li className="pl-8 text-[13px] text-muted">This takes a minute or two. The plan opens when it's ready.</li>
+    </ol>
   );
 }
 

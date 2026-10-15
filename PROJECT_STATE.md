@@ -49,6 +49,28 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-14 (late night): Create is one guided chat
+
+- **Create is only the chat now** (the One piece | Campaign switch and
+  `factory-start.tsx` are gone). Built-in opening, answered with buttons and
+  no Claude calls: what are we creating (Email, Flyer design, Blog post,
+  Campaign), what it's for, references or photos, what to do with them
+  (optional). Flyers add a look step; campaigns add what to include, how
+  many, how long, look (social/ads only), and **"research first?"**. The
+  answers go to the agent as one message (`lib/create-intake.ts`), and it
+  asks 2-3 kind-specific follow-ups (flyer: main thing + must-show text,
+  feel, where it goes; email: real detail, what readers do; blog: who's
+  reading, your take, kind of post; campaign: offer, proof, audience).
+- **Campaigns:** the agent calls `start_campaign` with a summary; the client
+  runs `/api/factory` in the chat (reusing the chat's campaign row) and opens
+  the plan. The old email-only `plan_series` is retired (old chats still show
+  their series card).
+- **Web research only runs when the owner says yes** (`research: true` on
+  `/api/factory`; default off). Planning works without it.
+- Chat flyers now carry the brief's feel, offer, price, and product photo.
+  Fixed: the chat route loaded a campaign by id without checking its brand.
+- Typecheck + 726 tests + build green. UNCOMMITTED, no click-through yet.
+
 ## Session 2026-10-14 (night): one Create page, two modes
 
 - **Create (`/`) has a One piece | Campaign switch** (`/?mode=campaign`).

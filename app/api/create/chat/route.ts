@@ -53,7 +53,7 @@ import {
   type GenerateContentInput,
   type GetContentInput,
   type ListRecentContentInput,
-  type PlanSeriesInput,
+  type StartCampaignInput,
   type RememberInput,
   type SaveCompetitorReferenceInput,
   type SelectTopicInput,
@@ -192,9 +192,12 @@ interface TurnState {
   // exists; the client auto-navigates to /drafts/[draftId] when present.
   draftId: string | null;
   channel: "email" | "blog" | "social" | null;
-  // Set by plan_series: every draft created for a multi-email campaign, in
-  // order. The client renders these as a series card instead of navigating.
+  // Drafts from the retired email-series tool, kept so old chats still show
+  // their series card on resume.
   series: SeriesDraftRef[] | null;
+  // Set by start_campaign: the factory description the client hands to
+  // /api/factory along with the settings picked in the app.
+  campaignSummary: string | null;
 }
 
 /**
@@ -247,6 +250,7 @@ export async function POST(req: NextRequest) {
     // client, mirrored into chat_state below). Load it if the client passed
     // an id, otherwise create one.
     let campaign = campaignId ? await getCampaign(campaignId) : null;
+    if (campaign && campaign.brand_id !== brand.id) campaign = null;
     if (!campaign) campaign = await createCampaign(brand.id);
 
     const [products, topics, memories] = await Promise.all([
@@ -334,6 +338,7 @@ export async function POST(req: NextRequest) {
       draftId: null,
       channel: null,
       series: null,
+      campaignSummary: null,
     };
     const dispatchCtx = {
       brand,
@@ -359,8 +364,8 @@ export async function POST(req: NextRequest) {
     const call = () =>
       getAnthropic().messages.create({
         model: DRAFT_MODEL,
-        // 2048, not 1024: a plan_series call carries up to 10 items of
-        // title/angle/key_message JSON alongside the reply text.
+        // 2048, not 1024: a turn can chain several tool calls of brief
+        // fields alongside the reply text.
         max_tokens: 2048,
         // Automatic caching: moves a breakpoint onto the newest block each
         // step, so later tool round-trips in this turn read the earlier ones
@@ -415,13 +420,15 @@ export async function POST(req: NextRequest) {
       // call would only produce "opening your draft" (the fallback below says
       // exactly that).
       if (state.draftId && state.draftId !== draftBefore) break;
+      // Same for a campaign: the client takes over and runs the planner.
+      if (state.campaignSummary) break;
 
       // The follow-up call after an interview step is nearly always an empty
       // reply (the question was already asked alongside the tool call), yet it
       // re-reads the whole ~18k-token prompt. Skip it when the turn is plainly
       // waiting on the user. Not when the brief just became ready or a
       // campaign is being planned: those turns chain on into generate_content
-      // or plan_series.
+      // or start_campaign.
       const waitingOnUser =
         response.content.some((b) => b.type === "text" && b.text.trim()) &&
         response.content.every(
@@ -474,8 +481,8 @@ export async function POST(req: NextRequest) {
     if (!reply) {
       reply = state.draftId
         ? "Done, opening your draft now."
-        : state.series
-          ? "Your series is ready below. Open each email to review it."
+        : state.campaignSummary
+          ? "Planning it now."
           : "What's the one thing this email needs to land?";
     }
     // Chat bubbles render as plain text, so any markdown the model slipped in
@@ -539,6 +546,7 @@ export async function POST(req: NextRequest) {
       draftId: state.draftId,
       channel: state.channel,
       series,
+      campaign: state.campaignSummary ? { summary: state.campaignSummary } : null,
       auto: autoMode,
     });
   } catch (err) {
@@ -605,7 +613,7 @@ async function dispatchTool(
       if (input.campaign_kind === "single") {
         saved.push("campaign_kind cleared, back to a single email");
       } else if (input.campaign_kind && state.brief.campaign_kind === input.campaign_kind) {
-        saved.push(`campaign_kind=${input.campaign_kind} (campaign mode: end with plan_series, never generate_content)`);
+        saved.push(`campaign_kind=${input.campaign_kind}`);
       }
       return saved.length ? `Saved: ${saved.join("; ")}` : "No new fields to save.";
     }
@@ -650,19 +658,6 @@ async function dispatchTool(
     }
     case "generate_content": {
       const input = block.input as GenerateContentInput;
-      // The mechanical backstop for the "campaign collapsed into one email"
-      // failure: while the interview is in campaign mode, a single-draft
-      // generate is refused outright, whatever the model's plan was.
-      if (state.brief.campaign_kind && input.channel !== "social") {
-        return (
-          `Refused: this brief is a ${state.brief.campaign_kind} campaign, and a ` +
-          "campaign always ends in ONE plan_series call covering EVERY email " +
-          "(with each item's subject and preheader from the plan the user " +
-          "approved), never generate_content. Propose the numbered plan if you " +
-          "haven't, then call plan_series. If the user now wants just one " +
-          "email, call update_brief with campaign_kind \"single\" first."
-        );
-      }
       if (!state.topicId) {
         return "Cannot generate yet: no topic is attached to the brief.";
       }
@@ -678,6 +673,9 @@ async function dispatchTool(
               state.brief.angle,
               state.brief.goal ? `Goal: ${state.brief.goal}` : "",
               state.brief.tone ? `Tone: ${state.brief.tone}` : "",
+              state.brief.visual_vibe ? `Feel: ${state.brief.visual_vibe}` : "",
+              state.brief.offer_deal ? `Offer: ${state.brief.offer_deal}` : "",
+              state.brief.offer_price ? `Price: ${state.brief.offer_price}` : "",
               state.brief.constraints,
               state.brief.proof ? `Proof: ${state.brief.proof}` : "",
               state.brief.offer_deadline ? `Deadline: ${state.brief.offer_deadline}` : "",
@@ -700,6 +698,9 @@ async function dispatchTool(
               competitorReferenceId: state.brief.competitor_reference_id,
               flyerFormat: input.social_format === "ad" ? "ad" : "post",
               ...(ctx.lookId ? { lookId: ctx.lookId } : {}),
+              ...(state.brief.product_photo_url
+                ? { productPhotoUrl: state.brief.product_photo_url }
+                : {}),
             }
           : {}),
       });
@@ -707,149 +708,12 @@ async function dispatchTool(
       state.channel = input.channel;
       return JSON.stringify({ draftId, channel: input.channel });
     }
-    case "plan_series": {
-      const input = block.input as PlanSeriesInput;
-      // Titles/angles/messages land in topics and prompts verbatim, so the
-      // em-dash ban has to be enforced here too, not just on reply text.
-      const items = (input.items ?? [])
-        .filter((i) => typeof i.title === "string" && i.title.trim())
-        .slice(0, 12)
-        .map((i) => ({
-          ...i,
-          title: stripEmDashes(i.title.trim()),
-          subject: i.subject ? stripEmDashes(i.subject) : undefined,
-          preheader: i.preheader ? stripEmDashes(i.preheader) : undefined,
-          angle: i.angle ? stripEmDashes(i.angle) : undefined,
-          key_message: i.key_message ? stripEmDashes(i.key_message) : undefined,
-          proof: i.proof ? stripEmDashes(i.proof) : undefined,
-          offer_deadline: i.offer_deadline ? stripEmDashes(i.offer_deadline) : undefined,
-        }));
-      if (items.length < 2) {
-        return "plan_series needs 2 to 12 emails, each with a title.";
-      }
-      const strategyId =
-        ctx.strategy?.id ??
-        (await ensureStrategyAndPrimaryIcp(ctx.brand.id)).strategy.id;
-      const clusterId = await ensureDefaultCluster(strategyId);
-
-      const created: SeriesDraftRef[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        let topicId =
-          item.topic_id && ctx.topics.some((t) => t.id === item.topic_id)
-            ? item.topic_id
-            : null;
-        if (!topicId) {
-          const topic = await createTopic(clusterId, {
-            title: item.title,
-            target_keyword: "",
-            intent: "",
-            funnel_stage: item.funnel_stage ?? "",
-            maps_to_product: item.offer_slug ?? "",
-          });
-          topicId = topic.id;
-        }
-        const topicCtx = await getTopicContext(topicId);
-        if (!topicCtx) continue;
-        // Campaign-level context (goal, audience, constraints, tone, length,
-        // image choice, style example, vibe) carries over; message, angle,
-        // offer, and a per-email image override are per email so the series
-        // doesn't flatten onto one shared brief. A per-item product photo is
-        // resolved the same way the single-email path does: only when this
-        // item's own offer_slug points at a product with a stored photo.
-        const includeImage = item.include_image ?? state.brief.include_image;
-        const itemProduct = item.offer_slug
-          ? ctx.products.find((p) => p.slug === item.offer_slug)
-          : undefined;
-        const productPhotoUrl = itemProduct?.image_url ?? undefined;
-        const draftId = await createDraftShell({
-          ctx: topicCtx,
-          campaignId: ctx.campaignId,
-          type: "email",
-          emailType: item.email_type,
-          seriesSeedIndex: i,
-          seriesBrief: {
-            ...(state.brief.goal ? { goal: state.brief.goal } : {}),
-            ...(state.brief.audience_notes
-              ? { audience_notes: state.brief.audience_notes }
-              : {}),
-            ...(state.brief.constraints
-              ? { constraints: state.brief.constraints }
-              : {}),
-            ...(state.brief.tone ? { tone: state.brief.tone } : {}),
-            ...(state.brief.length ? { length: state.brief.length } : {}),
-            ...(state.brief.style_example
-              ? { style_example: state.brief.style_example }
-              : {}),
-            ...(state.brief.visual_vibe
-              ? { visual_vibe: state.brief.visual_vibe }
-              : {}),
-            // Campaign-wide defaults that were silently dropped on every
-            // multi-email series until now.
-            ...(state.brief.image_style ? { image_style: state.brief.image_style } : {}),
-            ...(state.brief.email_style ? { email_style: state.brief.email_style } : {}),
-            ...(state.brief.hook ? { hook: state.brief.hook } : {}),
-            ...(state.brief.offer_deal ? { offer_deal: state.brief.offer_deal } : {}),
-            ...(state.brief.offer_price ? { offer_price: state.brief.offer_price } : {}),
-            ...(state.brief.offer_exclusions
-              ? { offer_exclusions: state.brief.offer_exclusions }
-              : {}),
-            ...(state.brief.reader_belief
-              ? { reader_belief: state.brief.reader_belief }
-              : {}),
-            // The campaign-wide conversation applies to every email in it.
-            ...(state.brief.conversation_notes
-              ? { conversation_notes: state.brief.conversation_notes }
-              : {}),
-            ...(typeof includeImage === "boolean"
-              ? { include_image: includeImage }
-              : {}),
-            ...(item.key_message ? { key_message: item.key_message } : {}),
-            ...(item.angle ? { angle: item.angle } : {}),
-            ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
-            // The name and subheader the user approved in the plan; generation
-            // uses them (near-)verbatim instead of writing its own.
-            ...(item.subject ? { subject_line: item.subject } : {}),
-            ...(item.preheader ? { preheader: item.preheader } : {}),
-            // Per-item proof/deadline win over the campaign-wide default (set
-            // above from state.brief) so a 5-email series doesn't recite the
-            // same one number five times.
-            ...(item.proof
-              ? { proof: item.proof }
-              : state.brief.proof
-                ? { proof: state.brief.proof }
-                : {}),
-            ...(item.offer_deadline
-              ? { offer_deadline: item.offer_deadline }
-              : state.brief.offer_deadline
-                ? { offer_deadline: state.brief.offer_deadline }
-                : {}),
-            ...(productPhotoUrl
-              ? { product_photo_url: productPhotoUrl, include_image: true }
-              : {}),
-            // Photos the user attached for the campaign ride into every
-            // email of the series (they asked for them in these emails).
-            ...(state.brief.photo_urls?.length
-              ? { photo_urls: state.brief.photo_urls }
-              : {}),
-          },
-        });
-        created.push({
-          draft_id: draftId,
-          title: item.title.trim(),
-          email_type: item.email_type ?? null,
-        });
-      }
-      if (created.length === 0) return "No drafts could be created.";
-      state.series = created;
-      // The campaign is built: drop the interview state so a follow-up "one
-      // more email" in this same chat isn't refused by the campaign guard.
-      delete state.brief.campaign_kind;
-      delete state.brief.campaign_products;
-      delete state.brief.email_count;
-      return JSON.stringify({
-        created: created.map((c) => ({ draftId: c.draft_id, title: c.title })),
-      });
+    case "start_campaign": {
+      const input = block.input as StartCampaignInput;
+      const summary = stripEmDashes(input.summary ?? "").trim().slice(0, 500);
+      if (!summary) return "start_campaign needs a summary of the campaign.";
+      state.campaignSummary = summary;
+      return "Handed to the planner. Reply with one short line that you're planning it now.";
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;
