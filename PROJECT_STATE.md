@@ -38,7 +38,9 @@ are in git history (`git log -p PROJECT_STATE.md`).
 - Publishing is a provider layer (`lib/publishing/`), idempotent per job +
   target.
 - Web research in campaigns only runs when the owner says yes (enforced in
-  code, not just the prompt).
+  code, not just the prompt). The Create chat is different: it searches and
+  fetches on its own whenever context helps, capped at 3 searches and 2
+  fetches per model call (Jordan's call, 2026-10-15).
 - Competitor ads: only distilled strategy reaches copy prompts; competitor
   images reach the image model only inside a look the owner built, with a
   no-copying instruction.
@@ -80,7 +82,8 @@ are in git history (`git log -p PROJECT_STATE.md`).
    to end): the Create chat for each kind, a campaign with "Test 3 first"
    (spends roughly $0.15-0.40 plus the pieces), design looks and designed
    flyers, composed flyers on a brand whose font isn't on Google Fonts
-   (falls back to Inter).
+   (falls back to Inter). Also the Create chat's web search (Oct 15):
+   ask it to research something mid-interview.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

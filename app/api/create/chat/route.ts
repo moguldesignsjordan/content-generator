@@ -44,6 +44,7 @@ import type {
 } from "@/lib/db/types";
 import { CAMPAIGN_BRIEF_TEXT_FIELDS } from "@/lib/db/types";
 import {
+  CHAT_WEB_TOOLS,
   CREATE_TOOLS,
   buildCreateAgentSystem,
   type CampaignTopicOption,
@@ -452,12 +453,20 @@ export async function POST(req: NextRequest) {
               cache_control: { type: "ephemeral" },
               system,
               messages,
-              tools: CREATE_TOOLS,
+              tools: [...CREATE_TOOLS, ...CHAT_WEB_TOOLS],
               tool_choice: { type: "auto" },
             });
             stream.on("text", (delta) => {
               send("delta", { text: needsGap ? `\n\n${delta}` : delta });
               needsGap = false;
+            });
+            stream.on("streamEvent", (event) => {
+              if (event.type !== "content_block_start") return;
+              if (event.content_block.type !== "server_tool_use") return;
+              send("status", {
+                label: event.content_block.name === "web_fetch" ? "Reading the page" : "Searching the web",
+              });
+              needsGap = true;
             });
             return stream.finalMessage();
           };
@@ -482,12 +491,25 @@ export async function POST(req: NextRequest) {
             }
             logUsage("create-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
 
+            // Search citations split one sentence across several text blocks, so
+            // adjacent text blocks join as-is; only text on either side of a
+            // tool call is a separate segment.
+            let segment = "";
             for (const block of response.content) {
-              if (block.type === "text") replyParts.push(block.text);
+              if (block.type === "text") {
+                segment += block.text;
+              } else {
+                if (segment) replyParts.push(segment);
+                segment = "";
+              }
             }
+            if (segment) replyParts.push(segment);
             if (response.content.some((b) => b.type === "text" && b.text.trim())) needsGap = true;
+            if (response.content.some((b) => b.type === "server_tool_use")) calledAnyTool = true;
             messages.push({ role: "assistant", content: response.content });
 
+            // The server's search loop paused mid-turn: resend as-is and it resumes.
+            if (response.stop_reason === "pause_turn") continue;
             if (response.stop_reason !== "tool_use") break;
 
             const toolResults: { type: "tool_result"; tool_use_id: string; content: string }[] = [];

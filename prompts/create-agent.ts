@@ -59,6 +59,17 @@ export const CREATE_TOOLS: Anthropic.Tool[] = [
   ...AGENT_TOOLS,
 ];
 
+/** Searches the chat may run per model call. Each is $0.01 on top of tokens. */
+export const CHAT_MAX_SEARCHES = 3;
+
+/** Server-side web tools for the chat: Anthropic runs them, so nothing is
+ * dispatched locally. Sonnet only: Haiku doesn't take these versions, so the
+ * forced Haiku step keeps CREATE_TOOLS alone. */
+export const CHAT_WEB_TOOLS: Anthropic.ToolUnion[] = [
+  { type: "web_search_20260209", name: "web_search", max_uses: CHAT_MAX_SEARCHES },
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 2 },
+];
+
 /**
  * Builds the system prompt for one create-agent turn. The agent reads the
  * stored brand brain and turns the user's freeform "what are we creating
@@ -417,6 +428,19 @@ export function buildCreateAgentSystem(args: {
     "  create_blog_from_email with that email's id, not a fresh brief.",
     "- \"Make a flyer/social post out of that\", about an existing email, means",
     "  create_flyer_from_email with that email's id.",
+    "",
+    "WEB SEARCH: you have web_search and web_fetch. Use them on your own,",
+    "without asking first, whenever outside context would make the piece",
+    "better: what's working for this kind of offer or audience right now, a",
+    "trend, holiday, or date, a competitor or link they mention, a fact you'd",
+    "otherwise guess. Don't search for what the brand details above already",
+    "answer, and don't search on plain interview turns. At most",
+    `${CHAT_MAX_SEARCHES} searches per message. After searching, say in one short line what`,
+    "you looked up and what you took from it, in your own words (no links),",
+    "then carry on with the next question or the confirm. Never say you can't",
+    "search. Something found on the web is never proof: proof is only the",
+    "brand's own real results. A campaign's research step is separate: still",
+    "ask about it in the campaign confirm.",
     "",
     "AFTER SOMETHING IS MADE:",
     "- When a draft or series was already made in this conversation and the",
