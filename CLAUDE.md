@@ -66,7 +66,7 @@ brands → strategies → icps / pillars → clusters → topics
 ## Conventions and constraints specific to this repo
 
 - **Server-only boundary is enforced, not assumed.** `lib/db/client.ts`, `lib/db/queries.ts`, `lib/clients/anthropic.ts`, and `lib/pipeline/` all import `"server-only"` so secrets (service-role key, Anthropic key) can never reach the client bundle. Keep new secret-touching code behind that boundary.
-- **Draft model is `claude-sonnet-4-6`** (`DRAFT_MODEL` in `lib/clients/anthropic.ts`) — the docs specify "Sonnet for drafts, Opus for hard pieces." Don't swap it to the default Opus without reason. Email generation uses structured outputs (`messages.parse` + `zodOutputFormat`) + adaptive thinking.
+- **Draft model is `claude-sonnet-5`** (`DRAFT_MODEL` in `lib/clients/model-ids.ts`, re-exported by `lib/clients/anthropic.ts`): the docs specify "Sonnet for drafts, Opus for hard pieces." Don't swap it to the default Opus without reason. Email generation uses structured outputs (`messages.parse` + `zodOutputFormat`) + adaptive thinking.
 - **Generation routes set `maxDuration`** (300s on `/api/generate`) — a Claude call with thinking takes 30–90s and exceeds the default serverless timeout.
 - **MailerLite requires the `{$unsubscribe}` merge tag.** `lib/pipeline/generate.ts` enforces it on every email so a draft can't be unpublishable; preserve that guarantee.
 - **The human-approval gate is mandatory** — nothing publishes without an explicit approve action. No auto-publish.
