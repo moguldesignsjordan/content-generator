@@ -4,7 +4,11 @@ import { parse, serialize } from "cookie";
 import { supabaseAnonKey, supabaseUrl } from "./config";
 import { applyRememberPolicy, REMEMBER_COOKIE } from "./remember";
 
+// Client components also render on the server, where there is no document.
+// The Supabase client loads the session in the background, so a throw here
+// becomes an unhandled rejection that kills the serverless process.
 function documentCookieGetAll() {
+  if (typeof document === "undefined") return [];
   const parsed = parse(document.cookie);
   return Object.entries(parsed).map(([name, value]) => ({ name, value: value ?? "" }));
 }
@@ -22,6 +26,7 @@ export function createClient() {
     cookies: {
       getAll: documentCookieGetAll,
       setAll(cookiesToSet) {
+        if (typeof document === "undefined") return;
         const remembered = parse(document.cookie)[REMEMBER_COOKIE] === "1";
         cookiesToSet.forEach(({ name, value, options }) => {
           document.cookie = serialize(name, value, applyRememberPolicy(name, options, remembered));
