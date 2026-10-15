@@ -224,7 +224,8 @@ const EXTRAS_PROPERTY = {
     description:
       "Text for the design's EXTRA TEXT SPOTS, one entry per spot you can " +
       "fill truthfully, typeset into the image exactly as written. Leave a " +
-      "spot out when the brief has nothing real for it. Never use em dashes.",
+      "spot out when the brief has nothing real for it. Only the words to " +
+      "print, never how they're styled. Never use em dashes.",
     items: {
       type: "object",
       properties: {
@@ -327,6 +328,11 @@ export function buildFlyerCopyMessages(args: {
           "- ad.cta_button: the one button that matches the next step.",
         ]
       : ["- caption: 1 to 3 sentences in the brand voice with a clear next step."]),
+    "- facts: every price, original price, discount, turnaround time, shipping",
+    "  or setup promise, guarantee, count, and stat in any field (mockup aside)",
+    "  must come from the brief or the brand context, and only for what it",
+    "  describes: never invent one, and never borrow a number from another",
+    "  service. Without a real fact, sell the benefit without a number.",
     "- scene: imagery and composition only. Never describe the text, colors,",
     "  or fonts; the render prompt handles those.",
     "- mockup: only when the scene shows off a designed item the brand makes",
@@ -378,6 +384,10 @@ export function buildFlyerCopyMessages(args: {
         "built ONLY from real facts in the brief (dates, times, places, the",
         "offer, real values). Leave a spot out when the brief has nothing true",
         "for it: an empty spot is dropped from the design, invented text isn't.",
+        "That includes a spot that needs a missing fact, like an original price",
+        "to strike through or a stat for a badge. Each text is exactly the words",
+        "printed, never a description of how they look (no 'crossed out',",
+        "'in a badge', 'with checkmarks'): the design draws that part.",
         ...args.textSlots.map((slot) => `  - ${slot}`),
       ]
     : [];

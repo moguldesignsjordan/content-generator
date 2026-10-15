@@ -103,13 +103,6 @@ export async function generateFlyerForTopicStreamed(
     if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
     const meta = draftCtx.meta;
     const aspect: FlyerAspect = meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT;
-    // Explicit preset → every option uses it; uploaded reference → no preset
-    // (the reference IS the style); neither → a distinct look per option.
-    const styles = resolveVariantStyles(draftId, {
-      fixedStyle: meta.flyer_style,
-      hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
-      count: meta.flyer_variant_count,
-    });
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
     await patchDraftGeneration(draftId, writing);
@@ -136,11 +129,18 @@ export async function generateFlyerForTopicStreamed(
 
     const usageDeltas: UsageDelta[] = [];
     const look = await resolveFlyerLook(meta, ctx.brand.id, draftId, usageDeltas);
+    // Explicit preset → every option uses it; a look or uploaded reference →
+    // no preset (the reference IS the style); neither → a distinct look per option.
+    const styles = resolveVariantStyles(draftId, {
+      fixedStyle: meta.flyer_style,
+      hasReference: Boolean(look || meta.style_reference_id),
+      count: meta.flyer_variant_count,
+    });
 
     const copies = await generateFlyerVariants(ctx, {
       aspect,
       brief: withClientNote(withLookNote(meta.flyer_brief, look?.profile), meta.client_brand, ctx.brand.name),
-      style: meta.flyer_style,
+      style: look ? undefined : meta.flyer_style,
       styles,
       emailCopy,
       competitorRef,
@@ -247,12 +247,6 @@ export async function regenerateFlyerDraft(
       ? priorStyles[0]
       : undefined
     : meta.flyer_style;
-  // Seeded by the next version so a rejection re-rolls the looks too.
-  const styles = resolveVariantStyles(`${draftId}:${latestVersion + 1}`, {
-    fixedStyle,
-    hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
-    count: meta.flyer_variant_count,
-  });
 
   const competitorRef = await loadCompetitorRef(
     meta.competitor_reference_id,
@@ -262,11 +256,17 @@ export async function regenerateFlyerDraft(
 
   const usageDeltas: UsageDelta[] = [];
   const look = await resolveFlyerLook(meta, ctx.brand.id, draftId, usageDeltas);
+  // Seeded by the next version so a rejection re-rolls the looks too.
+  const styles = resolveVariantStyles(`${draftId}:${latestVersion + 1}`, {
+    fixedStyle,
+    hasReference: Boolean(look || meta.style_reference_id),
+    count: meta.flyer_variant_count,
+  });
 
   const copies = await generateFlyerVariants(ctx, {
     aspect,
     brief: withClientNote(withLookNote(meta.flyer_brief, look?.profile), meta.client_brand, ctx.brand.name),
-    style: fixedStyle,
+    style: look ? undefined : fixedStyle,
     styles,
     emailCopy,
     competitorRef,

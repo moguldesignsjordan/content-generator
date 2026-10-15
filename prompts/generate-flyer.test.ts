@@ -371,6 +371,23 @@ describe("buildFlyerCopyMessages", () => {
     expect(ad).toContain("ad.cta_button");
   });
 
+  it("forbids invented prices, promises, and stats in both formats", () => {
+    for (const format of ["post", "ad"] as const) {
+      const { system } = buildFlyerCopyMessages({ ...base, format });
+      expect(system).toContain("- facts:");
+      expect(system).toContain("never invent one");
+    }
+  });
+
+  it("fills extra spots with printed words only, skipping ones that need a missing fact", () => {
+    const { user } = buildFlyerCopyMessages({
+      ...base,
+      textSlots: ["price callout with strikethrough original price"],
+    });
+    expect(user).toContain("an original price\nto strike through");
+    expect(user).toContain("never a description of how they look");
+  });
+
   it("distills the source email when emailCopy is provided", () => {
     const { user } = buildFlyerCopyMessages({
       ...base,
