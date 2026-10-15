@@ -704,13 +704,7 @@ export function CreateAgent({
                 </motion.span>
               </h2>
               <div className="w-full max-w-xl">
-                <ActionGrid
-                  picked={picked}
-                  onPick={pickKind}
-                  disabled={loading || generating}
-                  className="mb-4"
-                />
-                <motion.div {...rise(0.8)}>
+                <motion.div {...rise(0.6)}>
                   <div className="mb-2 flex justify-end">
                     <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
                   </div>
@@ -734,6 +728,13 @@ export function CreateAgent({
                     pendingImages={pendingImages}
                     onRemoveImage={(url) =>
                       setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
+                    }
+                    footer={
+                      <ActionGrid
+                        picked={picked}
+                        onPick={pickKind}
+                        disabled={loading || generating}
+                      />
                     }
                   />
                 </motion.div>
@@ -1053,6 +1054,7 @@ function ComposerBar({
   placeholderCycle,
   pendingImages,
   onRemoveImage,
+  footer,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -1076,6 +1078,8 @@ function ComposerBar({
   /** Images uploaded and staged, waiting to ride with the next send. */
   pendingImages?: PendingImage[];
   onRemoveImage?: (url: string) => void;
+  /** Sits inside the bar under the input, e.g. the landing's kind chips. */
+  footer?: ReactNode;
 }) {
   const attachRef = useRef<HTMLInputElement>(null);
   const cycling = placeholderCycle !== undefined && !ready;
@@ -1188,6 +1192,7 @@ function ComposerBar({
         <SendIcon size={18} />
       </Button>
       </div>
+      {footer && <div className="border-t border-border px-0.5 pb-0.5 pt-2.5">{footer}</div>}
     </div>
   );
 }
@@ -1212,9 +1217,9 @@ function ActionGrid({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap justify-center gap-2", className)}>
+    <div className={cn("flex flex-wrap gap-2", className)}>
       {(Object.keys(STARTERS) as StarterKind[]).map((kind, i) => (
-        <motion.div key={kind} {...rise(0.55 + i * 0.06)}>
+        <motion.div key={kind} {...rise(0.85 + i * 0.06)}>
           <ActionButton
             icon={STARTER_ICONS[kind]}
             label={STARTERS[kind].label}
