@@ -9,15 +9,17 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
+import { AccentSpinner, Button, LinkButton, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
   CheckIcon,
   CloseIcon,
   ImageIcon,
   PaperclipIcon,
+  RefreshIcon,
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
@@ -26,6 +28,7 @@ import { readSse } from "@/lib/read-sse";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 import { HomeHero } from "./home-hero";
 import { KindTiles } from "./kind-tiles";
+import { KIND_ART } from "./art";
 import type {
   BlogType,
   ClientBrand,
@@ -767,12 +770,12 @@ export function CreateAgent({
             // Conversation — scrolling thread + docked composer.
             <motion.div
               key="thread"
-              className="flex min-h-0 flex-1 flex-col"
+              className="hero-glow flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-border bg-surface/70 backdrop-blur-xl"
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: EASE_OUT }}
             >
-              <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+              <div className="flex items-center justify-between gap-1 border-b border-border bg-surface-2/50 px-3 py-2">
                 <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
                 {card && (
                   <button
@@ -787,7 +790,12 @@ export function CreateAgent({
                 <button
                   type="button"
                   onClick={clearChat}
-                  className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                    confirmClear
+                      ? "bg-danger/10 text-danger hover:bg-danger/15"
+                      : "text-muted hover:bg-surface-2 hover:text-foreground",
+                  )}
                 >
                   {confirmClear ? "Confirm clear?" : "Clear chat"}
                 </button>
@@ -844,17 +852,22 @@ export function CreateAgent({
                   <Bubble key={i} msg={m} />
                 ))}
 
-                {preview && <ChatPreviewCard key={preview.draftId} preview={preview} queued={queued} />}
+                {preview && (
+                  <div className="sm:pl-9">
+                    <ChatPreviewCard key={preview.draftId} preview={preview} queued={queued} />
+                  </div>
+                )}
 
                 {options && options.length > 0 && !loading && (
-                  <div className="bubble-in flex flex-wrap gap-2">
-                    {options.map((opt) => (
+                  <div className="flex flex-wrap gap-2 pl-9">
+                    {options.map((opt, i) => (
                       <button
                         key={opt.id}
                         type="button"
                         onClick={() => send(opt.label)}
                         disabled={loading || generating}
-                        className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+                        className={cn("bubble-in", CHIP_CLASS)}
+                        style={{ animationDelay: `${i * 45}ms`, animationFillMode: "backwards" }}
                       >
                         {opt.label}
                       </button>
@@ -863,7 +876,11 @@ export function CreateAgent({
                 )}
 
                 {lookPickerOpen && !loading && (
-                  <div className="bubble-in space-y-3 rounded-2xl border border-border p-3">
+                  <div className="bubble-in space-y-3 rounded-[22px] border border-border bg-surface-2 p-3.5 sm:ml-9">
+                    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+                      <span className="bar-spectrum h-1 w-4 rounded-full" />
+                      Pick a style
+                    </span>
                     <LookPicker value={lookId} onChange={setLookId} />
                     <StepChip
                       primary
@@ -894,7 +911,11 @@ export function CreateAgent({
                   </div>
                 )}
 
-                {campaignRun && <CampaignRunView run={campaignRun} onRetry={runFactory} />}
+                {campaignRun && (
+                  <div className="sm:pl-9">
+                    <CampaignRunView run={campaignRun} onRetry={runFactory} />
+                  </div>
+                )}
               </div>
 
               {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
@@ -1221,13 +1242,17 @@ function StepChip({
           ? "border-accent bg-accent text-white hover:bg-accent-press"
           : pressed
             ? "border-accent/40 bg-accent/[0.12] text-foreground"
-            : "border-border bg-surface-2 text-foreground hover:bg-surface-3",
+            : CHIP_CLASS,
       )}
     >
       {label}
     </button>
   );
 }
+
+/** An answer chip in the thread: lifts toward the brand light on hover. */
+const CHIP_CLASS =
+  "rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-[border-color,box-shadow,transform] duration-200 hover:border-accent/45 hover:shadow-[0_0_24px_-12px_rgba(255,61,140,0.5)] active:scale-[0.97] disabled:opacity-50";
 
 /** The planner's progress after the agent hands off a campaign, or its error. */
 function CampaignRunView({
@@ -1237,45 +1262,72 @@ function CampaignRunView({
   run: CampaignRun;
   onRetry: (handoff: CampaignHandoff, campaignId: string) => void;
 }) {
-  if (run.error) {
-    return (
-      <div className="bubble-in space-y-2" role="alert">
-        <p className="text-[14px] text-danger">
-          {run.error.message}{" "}
-          {run.error.outOfCredits && (
-            <a href="/billing" className="font-medium underline">
-              Top up credits
-            </a>
-          )}
-        </p>
-        <StepChip primary label="Try again" onClick={() => onRetry(run.handoff, run.campaignId)} />
-      </div>
-    );
-  }
   const steps = run.handoff.research
     ? FACTORY_STEPS
     : FACTORY_STEPS.filter((s) => s.phase !== "researching");
   const active = run.phase === "opening" ? steps.length : steps.findIndex((s) => s.phase === run.phase);
   return (
-    <ol className="bubble-in space-y-2.5 rounded-2xl bg-surface-2 px-4 py-3" aria-live="polite">
-      {steps.map((s, i) => (
-        <li key={s.phase} className="flex items-center gap-3 text-[14px]">
-          {i < active ? (
-            <span className="flex h-5 w-5 items-center justify-center text-success">✓</span>
-          ) : i === active ? (
-            <AccentSpinner size={18} className="mx-px" />
+    <div className="bubble-in overflow-hidden rounded-[22px] border border-border bg-surface-2">
+      <div className="flex items-center gap-3 px-3.5 pb-3 pt-3.5">
+        <span className="art-frame h-10 w-10 shrink-0 overflow-hidden rounded-[12px]">
+          <Image src={KIND_ART.campaign} alt="" sizes="40px" className="h-full w-full scale-[1.2] object-cover" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-2">Campaign</p>
+          <p className="truncate text-[14px] font-semibold leading-snug text-foreground">{run.handoff.summary}</p>
+        </div>
+      </div>
+
+      {run.error ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-3.5 py-3" role="alert">
+          <p className="min-w-0 flex-1 text-[13px] text-danger">{run.error.message}</p>
+          {run.error.outOfCredits ? (
+            <LinkButton href="/billing" size="sm" variant="gradient">
+              Top up credits
+            </LinkButton>
           ) : (
-            <span className="h-5 w-5" />
+            <Button size="sm" variant="outline" onClick={() => onRetry(run.handoff, run.campaignId)}>
+              <RefreshIcon size={15} />
+              Try again
+            </Button>
           )}
-          <span className={i === active ? "text-shimmer" : i < active ? "text-foreground" : "text-muted"}>
-            {s.label}
-          </span>
-        </li>
-      ))}
-      <li className="pl-8 text-[13px] text-muted">
-        {run.phase === "opening" ? "Opening your plan..." : "This takes a minute or two. The plan opens when it's ready."}
-      </li>
-    </ol>
+        </div>
+      ) : (
+        <>
+          <ol className="space-y-2.5 px-3.5 pb-3" aria-live="polite">
+            {steps.map((s, i) => (
+              <li key={s.phase} className="flex items-center gap-3 text-[14px]">
+                {i < active ? (
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
+                    <CheckIcon size={13} />
+                  </span>
+                ) : i === active ? (
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+                    <AccentSpinner size={18} />
+                  </span>
+                ) : (
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-[11px] font-semibold tabular-nums text-muted-2">
+                    {i + 1}
+                  </span>
+                )}
+                <span className={i === active ? "text-shimmer font-medium" : i < active ? "text-foreground" : "text-muted"}>
+                  {s.label}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p className="border-t border-border px-3.5 py-2.5 text-[12px] text-muted-2">
+            {run.phase === "opening" ? "Opening your plan..." : "This takes a minute or two. The plan opens when it's ready."}
+          </p>
+          <div className="h-[3px] overflow-hidden bg-surface-3">
+            <div
+              className="bg-spectrum h-full w-1/3 rounded-full"
+              style={{ animation: "progress-indeterminate 1.3s ease-in-out infinite" }}
+            />
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1300,7 +1352,7 @@ function Bubble({ msg, live }: { msg: Msg; live?: boolean }) {
   if (isUser) {
     return (
       <div className="bubble-in flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
+        <div className="max-w-[85%] rounded-[20px] rounded-br-md bg-accent px-4 py-2.5 text-[14.5px] leading-relaxed text-white shadow-[0_8px_24px_-14px_rgba(255,61,140,0.7)] sm:max-w-[75%]">
           {msg.images && msg.images.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {msg.images.map((url) => (
@@ -1309,7 +1361,7 @@ function Bubble({ msg, live }: { msg: Msg; live?: boolean }) {
                   key={url}
                   src={url}
                   alt=""
-                  className="h-16 w-16 rounded-[var(--radius-md)] object-cover"
+                  className="h-20 w-20 rounded-[var(--radius-md)] object-cover ring-1 ring-white/25"
                 />
               ))}
             </div>
@@ -1322,7 +1374,7 @@ function Bubble({ msg, live }: { msg: Msg; live?: boolean }) {
   return (
     <div className="bubble-in flex items-end gap-2">
       <AgentDot className="mb-0.5" />
-      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground">
+      <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] rounded-bl-md border border-border bg-surface-2 px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground sm:max-w-[75%]">
         {msg.content}
         {live && (
           <span aria-hidden className="caret-blink ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[3px] bg-foreground" />
@@ -1465,7 +1517,7 @@ function BriefCardView({
   return (
     <div
       className={cn(
-        "bubble-in rounded-[var(--radius-lg)] border bg-surface-2 p-3 transition-shadow duration-300",
+        "bubble-in rounded-[22px] border bg-surface-2 p-3.5 transition-shadow duration-300",
         // Ready is the payoff moment: the brief wears the spectrum hairline
         // and a soft halo, signaling "this is what gets generated".
         ready ? "ring-spectrum glow-spectrum-soft border-transparent" : "border-border",
@@ -1657,7 +1709,7 @@ function SeriesCardView({ items }: { items: SeriesDraftRef[] }) {
   }
 
   return (
-    <div className="bubble-in rounded-[var(--radius-lg)] border border-border bg-surface-2 p-3">
+    <div className="bubble-in rounded-[22px] border border-border bg-surface-2 p-3.5">
       <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
         <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
           <span className="bar-spectrum h-1 w-4 rounded-full" />
@@ -1935,7 +1987,7 @@ function WorkingLine({
   return (
     <div className="bubble-in flex items-end gap-2" role="status" aria-live="polite">
       {showDot ? <AgentDot className="mb-0.5" /> : <span className="w-7 shrink-0" />}
-      <div className="flex items-center gap-2.5 rounded-2xl rounded-bl-sm bg-surface-2 px-4 py-3">
+      <div className="flex items-center gap-2.5 rounded-[20px] rounded-bl-md border border-border bg-surface-2 px-4 py-3">
         <span className="inline-flex gap-1">
           {(["bg-amber", "bg-magenta", "bg-cyan"] as const).map((tone, i) => (
             <span
