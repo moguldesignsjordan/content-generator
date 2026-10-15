@@ -255,8 +255,29 @@ export const REFERENCE_DIRECTIVES: Record<ReferenceUse, string> = {
     "refined and composed as described above.",
 };
 
+/**
+ * Appended when the brand's own liked heroes ride along as references (see
+ * listLikedHeroImages). `afterSubject` is set when a subject reference (a
+ * product photo) is attached first, so the model knows which image is which.
+ */
+export function brandLookDirective(count: number, afterSubject: boolean): string {
+  const which = afterSubject
+    ? `The ${count === 1 ? "last attached image is" : `last ${count} attached images are`}`
+    : count === 1
+      ? "The attached image is"
+      : "The attached images are";
+  return (
+    `${which} this brand's past hero images: match their look and finish ` +
+    "(rendering style, lighting, level of detail, mood) so this reads as the " +
+    "same company, but never copy their subjects or layout."
+  );
+}
+
 export interface ImagePromptOutput {
   scene: string;
+  /** Framing, placement, viewpoint (and light, for photos). Optional so a
+   * response without it still renders from the scene alone. */
+  composition?: string;
   alt: string;
 }
 
@@ -273,10 +294,21 @@ export const IMAGE_PROMPT_TOOL: Anthropic.Tool = {
       scene: {
         type: "string",
         description:
-          "One or two sentences describing the concrete subject/scene that " +
-          "visualizes this piece's core idea. Concrete nouns and actions, no " +
+          "One sentence, written as a lowercase noun phrase that completes " +
+          "'An image of ...', naming the concrete subject/scene that " +
+          "visualizes this piece's core idea and the specific details that make " +
+          "it this business's world. Concrete nouns and actions, no " +
           "abstractions like 'success' or 'growth' by themselves, no style or " +
           "color words, no text elements.",
+      },
+      composition: {
+        type: "string",
+        description:
+          "Two or three full sentences on how the shot is framed: where the " +
+          "main subject sits in the frame, where the empty space is, the " +
+          "viewpoint and distance (eye level, overhead, close-up, wide). For " +
+          "the 'photo' style only, also the light (direction, time of day). " +
+          "No palette or art-style words.",
       },
       alt: {
         type: "string",
@@ -285,7 +317,7 @@ export const IMAGE_PROMPT_TOOL: Anthropic.Tool = {
           "describing what a reader would see. Never starts with 'Image of'.",
       },
     },
-    required: ["scene", "alt"],
+    required: ["scene", "composition", "alt"],
   },
 };
 
@@ -296,6 +328,9 @@ export function buildFinalImagePrompt(
   tokens: BrandTokens,
   referenceUse?: ReferenceUse,
   brandPalette?: BrandPaletteMode,
+  /** The scene writer's framing notes, appended after the scaffold so the
+   * scaffold's own sentence (which {SCENE} completes) stays grammatical. */
+  composition?: string,
 ): string {
   const c = tokens.colors;
   // Texture is deliberately a pure brand backdrop, so it gets the full
@@ -308,9 +343,11 @@ export function buildFinalImagePrompt(
   const palette = paletteColors.filter(Boolean).join(", ");
   const mode = brandPalette ?? resolveBrandPalette(style);
   const color = COLOR_TREATMENTS[style][mode].replace("{PALETTE}", palette);
-  const base = STYLE_SCAFFOLDS[style]
+  const scaffold = STYLE_SCAFFOLDS[style]
     .replace("{SCENE}", scene.trim().replace(/\.$/, ""))
     .replace("{COLOR}", color);
+  const framing = composition?.trim();
+  const base = framing ? `${scaffold} Composition: ${framing}` : scaffold;
   return referenceUse ? `${base} ${REFERENCE_DIRECTIVES[referenceUse]}` : base;
 }
 
@@ -358,7 +395,8 @@ export function buildImagePromptMessages(args: {
     "  piece wants a scene with movement, a moment, or a bit of surprise; a",
     "  sleek or premium piece wants one still, considered object with lots of",
     "  breathing room. Energy shows up in WHAT the scene depicts, never in",
-    "  style, palette, lighting, or quality words, those stay the scaffold's job.",
+    "  style, palette, or quality words, those stay the scaffold's job (light",
+    "  only as the COMPOSITION rule below allows).",
     "- No text, letters, numbers, screens with readable UI, or logos in the scene.",
     "- For the 'texture' style, describe an abstract composition (shapes,",
     "  gradients, motion), not objects or people.",
@@ -368,8 +406,17 @@ export function buildImagePromptMessages(args: {
     "- For 'watercolor', pick ONE clear subject with room for the washes to breathe.",
     "- For 'retro', keep it to 1 to 3 bold, iconic shapes a poster could carry.",
     "- For 'duotone', describe ONE strong subject with a clean, readable silhouette.",
+    "- The scene names specifics, not categories: not 'a business owner at",
+    "  work' but 'a florist trimming eucalyptus stems at a zinc counter, a",
+    "  half-wrapped bouquet by the register'. Two or three telling details beat a list.",
+    "- COMPOSITION: the image is a wide 16:9 hero that email clients may crop",
+    "  at the edges, so keep the subject inside the middle 80% of the frame and",
+    "  put it off-center (left or right third) with clear open space on the",
+    "  other side. Name the viewpoint and distance. For 'photo' only, name the",
+    "  light: its direction and the time of day (soft window light from the",
+    "  left, late afternoon). For every other style, leave light to the style.",
     "- NEVER use em dashes anywhere.",
-    "Call save_image_prompt once.",
+    "Call save_image_prompt once, with scene, composition, and alt.",
   ].join("\n");
 
   const referenceLine =
@@ -394,7 +441,7 @@ export function buildImagePromptMessages(args: {
       ? `THE USER ASKED FOR THIS SUBJECT (hard constraint, keep every element they named): ${subject}`
       : "No subject given: infer the strongest visual from the topic and headline.",
     "",
-    "Call save_image_prompt with the scene and alt text.",
+    "Call save_image_prompt with the scene, composition, and alt text.",
   ]
     .filter(Boolean)
     .join("\n");

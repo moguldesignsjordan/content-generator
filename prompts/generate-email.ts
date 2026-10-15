@@ -3,6 +3,7 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   CampaignBrief,
   ContentImage,
+  DraftEdit,
   EmailLengthPreference,
   EmailStyleId,
   EmailTemplateId,
@@ -11,6 +12,7 @@ import type {
   Product,
   TopicContext,
   Topic,
+  TopPerformingEmail,
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import {
@@ -517,6 +519,62 @@ export function buildFeedbackBlock(examples: FeedbackEmailExample[] | undefined)
 }
 
 /**
+ * How the reviewer has been hand-editing past drafts (draft_edits), rendered
+ * as before/after pairs so every correction shapes the next draft without a
+ * trip to Settings. Style edits carry only the instruction. Empty string when
+ * nothing has been edited, so the prompt is unchanged for new accounts.
+ */
+export function buildEditsBlock(edits: DraftEdit[] | undefined, limit = 10): string {
+  const clip = (s: string) => {
+    const flat = s.replace(/\s+/g, " ").trim();
+    return flat.length > 240 ? `${flat.slice(0, 240)}...` : flat;
+  };
+  const lines = (edits ?? [])
+    .map((e) => {
+      const where = e.region ? ` (${e.region})` : "";
+      if (e.kind === "inline" && e.before_text?.trim() && e.after_text?.trim()) {
+        return [
+          `- Edited${where}:`,
+          `  We wrote: "${clip(e.before_text)}"`,
+          `  They changed it to: "${clip(e.after_text)}"`,
+        ].join("\n");
+      }
+      if (e.kind === "style" && e.instruction?.trim()) {
+        return `- Design change they asked for${where}: "${clip(e.instruction)}"`;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .slice(0, limit);
+  if (!lines.length) return "";
+  return [
+    "HOW THE REVIEWER EDITS YOUR DRAFTS (their recent hand corrections, newest",
+    "first). Work out the pattern behind them (shorter sentences, plainer words,",
+    "less hype, a different register) and write that way from the start. Never",
+    "reuse their wording; these were for other emails:",
+    ...lines,
+  ].join("\n");
+}
+
+/**
+ * Subject lines that actually got opened, for the subject-line writer. The
+ * angle pass sees these too (with openings, see prompts/pick-angle.ts); this
+ * is the narrow subject-only form, since the subject is where open rate is won.
+ */
+export function buildSubjectPerformanceBlock(top: TopPerformingEmail[] | undefined): string {
+  if (!top?.length) return "";
+  const pct = (n: number) => `${n.toFixed(1)}%`;
+  return [
+    "SUBJECT LINES THAT WORKED FOR THIS LIST (real send data, best first). Learn",
+    "what this audience opens (length, specificity, tone, question or statement)",
+    "and write subjects in that spirit. Never reuse or lightly reword them:",
+    ...top.map(
+      (e) => `- "${e.subject}" (opened ${pct(e.open_rate)}, clicked ${pct(e.click_rate)})`,
+    ),
+  ].join("\n");
+}
+
+/**
  * The QA reviewer's findings, rendered as a fix-this nudge appended to the
  * ORIGINAL user turn (the same shape the length retry uses, so the cached
  * system prompt still lands and the draft keeps its brief, layout, and style).
@@ -608,6 +666,11 @@ export function buildEmailMessages(
     /** Recent thumbs-rated past emails (listFeedbackEmailExamples), injected
      * as liked/disliked taste examples so ratings improve future drafts. */
     feedbackExamples?: FeedbackEmailExample[];
+    /** The reviewer's recent hand edits (listDraftEdits), as before/after
+     * pairs so their corrections carry into every new draft. */
+    recentEdits?: DraftEdit[];
+    /** Best-performing past sends (listTopPerformingEmails), for subjects. */
+    topPerformers?: TopPerformingEmail[];
     /** The angle chosen up front by the strategy pass (lib/pipeline/pick-angle).
      * Absent when that step was skipped or failed, in which case the model
      * chooses its own angle as it always did. */
@@ -689,6 +752,7 @@ export function buildEmailMessages(
     referenceBlock,
     competitorBlock,
     buildFeedbackBlock(opts.feedbackExamples),
+    buildEditsBlock(opts.recentEdits),
     "",
     designBrief,
     "",
@@ -708,6 +772,7 @@ export function buildEmailMessages(
     "  truncates), curiosity or specificity over hype. No ALL CAPS, no 'FREE!!!',",
     "  no stacked punctuation or emoji, no misleading claims (spam triggers).",
     "  Include the keyword in the subject or opening paragraph where it fits naturally.",
+    buildSubjectPerformanceBlock(opts.topPerformers),
     "- The preheader complements the subject with new information; restating the",
     "  subject wastes the inbox preview line.",
     "- CTA copy is action plus value ('Get my content plan'), never 'Submit' or",

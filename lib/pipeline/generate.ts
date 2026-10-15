@@ -14,7 +14,9 @@ import {
   getLatestDraftVersion,
   getRecentEmailStyleVariants,
   getTopicContext,
+  listDraftEdits,
   listFeedbackEmailExamples,
+  listTopPerformingEmails,
   patchDraftGeneration,
   populateDraft,
   persistRegeneratedDraft,
@@ -135,7 +137,13 @@ export async function generateEmailForTopicStreamed(
         : { styles: [], layouts: [] };
     // Thumbs the reviewer gave past emails, fed back as taste examples so
     // every rating makes the next draft better (non-fatal: [] on any error).
-    const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
+    // Their hand edits and the subjects that got opened ride along the same
+    // way (both non-fatal: [] on any error or an unapplied migration).
+    const [feedbackExamples, recentEdits, topPerformers] = await Promise.all([
+      listFeedbackEmailExamples(ctx.brand.id),
+      listDraftEdits(ctx.brand.id, 20),
+      listTopPerformingEmails(ctx.brand.id, 5),
+    ]);
 
     // Decide WHAT to argue before writing it. Non-fatal: a null angle means
     // the drafting prompt is exactly what it was before this step existed.
@@ -161,6 +169,8 @@ export async function generateEmailForTopicStreamed(
         recentStyles: recent.styles,
         recentLayouts: recent.layouts,
         feedbackExamples,
+        recentEdits,
+        topPerformers,
         angle,
       });
     const designReference = await loadEmailDesignReference(ctx, draftId);
@@ -1149,7 +1159,11 @@ export async function regenerateEmailDraft(
   // style (like the hero image above) instead of rotating again. An explicit
   // opts.templateOverride (the reviewer picked a different layout in the UI)
   // still wins over the stored one. Only a FRESH generation rotates.
-  const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id);
+  const [feedbackExamples, recentEdits, topPerformers] = await Promise.all([
+    listFeedbackEmailExamples(ctx.brand.id),
+    listDraftEdits(ctx.brand.id, 20),
+    listTopPerformingEmails(ctx.brand.id, 5),
+  ]);
   const angles =
     (opts.angleIndex !== undefined
       ? switchAngle(draftCtx.meta.angles, opts.angleIndex)
@@ -1163,6 +1177,8 @@ export async function regenerateEmailDraft(
       heroImage,
       emailTypeOverride: draftCtx.emailType ?? undefined,
       feedbackExamples,
+      recentEdits,
+      topPerformers,
       // Reuse the angle this draft was built on rather than paying for a fresh
       // strategy pass: a rejection carries explicit instructions that outrank
       // it anyway, and keeping the angle is what makes this a revision of the

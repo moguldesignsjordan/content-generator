@@ -7,6 +7,7 @@ import {
   IMAGE_STYLE_LABELS,
   VARIED_STYLE_POOL,
   VISUAL_VIBE_IMAGE_STYLE,
+  brandLookDirective,
   buildFinalImagePrompt,
   buildImageBrandContext,
   buildImagePromptMessages,
@@ -91,6 +92,41 @@ describe("buildFinalImagePrompt", () => {
         expect(prompt).not.toContain("{PALETTE}");
       }
     }
+  });
+});
+
+describe("buildFinalImagePrompt composition", () => {
+  it("appends the composition after the scaffold, before the reference directive", () => {
+    const prompt = buildFinalImagePrompt(
+      "photo",
+      "a desk",
+      TOKENS,
+      "subject",
+      "none",
+      "Subject on the left third, open space right.",
+    );
+    const comp = prompt.indexOf("Composition: Subject on the left third");
+    expect(comp).toBeGreaterThan(prompt.indexOf("photograph of a desk"));
+    expect(prompt.indexOf("A reference image is attached")).toBeGreaterThan(comp);
+  });
+
+  it("is unchanged when no composition is given", () => {
+    expect(buildFinalImagePrompt("photo", "a desk", TOKENS)).not.toContain("Composition:");
+    expect(buildFinalImagePrompt("photo", "a desk", TOKENS, undefined, undefined, "  ")).not.toContain(
+      "Composition:",
+    );
+  });
+});
+
+describe("brandLookDirective", () => {
+  it("names which images are the brand's when a subject comes first", () => {
+    expect(brandLookDirective(2, true)).toMatch(/^The last 2 attached images are/);
+    expect(brandLookDirective(1, true)).toMatch(/^The last attached image is/);
+  });
+
+  it("refers to all attachments when there is no subject reference", () => {
+    expect(brandLookDirective(1, false)).toMatch(/^The attached image is/);
+    expect(brandLookDirective(2, false)).toMatch(/^The attached images are/);
   });
 });
 

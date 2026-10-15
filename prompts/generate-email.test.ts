@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   Brand,
   CampaignBrief,
+  DraftEdit,
   EmailTemplateId,
   EmailType,
   FeedbackEmailExample,
@@ -13,9 +14,11 @@ import type {
 import {
   EMAIL_LENGTH_TARGETS,
   buildBriefPhotosBlock,
+  buildEditsBlock,
   buildFeedbackBlock,
   buildOfferBlock,
   buildQaRevisionNudge,
+  buildSubjectPerformanceBlock,
   countEmailWords,
   resolveEmailLayout,
   resolveEmailTemplateId,
@@ -295,6 +298,63 @@ describe("resolveLengthTarget", () => {
   it("never drops below the 50-word floor on the tightest type", () => {
     const short = resolveLengthTarget("promotional", "short");
     expect(short.words[0]).toBeGreaterThanOrEqual(50);
+  });
+});
+
+function makeEdit(overrides: Partial<DraftEdit> = {}): DraftEdit {
+  return {
+    kind: "inline",
+    region: "Body",
+    before_text: "We are thrilled to announce our new offering.",
+    after_text: "New this week: logo refreshes.",
+    instruction: null,
+    created_at: "2026-10-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("buildEditsBlock", () => {
+  it("returns empty when there is nothing usable", () => {
+    expect(buildEditsBlock(undefined)).toBe("");
+    expect(buildEditsBlock([])).toBe("");
+    expect(buildEditsBlock([makeEdit({ before_text: null })])).toBe("");
+    expect(buildEditsBlock([makeEdit({ kind: "style", instruction: " " })])).toBe("");
+  });
+
+  it("renders inline edits as before/after pairs", () => {
+    const block = buildEditsBlock([makeEdit()]);
+    expect(block).toContain('We wrote: "We are thrilled to announce our new offering."');
+    expect(block).toContain('They changed it to: "New this week: logo refreshes."');
+    expect(block).toContain("(Body)");
+  });
+
+  it("renders style edits as the instruction", () => {
+    const block = buildEditsBlock([
+      makeEdit({ kind: "style", region: null, before_text: null, after_text: null, instruction: "Bigger button" }),
+    ]);
+    expect(block).toContain('Design change they asked for: "Bigger button"');
+  });
+
+  it("caps the count and clips long text", () => {
+    const edits = Array.from({ length: 15 }, (_, i) => makeEdit({ after_text: `Edit ${i}` }));
+    const block = buildEditsBlock(edits);
+    expect(block.match(/They changed it to/g)).toHaveLength(10);
+    const long = buildEditsBlock([makeEdit({ before_text: "a ".repeat(400) })]);
+    expect(long).toContain("...");
+  });
+});
+
+describe("buildSubjectPerformanceBlock", () => {
+  it("returns empty with no data", () => {
+    expect(buildSubjectPerformanceBlock(undefined)).toBe("");
+    expect(buildSubjectPerformanceBlock([])).toBe("");
+  });
+
+  it("lists subjects with their rates", () => {
+    const block = buildSubjectPerformanceBlock([
+      { subject: "Your logo is costing you", opening: "", open_rate: 42.15, click_rate: 3.5 },
+    ]);
+    expect(block).toContain('"Your logo is costing you" (opened 42.1%, clicked 3.5%)');
   });
 });
 

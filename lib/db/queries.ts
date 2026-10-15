@@ -19,6 +19,7 @@ import type {
   Cluster,
   CompetitorProfile,
   CompetitorReference,
+  ContentImageStyle,
   ContentJobType,
   ContentSchedule,
   DraftEdit,
@@ -1499,6 +1500,43 @@ export async function listFeedbackEmailExamples(
     });
   }
   return examples;
+}
+
+/**
+ * Hero images from drafts the reviewer gave a thumbs up, in one art style,
+ * newest first: the brand's own approved look, passed to the image model as
+ * style references so new heroes look like the same company. Same style only,
+ * since a watercolor reference would drag a photo render off course. Uploads
+ * are excluded (style "uploaded" never matches a generated style).
+ *
+ * Non-fatal: any error means no references and the render is unchanged.
+ */
+export async function listLikedHeroImages(
+  brandId: string,
+  style: ContentImageStyle,
+  limit = 2,
+): Promise<string[]> {
+  try {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("drafts")
+      .select("meta, content_jobs!inner ( brand_id )")
+      .eq("content_jobs.brand_id", brandId)
+      .eq("feedback", "up")
+      .eq("meta->hero_image->>style", style)
+      .order("created_at", { ascending: false })
+      .limit(limit * 3);
+    if (error) throw error;
+    const urls = ((data ?? []) as { meta: DraftMeta | null }[])
+      .map((row) => row.meta?.hero_image?.url)
+      .filter((u): u is string => Boolean(u));
+    return [...new Set(urls)].slice(0, limit);
+  } catch (err) {
+    logWarn("db:listLikedHeroImages", err instanceof Error ? err.message : String(err), {
+      brandId,
+    });
+    return [];
+  }
 }
 
 /**
