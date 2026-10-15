@@ -61,7 +61,7 @@ export function ForgotPasswordCard() {
     <div>
       <h1 className="font-display text-lg font-semibold">Reset your password</h1>
       <p className="mt-1.5 text-sm text-muted">
-        Enter your email and we'll send you a link to set a new password.
+        Enter your email and we&apos;ll send you a link to set a new password.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">

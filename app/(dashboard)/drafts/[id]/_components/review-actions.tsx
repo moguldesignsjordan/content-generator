@@ -824,7 +824,7 @@ export function ReviewActions({
           ) : (
             !ctaUrl.trim() && (
               <p className="mt-1.5 text-[11px] text-warning">
-                No link set yet, the button won't go anywhere until you add one.
+                No link set yet, the button won&apos;t go anywhere until you add one.
               </p>
             )
           )}
@@ -1135,7 +1135,7 @@ export function ReviewActions({
             <>
               <p className="text-sm text-muted">
                 Sends this email through MailerLite immediately, no separate
-                step there. Schedule it for later instead if you'd rather.
+                step there. Schedule it for later instead if you&apos;d rather.
               </p>
               <div className="flex gap-2">
                 <Button

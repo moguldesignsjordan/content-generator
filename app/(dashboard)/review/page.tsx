@@ -35,7 +35,7 @@ export default async function ReviewPage() {
         />
       ) : (
         <Card className="p-6 text-sm text-muted">
-          Nothing to review right now. New pieces show up here as soon as they're made.
+          Nothing to review right now. New pieces show up here as soon as they&apos;re made.
         </Card>
       )}
     </>

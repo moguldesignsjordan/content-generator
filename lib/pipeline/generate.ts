@@ -69,7 +69,7 @@ import {
   generateContentImage,
   isGeminiConfigured,
   spliceHeroImage,
-  useProductPhotoAsHero,
+  heroFromProductPhoto,
 } from "./generate-image";
 import {
   IMAGE_STYLE_LABELS as STYLE_LABELS,
@@ -218,12 +218,12 @@ export async function generateEmailForTopicStreamed(
     // A real product photo (the mapped product's own image, or one the user
     // uploaded in the interview) wins over AI generation: it's the actual
     // thing being sold, and it's free. Falls through to the normal AI path
-    // on any fetch/optimize failure (useProductPhotoAsHero is non-fatal).
+    // on any fetch/optimize failure (heroFromProductPhoto is non-fatal).
     if (!skipImage && brief?.product_photo_url) {
       const imaging = { phase: "imaging", label: "Adding your product photo" };
       await patchDraftGeneration(draftId, imaging).catch(() => {});
       onEvent({ type: "phase", ...imaging });
-      heroImage = await useProductPhotoAsHero(
+      heroImage = await heroFromProductPhoto(
         brief.product_photo_url,
         copy.headline ?? ctx.topic.title,
         ctx.brand.id,

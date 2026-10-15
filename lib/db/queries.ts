@@ -124,7 +124,7 @@ export async function getBrandStrategy(userId: string): Promise<{
     p.clusters.flatMap((c) => c.topics.map((t) => t.id)),
   );
 
-  let latestDraftByTopic: Record<string, { id: string; state: string; version: number }> = {};
+  const latestDraftByTopic: Record<string, { id: string; state: string; version: number }> = {};
   if (topicIds.length > 0) {
     const { data: jobs } = await db
       .from("content_jobs")

@@ -50,7 +50,7 @@ export function ResetPasswordCard() {
   if (linkState === "invalid") {
     return (
       <div className="text-center">
-        <h2 className="font-display text-lg font-semibold">This link didn't work</h2>
+        <h2 className="font-display text-lg font-semibold">This link didn&apos;t work</h2>
         <p className="mt-1.5 text-sm text-muted">
           The reset link is invalid or has expired. Request a fresh one and open it in this browser.
         </p>

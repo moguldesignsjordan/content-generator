@@ -319,7 +319,7 @@ export function CompetitorReferencePanel({
 
       {items.length === 0 ? (
         <p className="px-1 text-sm text-muted">
-          Nothing here yet. Save a competitor ad you want to learn from, and it'll show up
+          Nothing here yet. Save a competitor ad you want to learn from, and it&apos;ll show up
           here to pick when creating a new email.
         </p>
       ) : (
@@ -360,7 +360,7 @@ export function CompetitorReferencePanel({
                 </p>
               ) : (
                 <p className="text-sm italic text-muted">
-                  Strategy analysis wasn't available; the raw ad is still saved.
+                  Strategy analysis wasn&apos;t available; the raw ad is still saved.
                 </p>
               )}
             </Card>

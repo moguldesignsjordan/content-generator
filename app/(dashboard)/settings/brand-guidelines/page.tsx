@@ -43,7 +43,7 @@ export default async function BrandGuidelinesPage() {
     return (
       <Card className="p-7">
         <h1 className="font-display text-xl font-semibold">
-          Couldn't load your brand
+          Couldn&apos;t load your brand
         </h1>
         <p className="mt-2 text-sm text-muted">
           {err instanceof Error ? err.message : "Try again in a moment."}

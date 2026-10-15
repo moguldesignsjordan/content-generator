@@ -321,7 +321,7 @@ export async function saveUploadedHeroImage(args: {
  * file logs a warning and returns undefined so generation falls back to the
  * normal AI-image path instead of failing the whole draft.
  */
-export async function useProductPhotoAsHero(
+export async function heroFromProductPhoto(
   url: string,
   alt: string,
   brandId?: string,

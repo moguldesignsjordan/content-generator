@@ -157,7 +157,7 @@ function MyMediaTab({ initialMedia }: { initialMedia: MediaAsset[] }) {
       {items.length === 0 ? (
         <p className="px-1 text-sm text-muted">
           Nothing here yet. Generate a hero image on a draft, or upload one
-          directly, and it'll show up here to reuse later.
+          directly, and it&apos;ll show up here to reuse later.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">

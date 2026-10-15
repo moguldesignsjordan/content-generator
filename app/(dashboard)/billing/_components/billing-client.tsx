@@ -112,7 +112,7 @@ export function BillingClient({
 
       {!stripeConfigured ? (
         <Card className="p-6">
-          <h2 className="font-display text-lg font-semibold">Billing isn't set up yet</h2>
+          <h2 className="font-display text-lg font-semibold">Billing isn&apos;t set up yet</h2>
           <p className="mt-2 text-sm text-muted">
             Add STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to .env.local to enable buying
             credits and managing a subscription. Generation still works off your free
@@ -160,7 +160,7 @@ export function BillingClient({
             <h2 className="font-display text-lg font-semibold">Plan</h2>
             {planCode === "pro" ? (
               <p className="mt-2 text-sm text-muted">
-                You're on the Pro plan: a bigger monthly credit allowance, refreshed
+                You&apos;re on the Pro plan: a bigger monthly credit allowance, refreshed
                 automatically. Manage or cancel it below.
               </p>
             ) : proPlanConfigured ? (
@@ -182,7 +182,7 @@ export function BillingClient({
               </div>
             ) : (
               <p className="mt-2 text-sm text-muted">
-                The Pro plan isn't configured yet. Set STRIPE_PRO_PRICE_ID to enable it.
+                The Pro plan isn&apos;t configured yet. Set STRIPE_PRO_PRICE_ID to enable it.
               </p>
             )}
             <div className="mt-4 border-t border-border pt-4">

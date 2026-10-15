@@ -14,7 +14,7 @@ export default function LoginPage() {
           <Logo height={40} className="mb-5" />
           <h1 className="font-display text-xl font-semibold">Connect Supabase</h1>
           <p className="mt-1.5 text-sm text-muted">
-            Sign-in needs a Supabase project. Once it's connected, this screen
+            Sign-in needs a Supabase project. Once it&apos;s connected, this screen
             becomes your login.
           </p>
           <ol className="mt-5 space-y-2.5 text-sm text-muted">

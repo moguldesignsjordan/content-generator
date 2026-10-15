@@ -124,7 +124,7 @@ export function CampaignView({
           <div className="space-y-1">
             <h2 className="font-display text-xl font-semibold">The plan</h2>
             <p className="text-[14px] text-muted">
-              Edit anything, remove what you don't want, and fill in real details where asked.
+              Edit anything, remove what you don&apos;t want, and fill in real details where asked.
               Nothing is made until you start it below.
             </p>
           </div>
@@ -165,7 +165,7 @@ export function CampaignView({
           {pending.some((i) => i.needs_detail && !i.detail) && (
             <p className="text-[13px] text-warning">
               {pending.filter((i) => i.needs_detail && !i.detail).length} pieces still need a real
-              detail. They'll be written without invented numbers, but they're stronger with one.
+              detail. They&apos;ll be written without invented numbers, but they&apos;re stronger with one.
             </p>
           )}
           <div className="flex flex-wrap gap-3">

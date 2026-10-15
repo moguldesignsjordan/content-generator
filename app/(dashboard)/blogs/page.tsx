@@ -45,7 +45,7 @@ export default async function BlogsPage() {
     return (
       <Card className="p-7">
         <h1 className="font-display text-xl font-semibold">
-          Couldn't load blog posts
+          Couldn&apos;t load blog posts
         </h1>
         <p className="mt-2 text-sm text-muted">
           {err instanceof Error ? err.message : "Try again in a moment."}
