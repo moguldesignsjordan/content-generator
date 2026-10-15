@@ -49,6 +49,19 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-14 (later): describe it, Claude dissects
+
+- Landing shows five kind chips (Flyer, Email, Campaign, Blog, Ad) under the
+  headline. Tapping one selects it and swaps the composer hint; nothing sends
+  until they write their description, which goes out as "I want to make a
+  flyer. <their words>". Ad = paid FB/IG ad (`social_format: "ad"`).
+- Prompt: Claude reads the whole description, saves every detail, reflects it
+  back, then asks only the missing items for that kind as one numbered list
+  (three max, no chips), then confirms. Campaign research question moved into
+  the confirm chips (Research first, then plan / Just plan it).
+- Typecheck + 723 tests green. Build not run (dev server shares `.next`).
+  UNCOMMITTED. Not run live.
+
 ## Session 2026-10-15: Create chat feels like ChatGPT
 
 - **Claude leads the conversation.** The built-in button steps (and

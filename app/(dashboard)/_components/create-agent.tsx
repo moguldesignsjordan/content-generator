@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
   BlogIcon,
+  BoltIcon,
   CheckIcon,
   CloseIcon,
   FlyerIcon,
@@ -21,7 +22,6 @@ import {
   MailIcon,
   MegaphoneIcon,
   PaperclipIcon,
-  PlusIcon,
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
@@ -81,14 +81,36 @@ const PROMPT_IDEAS = [
   "Write a blog post about how we work",
 ];
 
-/** The landing's starter cards: each just sends a natural first message. */
-type StarterKind = "email" | "flyer" | "blog" | "campaign";
+/** The landing's starter chips: picking one sets the kind and a describe-it
+ * hint; the kind rides at the front of their description when they send. */
+type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
 
-const STARTERS: Record<StarterKind, { label: string; text: string }> = {
-  email: { label: "Email", text: "I want to write an email" },
-  flyer: { label: "Flyer design", text: "I want to make a flyer" },
-  blog: { label: "Blog post", text: "I want to write a blog post" },
-  campaign: { label: "Campaign", text: "I want to plan a campaign" },
+const STARTERS: Record<StarterKind, { label: string; text: string; hint: string }> = {
+  flyer: {
+    label: "Flyer",
+    text: "I want to make a flyer",
+    hint: "Describe your flyer: what it's for, the offer, dates, where it'll post...",
+  },
+  email: {
+    label: "Email",
+    text: "I want to write an email",
+    hint: "Describe your email: what it's about, who it's for, any deal...",
+  },
+  campaign: {
+    label: "Campaign",
+    text: "I want to plan a campaign",
+    hint: "Describe your campaign: what you're promoting, the offer, how long...",
+  },
+  blog: {
+    label: "Blog",
+    text: "I want to write a blog post",
+    hint: "Describe your post: the topic, who's reading, your take on it...",
+  },
+  ad: {
+    label: "Ad",
+    text: "I want to make a paid Facebook or Instagram ad",
+    hint: "Describe your ad: what you're selling, the offer, who should see it...",
+  },
 };
 
 /** A campaign the agent handed to the planner, with its settings. */
@@ -204,8 +226,10 @@ export function CreateAgent({
   const toast = useToast();
 
   const [messages, setMessages] = useState<Msg[]>(initial?.messages ?? []);
-  const [input, setInput] = useState(
-    startKind && !initial?.messages.length ? `${STARTERS[startKind].text} for ` : "",
+  const [input, setInput] = useState("");
+  // The kind chip picked on the landing (e.g. a "New campaign" link presets it).
+  const [picked, setPicked] = useState<StarterKind | null>(
+    startKind && !initial?.messages.length ? startKind : null,
   );
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState(false);
@@ -234,9 +258,6 @@ export function CreateAgent({
   // Guided runs the staged chip interview (default); Auto fills the brief
   // silently from context and stops so the user presses Generate.
   const [mode, setMode] = useState<"guided" | "auto">(initial?.auto ? "auto" : "guided");
-  // Quick-action panel open state. Open in the landing; tapping + toggles it.
-  // Closes on send so the conversation reads clean.
-  const [actionsOpen, setActionsOpen] = useState(true);
   // Which pipeline the brief hands off to. Same brief, different renderer:
   // email → the email draft pipeline, blog → the Sanity-bound blog pipeline.
   const [channel, setChannel] = useState<"email" | "blog">("email");
@@ -404,7 +425,6 @@ export function CreateAgent({
     setError(null);
     setHint(false);
     setOptions(null);
-    setActionsOpen(false);
     setLookPickerOpen(false);
     setMessages((m) => [
       ...m,
@@ -415,6 +435,17 @@ export function CreateAgent({
       },
     ]);
     void postToAgent(displayText, imageUrls);
+  }
+
+  function sendFromLanding() {
+    if (!picked) return send(input);
+    send(`${STARTERS[picked].text}. ${input.trim()}`);
+    setPicked(null);
+  }
+
+  function pickKind(kind: StarterKind) {
+    setPicked((k) => (k === kind ? null : kind));
+    inputRef.current?.focus();
   }
 
   async function postToAgent(text: string, imageUrls: string[]) {
@@ -525,6 +556,7 @@ export function CreateAgent({
     }
     setMessages([]);
     setInput("");
+    setPicked(null);
     setCard(null);
     setTopicId(null);
     setCampaignId(null);
@@ -533,7 +565,6 @@ export function CreateAgent({
     setReady(false);
     setGenerating(false);
     setError(null);
-    setActionsOpen(true);
     setPendingImages([]);
     setLookPickerOpen(false);
     setLookId(null);
@@ -649,6 +680,12 @@ export function CreateAgent({
             today?
           </h2>
           <div className="w-full max-w-xl">
+            <ActionGrid
+              picked={picked}
+              onPick={pickKind}
+              disabled={loading || generating}
+              className="mb-4"
+            />
             <div className="mb-2 flex justify-end">
               <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
             </div>
@@ -659,29 +696,21 @@ export function CreateAgent({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  send(input);
+                  sendFromLanding();
                 }
               }}
-              onSend={() => send(input)}
-              onPlus={() => setActionsOpen((v) => !v)}
+              onSend={sendFromLanding}
               onAttachFiles={handleAttachFiles}
               onOpenLibrary={() => setLibraryOpen(true)}
               uploading={uploading}
               ready={ready}
               disabled={loading || generating}
-              placeholderCycle={PROMPT_IDEAS[phIndex]}
+              placeholderCycle={picked ? STARTERS[picked].hint : PROMPT_IDEAS[phIndex]}
               pendingImages={pendingImages}
               onRemoveImage={(url) =>
                 setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
               }
             />
-            {actionsOpen && (
-              <ActionGrid
-                onPick={(kind) => send(STARTERS[kind].text)}
-                disabled={loading || generating}
-                className="mt-3"
-              />
-            )}
             {suggestions.length > 0 && (
               <div className="mt-5">
                 <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
@@ -957,7 +986,6 @@ function ComposerBar({
   onChange,
   onKeyDown,
   onSend,
-  onPlus,
   onAttachFiles,
   onOpenLibrary,
   uploading,
@@ -972,7 +1000,6 @@ function ComposerBar({
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
-  onPlus?: () => void;
   /** Attach examples/photos: a text/HTML/eml file drops into the composer as
    * an email to READ like; images (several at once welcome) stage thumbnails
    * and send with the next message so the agent can actually see them
@@ -1020,16 +1047,6 @@ function ComposerBar({
         </div>
       )}
       <div className="flex items-end gap-1.5">
-      {onPlus && (
-        <button
-          type="button"
-          onClick={onPlus}
-          aria-label="Quick actions"
-          className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
-        >
-          <PlusIcon size={20} />
-        </button>
-      )}
       {onAttachFiles && (
         <>
           <button
@@ -1116,41 +1133,37 @@ function ComposerBar({
   );
 }
 
+const STARTER_ICONS: Record<StarterKind, ReactNode> = {
+  flyer: <FlyerIcon size={15} />,
+  email: <MailIcon size={15} />,
+  campaign: <MegaphoneIcon size={15} />,
+  blog: <BlogIcon size={15} />,
+  ad: <BoltIcon size={15} />,
+};
+
 function ActionGrid({
+  picked,
   onPick,
   disabled,
   className,
 }: {
+  picked: StarterKind | null;
   onPick: (kind: StarterKind) => void;
   disabled: boolean;
   className?: string;
 }) {
   return (
-    <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}>
-      <ActionButton
-        icon={<MailIcon size={15} />}
-        label={STARTERS.email.label}
-        onClick={() => onPick("email")}
-        disabled={disabled}
-      />
-      <ActionButton
-        icon={<FlyerIcon size={15} />}
-        label={STARTERS.flyer.label}
-        onClick={() => onPick("flyer")}
-        disabled={disabled}
-      />
-      <ActionButton
-        icon={<BlogIcon size={15} />}
-        label={STARTERS.blog.label}
-        onClick={() => onPick("blog")}
-        disabled={disabled}
-      />
-      <ActionButton
-        icon={<MegaphoneIcon size={15} />}
-        label={STARTERS.campaign.label}
-        onClick={() => onPick("campaign")}
-        disabled={disabled}
-      />
+    <div className={cn("flex flex-wrap justify-center gap-2", className)}>
+      {(Object.keys(STARTERS) as StarterKind[]).map((kind) => (
+        <ActionButton
+          key={kind}
+          icon={STARTER_ICONS[kind]}
+          label={STARTERS[kind].label}
+          onClick={() => onPick(kind)}
+          disabled={disabled}
+          pressed={picked === kind}
+        />
+      ))}
     </div>
   );
 }
@@ -1247,20 +1260,33 @@ function ActionButton({
   label,
   onClick,
   disabled,
+  pressed,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
   disabled: boolean;
+  pressed: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group flex items-center justify-center gap-2 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface-2 px-2.5 py-2.5 text-[12.5px] font-medium text-foreground transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-border-strong hover:bg-surface-3 disabled:opacity-50"
+      aria-pressed={pressed}
+      className={cn(
+        "group flex items-center justify-center gap-2 overflow-hidden rounded-full border px-3.5 py-2 text-[13px] font-medium transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px disabled:opacity-50",
+        pressed
+          ? "border-foreground bg-surface-3 text-foreground"
+          : "border-border bg-surface-2 text-foreground hover:border-border-strong hover:bg-surface-3",
+      )}
     >
-      <span className="shrink-0 text-muted transition-colors duration-150 group-hover:text-foreground">
+      <span
+        className={cn(
+          "shrink-0 transition-colors duration-150 group-hover:text-foreground",
+          pressed ? "text-foreground" : "text-muted",
+        )}
+      >
         {icon}
       </span>
       <span className="min-w-0 truncate">{label}</span>
