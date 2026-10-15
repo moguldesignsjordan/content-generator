@@ -19,21 +19,55 @@ export interface FlyerText {
   cta?: string;
 }
 
-const logoCache = new Map<string, Promise<string | null>>();
+interface LoadedLogo {
+  uri: string;
+  /** width / height of the PNG, shadow margin included. */
+  aspect: number;
+}
+
+const logoCache = new Map<string, Promise<LoadedLogo | null>>();
 
 /** The brand logo as a PNG data URI (webp/svg/whatever in, PNG out), once per
- * URL per server instance. Null on any failure: the flyer just has no logo. */
-function loadLogo(url: string): Promise<string | null> {
+ * URL per server instance. Null on any failure: the flyer just has no logo.
+ * Uploaded logos often carry a wide empty margin that shrinks the mark to a
+ * speck, so it's trimmed off, and a soft shadow is baked in so the logo reads
+ * on any artwork without sitting in a box. */
+function loadLogo(url: string): Promise<LoadedLogo | null> {
   let pending = logoCache.get(url);
   if (!pending) {
     pending = (async () => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`logo fetch ${res.status}`);
-      const png = await sharp(Buffer.from(await res.arrayBuffer()))
+      const mark = await sharp(Buffer.from(await res.arrayBuffer()), { density: 300 })
+        .trim()
         .resize({ height: 200, withoutEnlargement: true })
+        .ensureAlpha()
         .png()
         .toBuffer();
-      return `data:image/png;base64,${png.toString("base64")}`;
+      const { width = 200, height = 200 } = await sharp(mark).metadata();
+      const blur = 10;
+      const pad = blur * 2;
+      const size = { width: width + pad * 2, height: height + pad * 2 };
+      const alpha = await sharp(mark)
+        .extractChannel("alpha")
+        .linear(0.55, 0)
+        .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#000000" })
+        .blur(blur)
+        .extractChannel(0)
+        .raw()
+        .toBuffer();
+      const shadow = await sharp({ create: { ...size, channels: 3, background: "#000000" } })
+        .joinChannel(alpha, { raw: { ...size, channels: 1 } })
+        .png()
+        .toBuffer();
+      const png = await sharp(shadow)
+        .composite([{ input: mark, left: pad, top: pad }])
+        .png()
+        .toBuffer();
+      return {
+        uri: `data:image/png;base64,${png.toString("base64")}`,
+        aspect: size.width / size.height,
+      };
     })().catch((err) => {
       logWarn("flyer:compose:logo", err instanceof Error ? err.message : String(err), { url });
       return null;
@@ -41,6 +75,13 @@ function loadLogo(url: string): Promise<string | null> {
     logoCache.set(url, pending);
   }
   return pending;
+}
+
+/** Logo height on a flyer of width W: big enough to read, capped in width so
+ * a long wordmark doesn't run across the top. */
+function logoHeight(aspect: number, W: number): number {
+  const s = W / 1080;
+  return Math.round(Math.min(120 * s, (420 * s) / aspect));
 }
 
 /** "#abc" → "#aabbcc"; anything that isn't a hex color → the fallback. */
@@ -146,17 +187,12 @@ export async function composeFlyer(args: {
   );
 
   const logoChip = logo ? (
-    <div
-      style={{
-        display: "flex",
-        background: cardBg,
-        padding: `${Math.round(14 * s)}px ${Math.round(20 * s)}px`,
-        borderRadius: Math.round(16 * s),
-      }}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logo} alt="" style={{ height: Math.round(56 * s) }} />
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={logo.uri}
+      alt=""
+      style={{ height: logoHeight(logo.aspect, W), width: Math.round(logoHeight(logo.aspect, W) * logo.aspect) }}
+    />
   ) : null;
 
   const artImg = (top: number) => (
@@ -267,8 +303,8 @@ export async function composeFlyer(args: {
 /**
  * Places the brand logo, exactly as uploaded, on an AI-designed flyer at the
  * corner its look names. The image model never redraws a logo (it would
- * distort it), so it's stamped here instead: a small chip on the brand's
- * light color, inset like the composed layouts. No logo on file: unchanged.
+ * distort it), so it's stamped here instead, inset like the composed layouts.
+ * No logo on file: unchanged.
  */
 export async function stampLogo(args: {
   image: Buffer;
@@ -279,32 +315,17 @@ export async function stampLogo(args: {
 }): Promise<Buffer> {
   const { width: W, height: H } = args;
   const base = await sharp(args.image).rotate().resize({ width: W, height: H, fit: "cover" }).toBuffer();
-  const logoUri = args.tokens.logo_url ? await loadLogo(args.tokens.logo_url) : null;
-  if (!logoUri) return base;
+  const loaded = args.tokens.logo_url ? await loadLogo(args.tokens.logo_url) : null;
+  if (!loaded) return base;
 
-  const s = W / 1080;
-  const logoH = Math.round(56 * s);
-  const padX = Math.round(20 * s);
-  const padY = Math.round(14 * s);
-  const logo = await sharp(Buffer.from(logoUri.split(",")[1], "base64"))
+  const logoH = logoHeight(loaded.aspect, W);
+  const logo = await sharp(Buffer.from(loaded.uri.split(",")[1], "base64"))
     .resize({ height: logoH })
     .png()
     .toBuffer();
   const { width: logoW = logoH } = await sharp(logo).metadata();
-  const chipW = logoW + padX * 2;
-  const chipH = logoH + padY * 2;
-  const radius = Math.round(16 * s);
-  const chipBg = hex(args.tokens.colors.background, "#FFFFFF");
-  const chip = await sharp(
-    Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${chipW}" height="${chipH}"><rect width="${chipW}" height="${chipH}" rx="${radius}" fill="${chipBg}"/></svg>`,
-    ),
-  )
-    .composite([{ input: logo, left: padX, top: padY }])
-    .png()
-    .toBuffer();
-  const inset = Math.round(64 * s);
-  const left = args.corner.endsWith("left") ? inset : W - inset - chipW;
-  const top = args.corner.startsWith("top") ? inset : H - inset - chipH;
-  return sharp(base).composite([{ input: chip, left, top }]).png().toBuffer();
+  const inset = Math.round(64 * (W / 1080));
+  const left = args.corner.endsWith("left") ? inset : W - inset - logoW;
+  const top = args.corner.startsWith("top") ? inset : H - inset - logoH;
+  return sharp(base).composite([{ input: logo, left, top }]).png().toBuffer();
 }
