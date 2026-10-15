@@ -393,12 +393,36 @@ export const REVISE_PIECE_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface SaveLookInput {
+  name: string;
+}
+
+/** Saves the designs attached for this flyer as a reusable look. */
+export const SAVE_LOOK_TOOL: Anthropic.Tool = {
+  name: "save_look",
+  description:
+    "Save the designs attached for this flyer (update_brief.style_reference_urls) " +
+    "as a look the owner can pick for future flyers. Only after they say yes " +
+    "to saving it.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: "A short name for the look, theirs or one you suggest from what it looks like (e.g. 'Bold black event').",
+      },
+    },
+    required: ["name"],
+  },
+};
+
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   GENERATE_CONTENT_TOOL,
   EDIT_FLYER_TOOL,
   REVISE_PIECE_TOOL,
   START_CAMPAIGN_TOOL,
   SHOW_LOOK_PICKER_TOOL,
+  SAVE_LOOK_TOOL,
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,
   CREATE_BLOG_FROM_EMAIL_TOOL,

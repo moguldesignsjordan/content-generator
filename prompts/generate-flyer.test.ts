@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESIGN_RIFFS,
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
   FLYER_STYLE_DIRECTIONS,
@@ -406,7 +407,7 @@ describe("buildFlyerDesignPrompt", () => {
     const prompt = buildFlyerDesignPrompt(copy, tokens, "4:5", { profile, exampleCount: 3, roles }, { logoCorner: "top-right" });
     expect(prompt).toContain('"Your website is losing you clients"');
     expect(prompt).toContain('"Book a call"');
-    expect(prompt).toContain("the 3 attached example images");
+    expect(prompt).toContain("Images 1 to 3 are the design examples to match.");
     expect(prompt).toContain("#08080A");
     expect(prompt).toContain("#FFAE3C as the one accent (only on the button)");
     expect(prompt).toContain("Keep the top-right corner completely empty");
@@ -426,10 +427,53 @@ describe("buildFlyerDesignPrompt", () => {
     expect(prompt).toContain("A previous attempt got this text wrong");
   });
 
-  it("puts the product photo first when there is one", () => {
+  it("numbers the product first, then the examples", () => {
     const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { hasProduct: true });
-    expect(prompt).toContain("(the images after the product photo)");
-    expect(prompt).toContain("The first attached image is the real product");
+    expect(prompt).toContain("Image 1 is the real product photo. Images 2 to 3 are the design examples to match.");
+    expect(prompt).toContain("Show the product from Image 1 exactly as photographed");
+  });
+
+  it("gives each line of text its own type direction", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
+    expect(prompt).toContain('Headline: "Your website is losing you clients", huge condensed sans');
+    expect(prompt).toContain('Call to action: "Book a call", styled as a pill.');
+  });
+
+  it("makes a client's flyer from their logo and colors, never the brand's", () => {
+    const prompt = buildFlyerDesignPrompt(
+      copy,
+      tokens,
+      "1:1",
+      { profile, exampleCount: 1, roles },
+      { logoCorner: "top-right", client: { name: "The Tax Moguls", hasLogo: true, hasColors: true } },
+    );
+    expect(prompt).toContain("for The Tax Moguls");
+    expect(prompt).toContain("Image 1 is the design example to match. Image 2 shows The Tax Moguls' logo.");
+    expect(prompt).toContain("Reproduce The Tax Moguls' logo from Image 2 exactly");
+    expect(prompt).toContain("in the top-right corner");
+    expect(prompt).toContain("use The Tax Moguls' colors");
+    expect(prompt).not.toContain("brand logo is added there afterwards");
+    expect(prompt).not.toContain(tokens.fonts.heading.split(",")[0].replace(/['"]/g, ""));
+  });
+
+  it("takes a client's colors from the logo when none were given", () => {
+    const prompt = buildFlyerDesignPrompt(
+      copy,
+      tokens,
+      "1:1",
+      { profile, exampleCount: 1, roles },
+      { client: { name: "Acme", hasLogo: true, hasColors: false } },
+    );
+    expect(prompt).toContain("take Acme's colors from their logo (Image 2)");
+  });
+
+  it("keeps option 1 close and riffs on the rest", () => {
+    const close = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles }, { riff: 0 });
+    const riff = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles }, { riff: 1 });
+    const none = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
+    expect(close).toContain(DESIGN_RIFFS[0]);
+    expect(riff).toContain(DESIGN_RIFFS[1]);
+    for (const r of DESIGN_RIFFS) expect(none).not.toContain(r);
   });
 });
 

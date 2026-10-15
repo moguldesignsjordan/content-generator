@@ -335,6 +335,7 @@ export async function POST(
           subject: reference!,
           note,
           ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
+          ...(meta.client_brand ? { clientBrand: meta.client_brand } : {}),
           draftId: id,
         })
       : await regenerateFlyerImage({
@@ -349,6 +350,10 @@ export async function POST(
       ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
       ...(meta.product_photo_url ? { productPhotoUrl: meta.product_photo_url } : {}),
       ...(meta.look_id ? { lookId: meta.look_id } : {}),
+      ...(meta.reference_urls?.length ? { referenceUrls: meta.reference_urls } : {}),
+      ...(meta.reference_profile ? { referenceProfile: meta.reference_profile } : {}),
+      ...(meta.client_brand ? { clientBrand: meta.client_brand } : {}),
+      ...(meta.flyer_variant_index !== undefined ? { variantIndex: meta.flyer_variant_index } : {}),
       draftId: id,
     });
 

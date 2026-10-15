@@ -23,13 +23,16 @@ export interface TextCheckResult {
   extra: string[];
 }
 
-export function checkRenderedText(expected: string[], seen: string): TextCheckResult {
+/** `alsoAllowed` is text that may appear without being required, like the
+ * name inside a client's logo the model draws. */
+export function checkRenderedText(expected: string[], seen: string, alsoAllowed: string[] = []): TextCheckResult {
   const seenWords = words(seen);
   const seenJoined = ` ${seenWords.join(" ")} `;
   const lines = expected.map((l) => l.trim()).filter(Boolean);
   const missing = lines.filter((line) => !seenJoined.includes(` ${words(line).join(" ")} `));
   const allowed = new Set(lines.flatMap(words));
-  const extra = seenWords.filter((w) => !allowed.has(w));
+  const logoWords = new Set(alsoAllowed.flatMap(words));
+  const extra = seenWords.filter((w) => !allowed.has(w) && !logoWords.has(w));
   // A few stray words are fine (a product's own printed label); a paragraph
   // of them means the model copied text from somewhere.
   const extraLimit = Math.max(4, Math.ceil(allowed.size * 0.3));

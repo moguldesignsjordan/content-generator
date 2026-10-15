@@ -53,6 +53,14 @@ are in git history (`git log -p PROJECT_STATE.md`).
   for examples instead of falling back. "No reference" (`"none"`) is the AI's
   free pick, a fresh preset per option. Uploaded "flyers" in the media
   library are not used: they're often raw photos.
+- Flyer references and client brands (Jordan's call, 2026-10-15): a design
+  attached in the Create chat to match is sent to the image model as an
+  image (the designed-flyer path), never summarized into text, and it skips
+  the Our style gate. Option 1 follows it closely; options 2 to 4 keep its
+  style and change the composition. It's one-off; the chat offers to save it
+  as a look. A flyer for another business uses that business's colors and
+  logo (from an attached logo or card); if neither is known the chat asks.
+  The account brand's logo is never stamped on a client's flyer.
 
 ## Current state
 
@@ -98,7 +106,10 @@ are in git history (`git log -p PROJECT_STATE.md`).
    its style). And the Create chat's live preview card: a flyer and an
    email generating in the thread, tapping options, asking for a change,
    attaching a photo for the flyer, and a reload keeping the card. None of
-   the card UI has been seen rendered yet.
+   the card UI has been seen rendered yet. And a flyer made from an attached reference
+   for a client business (Oct 15): attach a design plus their logo in the
+   Create chat, confirm no look picker appears, the 4 options follow the
+   design in the client's colors with their logo, and "save as a look" works.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

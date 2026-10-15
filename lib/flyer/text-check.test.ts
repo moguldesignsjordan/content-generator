@@ -31,4 +31,11 @@ describe("checkRenderedText", () => {
   it("treats apostrophes and dollar signs sensibly", () => {
     expect(checkRenderedText(["Don't wait: $49"], "DONT WAIT $49").ok).toBe(true);
   });
+
+  it("doesn't count a client's logo name as stray text", () => {
+    const base = expected.join("\n");
+    const seen = `${base}\nthe tax moguls www thetaxmoguls com rated best`;
+    expect(checkRenderedText(expected, seen).extra).toContain("moguls");
+    expect(checkRenderedText(expected, seen, ["The Tax Moguls"]).extra).not.toContain("moguls");
+  });
 });

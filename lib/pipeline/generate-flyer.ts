@@ -29,10 +29,10 @@ import sharp from "sharp";
 import { composeFlyer, stampLogo } from "@/lib/flyer/compose";
 import { mapBrandColors } from "@/lib/flyer/color-roles";
 import { checkRenderedText } from "@/lib/flyer/text-check";
-import { loadLookImages } from "./extract-look";
+import { extractLookProfile, loadLookImages } from "./extract-look";
 import { readImageText } from "./read-image-text";
 import { pickLayout, quietZoneFor } from "@/lib/flyer/layout";
-import { resolveBrandTokens } from "@/lib/email/templates/types";
+import { resolveBrandTokens, type BrandTokens } from "@/lib/email/templates/types";
 import { buildBrandVoiceBlock, buildGuidelinesBlock } from "@/prompts/brand-voice";
 import {
   DEFAULT_FLYER_ASPECT,
@@ -49,6 +49,7 @@ import {
 } from "@/prompts/generate-flyer";
 import { stripEmDashes } from "@/lib/text";
 import type {
+  ClientBrand,
   CompetitorReference,
   ContentImage,
   DesignLookProfile,
@@ -106,7 +107,7 @@ export async function generateFlyerForTopicStreamed(
     // (the reference IS the style); neither → a distinct look per option.
     const styles = resolveVariantStyles(draftId, {
       fixedStyle: meta.flyer_style,
-      hasReference: Boolean(meta.style_reference_id),
+      hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
     });
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
@@ -132,12 +133,12 @@ export async function generateFlyerForTopicStreamed(
       draftId,
     );
 
-    const look = await resolveLook(meta.look_id, ctx.brand.id, draftId);
-
     const usageDeltas: UsageDelta[] = [];
+    const look = await resolveFlyerLook(meta, ctx.brand.id, draftId, usageDeltas);
+
     const copies = await generateFlyerVariants(ctx, {
       aspect,
-      brief: withLookNote(meta.flyer_brief, look?.profile),
+      brief: withClientNote(withLookNote(meta.flyer_brief, look?.profile), meta.client_brand, ctx.brand.name),
       style: meta.flyer_style,
       styles,
       emailCopy,
@@ -164,6 +165,7 @@ export async function generateFlyerForTopicStreamed(
       usageDeltas,
       modelTier: meta.flyer_model,
       look,
+      client: await loadClient(meta.client_brand, draftId),
     });
     const first = variants[0];
 
@@ -172,7 +174,8 @@ export async function generateFlyerForTopicStreamed(
 
     const nextMeta: DraftMeta = {
       ...mirrorVariant(first),
-      ...(look ? { look_id: look.id } : {}),
+      ...(look && look.id !== ATTACHED_LOOK_ID ? { look_id: look.id } : {}),
+      ...(look?.id === ATTACHED_LOOK_ID && look.profile ? { reference_profile: look.profile } : {}),
       flyer_aspect: aspect,
       flyer_variants: variants,
       flyer_variant_index: 0,
@@ -245,7 +248,7 @@ export async function regenerateFlyerDraft(
   // Seeded by the next version so a rejection re-rolls the looks too.
   const styles = resolveVariantStyles(`${draftId}:${latestVersion + 1}`, {
     fixedStyle,
-    hasReference: Boolean(meta.style_reference_id),
+    hasReference: Boolean(meta.style_reference_id || meta.reference_urls?.length),
   });
 
   const competitorRef = await loadCompetitorRef(
@@ -254,12 +257,12 @@ export async function regenerateFlyerDraft(
     draftId,
   );
 
-  const look = await resolveLook(meta.look_id, ctx.brand.id, draftId);
-
   const usageDeltas: UsageDelta[] = [];
+  const look = await resolveFlyerLook(meta, ctx.brand.id, draftId, usageDeltas);
+
   const copies = await generateFlyerVariants(ctx, {
     aspect,
-    brief: withLookNote(meta.flyer_brief, look?.profile),
+    brief: withClientNote(withLookNote(meta.flyer_brief, look?.profile), meta.client_brand, ctx.brand.name),
     style: fixedStyle,
     styles,
     emailCopy,
@@ -284,6 +287,7 @@ export async function regenerateFlyerDraft(
     usageDeltas,
     modelTier: meta.flyer_model,
     look,
+    client: await loadClient(meta.client_brand, draftId),
   });
   const first = variants[0];
 
@@ -316,7 +320,10 @@ export async function regenerateFlyerDraft(
       ...(meta.planned_publish_at ? { planned_publish_at: meta.planned_publish_at } : {}),
       ...(meta.product_photo_url ? { product_photo_url: meta.product_photo_url } : {}),
       ...(meta.flyer_model ? { flyer_model: meta.flyer_model } : {}),
-      ...(look ? { look_id: look.id } : {}),
+      ...(look && look.id !== ATTACHED_LOOK_ID ? { look_id: look.id } : {}),
+      ...(meta.reference_urls?.length ? { reference_urls: meta.reference_urls } : {}),
+      ...(look?.id === ATTACHED_LOOK_ID && look.profile ? { reference_profile: look.profile } : {}),
+      ...(meta.client_brand ? { client_brand: meta.client_brand } : {}),
       usage,
     },
   });
@@ -353,6 +360,14 @@ export async function regenerateFlyerImage(args: {
   productPhotoUrl?: string;
   /** meta.look_id: re-render following the same look (AI-designed). */
   lookId?: string;
+  /** meta.reference_urls / reference_profile: the attached designs the
+   * flyer matches; they win over lookId. */
+  referenceUrls?: string[];
+  referenceProfile?: DesignLookProfile;
+  /** meta.client_brand: the business the flyer is for. */
+  clientBrand?: ClientBrand;
+  /** meta.flyer_variant_index: keeps the picked option's riff on re-render. */
+  variantIndex?: number;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -366,14 +381,21 @@ export async function regenerateFlyerImage(args: {
     args.reference ??
     (await loadStyleReference(args.styleReferenceId, args.draftId)) ??
     undefined;
-  const tokens = resolveBrandTokens(args.ctx.brand);
+  const client = await loadClient(args.clientBrand, args.draftId);
+  const tokens = flyerTokens(args.ctx, client?.brand);
   const layout = args.layout ?? pickLayout(0);
 
-  // A flyer that follows a look re-renders as an AI design, text checked; the
-  // code-set path below is its fallback, and the exact-prompt path stays the
-  // user's full control. A one-off reference is a new style, so it skips the look.
-  if (!args.exactPrompt && !args.reference && args.lookId) {
-    const look = await resolveLook(args.lookId, args.ctx.brand.id, args.draftId);
+  // A flyer that follows a look or attached designs re-renders as an AI
+  // design, text checked; the code-set path below is its fallback, and the
+  // exact-prompt path stays the user's full control. A one-off reference is a
+  // new style, so it skips both.
+  if (!args.exactPrompt && !args.reference && (args.referenceUrls?.length || args.lookId)) {
+    const look = await resolveFlyerLook(
+      { reference_urls: args.referenceUrls, reference_profile: args.referenceProfile, look_id: args.lookId },
+      args.ctx.brand.id,
+      args.draftId,
+      usageDeltas,
+    );
     if (look) {
       const designed = await renderDesignedFlyer(args.ctx, args.copy, {
         aspect: args.aspect,
@@ -385,6 +407,8 @@ export async function regenerateFlyerImage(args: {
         ),
         draftId: args.draftId,
         usageDeltas,
+        client,
+        riff: look.riffs ? args.variantIndex ?? 0 : undefined,
       });
       if (designed) return { image: designed, usage: usageDeltas };
     }
@@ -479,6 +503,8 @@ export async function placeImageInFlyer(args: {
   subject: { data: string; mimeType: string };
   note?: string;
   model?: string;
+  /** meta.client_brand: its logo's words are expected in the design. */
+  clientBrand?: ClientBrand;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -498,6 +524,7 @@ export async function placeImageInFlyer(args: {
   const before = await readImageText(await toPreview(current), readOpts);
   const expected =
     before === null ? [args.copy.headline] : lines.filter((l) => checkRenderedText([l], before).missing.length === 0);
+  const logoText = args.clientBrand ? [args.clientBrand.name] : [];
 
   const model = args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model);
   const references = [await prepareReferenceImage(current), args.subject];
@@ -514,7 +541,7 @@ export async function placeImageInFlyer(args: {
 
     const seen = await readImageText(await toPreview(rendered.data), readOpts);
     if (seen !== null) {
-      const check = checkRenderedText(expected, seen);
+      const check = checkRenderedText(expected, seen, logoText);
       if (!check.ok) {
         logWarn("pipeline:generate-flyer:place-text-check", "edited flyer text didn't match", {
           draftId: args.draftId,
@@ -569,10 +596,11 @@ async function renderFlyer(
     model?: string;
     layout: FlyerLayout;
     productPhoto?: { data: string; mimeType: string } | null;
+    client?: LoadedClient | null;
   },
 ): Promise<ContentImage> {
   const reference = await loadStyleReference(opts.styleReferenceId, opts.draftId);
-  const tokens = resolveBrandTokens(ctx.brand);
+  const tokens = flyerTokens(ctx, opts.client?.brand);
   const finalPrompt = buildFlyerImagePrompt(
     copy,
     tokens,
@@ -657,6 +685,7 @@ async function renderFlyerVariants(
     /** With a look, each option is AI-designed to follow it, falling back to
      * the code-set layout only if its text can't be verified. */
     look?: ResolvedLook | null;
+    client?: LoadedClient | null;
   },
 ): Promise<FlyerVariant[]> {
   const model = resolveImageModel(
@@ -665,7 +694,12 @@ async function renderFlyerVariants(
   const results = await Promise.allSettled(
     copies.map(async (copy, i) => {
       if (opts.look) {
-        const designed = await renderDesignedFlyer(ctx, copy, { ...opts, look: opts.look, model });
+        const designed = await renderDesignedFlyer(ctx, copy, {
+          ...opts,
+          look: opts.look,
+          model,
+          riff: opts.look.riffs ? i : undefined,
+        });
         if (designed) return { image: designed, layout: undefined };
       }
       const layout = pickLayout(i);
@@ -854,6 +888,76 @@ interface ResolvedLook {
   id: string;
   profile: DesignLookProfile | null;
   images: { data: string; mimeType: string }[];
+  /** Attached designs: option 1 stays close, the rest riff on it. */
+  riffs?: boolean;
+}
+
+/** ResolvedLook.id for designs attached in chat (never stored as look_id). */
+const ATTACHED_LOOK_ID = "attached";
+
+/**
+ * The look a flyer follows: designs attached in chat win (read once, with
+ * the profile kept on the draft so a re-render doesn't read them again),
+ * else the saved look or Our style (resolveLook). Unreadable attachments
+ * fall through to resolveLook rather than failing the flyer.
+ */
+async function resolveFlyerLook(
+  meta: Pick<DraftMeta, "reference_urls" | "reference_profile" | "look_id">,
+  brandId: string,
+  draftId: string,
+  usageDeltas: UsageDelta[],
+): Promise<ResolvedLook | null> {
+  if (meta.reference_urls?.length) {
+    const examples = meta.reference_urls.map((url) => ({ url, source: "library" as const }));
+    const images = await loadLookImages(examples, LOOK_EXAMPLES_PER_RENDER);
+    if (images.length) {
+      const profile = meta.reference_profile ?? (await extractLookProfile(examples, brandId, usageDeltas));
+      return { id: ATTACHED_LOOK_ID, profile, images, riffs: true };
+    }
+    logWarn("pipeline:generate-flyer:attached-refs", "no attached reference could be loaded", { draftId });
+  }
+  return resolveLook(meta.look_id, brandId, draftId);
+}
+
+/** The client's brand plus its logo image, ready for the image model. */
+interface LoadedClient {
+  brand: ClientBrand;
+  logo: { data: string; mimeType: string } | null;
+}
+
+async function loadClient(brand: ClientBrand | undefined, draftId: string): Promise<LoadedClient | null> {
+  if (!brand) return null;
+  return { brand, logo: await loadProductPhoto(brand.logo_url, draftId) };
+}
+
+/**
+ * The tokens a flyer is drawn with: the brand's, or for a client's flyer
+ * their colors and no logo (code never stamps the account brand's logo on
+ * someone else's flyer; the designed path draws theirs from its image).
+ * Without client colors it's a neutral black and white, never the brand's.
+ */
+function flyerTokens(ctx: TopicContext, client: ClientBrand | undefined): BrandTokens {
+  const tokens = resolveBrandTokens(ctx.brand);
+  if (!client) return tokens;
+  const [primary = "#111114", accent = primary, secondary = accent] = client.colors ?? [];
+  return {
+    ...tokens,
+    logo_url: null,
+    logo_alt: client.name,
+    colors: { ...tokens.colors, primary, accent, secondary, background: "#FFFFFF", text: "#111114", muted: "#6B7280" },
+  };
+}
+
+/** Tells the copy writer whose flyer this is, so a client's flyer isn't
+ * written as the account's own brand. */
+function withClientNote(brief: string | undefined, client: ClientBrand | undefined, brandName: string): string | undefined {
+  if (!client) return brief;
+  return [
+    brief,
+    `CLIENT: this flyer is for ${client.name}, a separate business, not ${brandName}. Write the headline, copy, caption, and hashtags as ${client.name}, and never mention ${brandName}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Examples sent per render: with the product photo that's 4 references,
@@ -946,14 +1050,20 @@ async function renderDesignedFlyer(
     productPhoto?: { data: string; mimeType: string } | null;
     draftId: string;
     usageDeltas: UsageDelta[];
+    client?: LoadedClient | null;
+    /** Index into DESIGN_RIFFS for this option (attached designs only). */
+    riff?: number;
   },
 ): Promise<ContentImage | null> {
-  const tokens = resolveBrandTokens(ctx.brand);
+  const client = opts.client ?? null;
+  const tokens = flyerTokens(ctx, client?.brand);
   const profile = opts.look.profile;
   const roles = mapBrandColors(tokens.colors, profile?.color_roles.background ?? "photo");
+  // Product, examples, then the client's logo: the order the prompt numbers them.
   const references = [
     ...(opts.productPhoto ? [opts.productPhoto] : []),
     ...opts.look.images,
+    ...(client?.logo ? [client.logo] : []),
   ];
   const expected = [
     copy.headline,
@@ -962,9 +1072,12 @@ async function renderDesignedFlyer(
   ].filter(Boolean);
   const size = FLYER_ASPECTS[opts.aspect];
 
-  // The logo is stamped wherever the look puts it (top-left when unknown), so
-  // the prompt keeps exactly that corner clear.
-  const corner = profile?.logo_placement === "none" ? null : (profile?.logo_placement ?? "top-left");
+  // The brand logo is stamped wherever the look puts it (top-left when
+  // unknown), so the prompt keeps exactly that corner clear. A client's logo
+  // is drawn by the model there instead, and with no logo image there's none.
+  const lookCorner = profile?.logo_placement === "none" ? null : (profile?.logo_placement ?? "top-left");
+  const corner = client && !client.logo ? null : lookCorner;
+  const stamp = client ? null : corner;
   let misspelled: string[] | undefined;
   for (let attempt = 0; attempt < DESIGN_ATTEMPTS; attempt++) {
     const prompt = buildFlyerDesignPrompt(
@@ -972,7 +1085,21 @@ async function renderDesignedFlyer(
       tokens,
       opts.aspect,
       { profile, exampleCount: opts.look.images.length, roles },
-      { hasProduct: Boolean(opts.productPhoto), misspelled, logoCorner: corner },
+      {
+        hasProduct: Boolean(opts.productPhoto),
+        misspelled,
+        logoCorner: corner,
+        riff: opts.riff,
+        ...(client
+          ? {
+              client: {
+                name: client.brand.name,
+                hasLogo: Boolean(client.logo),
+                hasColors: Boolean(client.brand.colors?.length),
+              },
+            }
+          : {}),
+      },
     );
     const rendered = await renderImage({
       model: opts.model,
@@ -998,7 +1125,7 @@ async function renderDesignedFlyer(
       usageDeltas: opts.usageDeltas,
     });
     if (seen === null) break; // Can't verify: use the safe layout.
-    const check = checkRenderedText(expected, seen);
+    const check = checkRenderedText(expected, seen, client ? [client.brand.name] : []);
     if (!check.ok) {
       logWarn("pipeline:generate-flyer:text-check", "designed flyer text didn't match", {
         draftId: opts.draftId,
@@ -1010,9 +1137,9 @@ async function renderDesignedFlyer(
     }
 
     const finished =
-      corner === null
+      stamp === null
         ? rendered.data
-        : await stampLogo({ image: rendered.data, tokens, width: size.width, height: size.height, corner });
+        : await stampLogo({ image: rendered.data, tokens, width: size.width, height: size.height, corner: stamp });
     const optimized = await optimizeFlyerImage(finished, size);
     const { url, path } = await uploadContentImage(optimized.data);
     const alt = stripEmDashes(copy.headline).slice(0, 160);

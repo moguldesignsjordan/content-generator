@@ -9,6 +9,7 @@ import type {
   Brand,
   BrandBilling,
   BrandGuidelines,
+  ClientBrand,
   BrandMemory,
   Cadence,
   Campaign,
@@ -335,6 +336,10 @@ export async function createDraftShell(args: {
   flyerModel?: ImageModelTier;
   /** Social only: the design look to follow (meta.look_id). */
   lookId?: string;
+  /** Social only: designs attached in chat to match (meta.reference_urls). */
+  referenceUrls?: string[];
+  /** Social only: the business the flyer is for, when it isn't this brand. */
+  clientBrand?: ClientBrand;
 }): Promise<string> {
   const db = getAdminClient();
   const {
@@ -357,6 +362,8 @@ export async function createDraftShell(args: {
     productPhotoUrl,
     flyerModel,
     lookId,
+    referenceUrls,
+    clientBrand,
   } = args;
 
   // campaign_id only when a campaign drove the draft, so plain generation
@@ -399,6 +406,8 @@ export async function createDraftShell(args: {
     ...(productPhotoUrl ? { product_photo_url: productPhotoUrl } : {}),
     ...(flyerModel ? { flyer_model: flyerModel } : {}),
     ...(lookId ? { look_id: lookId } : {}),
+    ...(referenceUrls?.length ? { reference_urls: referenceUrls } : {}),
+    ...(clientBrand ? { client_brand: clientBrand } : {}),
   };
 
   const { data: draft, error: draftErr } = await db

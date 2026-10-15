@@ -5,6 +5,7 @@ import { EXTRACT_LOOK_TOOL, buildExtractLookMessages, parseLookProfile } from "@
 import type { DesignLookProfile, LookExample } from "@/lib/db/types";
 import { prepareReferenceImage } from "@/lib/images/optimize";
 import { logError, logWarn } from "@/lib/log";
+import type { UsageDelta } from "./cost";
 
 /** Examples read per look; more adds cost without changing the pattern. */
 export const MAX_LOOK_EXAMPLES = 6;
@@ -39,6 +40,8 @@ export async function loadLookImages(
 export async function extractLookProfile(
   examples: LookExample[],
   brandId: string,
+  /** A draft's usage list, when the read is part of making one. */
+  usageDeltas?: UsageDelta[],
 ): Promise<DesignLookProfile | null> {
   try {
     const images = await loadLookImages(examples);
@@ -66,6 +69,7 @@ export async function extractLookProfile(
       tool_choice: { type: "tool", name: EXTRACT_LOOK_TOOL.name },
     });
     logUsage("look-profile", DRAFT_MODEL, response.usage, { brandId, metered: true, requestId: response.id });
+    usageDeltas?.push({ model: DRAFT_MODEL, ...response.usage });
     const tu = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === EXTRACT_LOOK_TOOL.name,
     );

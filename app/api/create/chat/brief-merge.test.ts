@@ -34,6 +34,31 @@ describe("mergeBrief competitor_reference_id", () => {
   });
 });
 
+describe("mergeBrief flyer references and client brand", () => {
+  const url = (n: number) => `https://x.supabase.co/storage/v1/object/public/content-images/${n}.jpg`;
+
+  it("keeps up to 3 deduped valid reference URLs, and [] clears them", () => {
+    const next = mergeBrief({} as CampaignBrief, {
+      style_reference_urls: [url(1), url(1), "not a url", url(2), url(3), url(4)],
+    });
+    expect(next.style_reference_urls).toEqual([url(1), url(2), url(3)]);
+    expect(mergeBrief(next, { style_reference_urls: [] }).style_reference_urls).toBeUndefined();
+  });
+
+  it("saves a client brand with valid hex colors and a real logo URL only", () => {
+    const next = mergeBrief({} as CampaignBrief, {
+      client_brand: { name: " The Tax Moguls ", colors: ["#000000", "green", "#1DB954"], logo_url: url(9) },
+    });
+    expect(next.client_brand).toEqual({ name: "The Tax Moguls", colors: ["#000000", "#1DB954"], logo_url: url(9) });
+    const noLogo = mergeBrief({} as CampaignBrief, { client_brand: { name: "Acme", logo_url: "made-up" } });
+    expect(noLogo.client_brand).toEqual({ name: "Acme" });
+  });
+
+  it("ignores a client brand without a name", () => {
+    expect(mergeBrief({} as CampaignBrief, { client_brand: { colors: ["#000000"] } }).client_brand).toBeUndefined();
+  });
+});
+
 describe("buildConversationNotes", () => {
   it("keeps only the user's turns, oldest first", () => {
     const notes = buildConversationNotes(

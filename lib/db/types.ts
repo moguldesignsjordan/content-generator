@@ -426,6 +426,14 @@ export interface CampaignBrief {
    * CAMPAIGN_BRIEF_TEXT_FIELDS, needs its own mergeBrief branch like
    * product_photo_url. */
   competitor_reference_id?: string;
+  /** Social only: hosted designs the user attached in chat for the flyer to
+   * match (layout, type, feel), at most MAX_FLYER_REFERENCES. They reach the
+   * image model as images; a text description alone never steers it. Same
+   * URL rule as photo_urls. */
+  style_reference_urls?: string[];
+  /** Social only: the business a flyer is for when it isn't this brand (an
+   * agency making a client's flyer). Its colors and logo replace the brand's. */
+  client_brand?: ClientBrand;
   /** A verbatim digest of what the user actually typed in the create chat,
    * newest last. The structured fields above are the model's summary of the
    * conversation and lose the user's own words, details, and asides; this is
@@ -450,6 +458,20 @@ export interface CampaignBrief {
 /** Cap on the stored conversation digest: enough for a full interview, small
  * enough that a pasted wall of HTML can't balloon the brief or the prompt. */
 export const MAX_CONVERSATION_NOTES_CHARS = 6000;
+
+/** Attached designs a flyer matches; with a product photo and a logo that's
+ * 5 references, inside every image model's limit. */
+export const MAX_FLYER_REFERENCES = 3;
+
+/** The business a flyer is made for, when it isn't the account's brand. */
+export interface ClientBrand {
+  name: string;
+  /** Hex colors read off their logo or materials, most dominant first. */
+  colors?: string[];
+  /** A hosted attachment that shows their logo (a logo file, a business
+   * card): the image model reproduces the mark from it. */
+  logo_url?: string;
+}
 
 /** The kinds of multi-email campaign the create-agent interview can run;
  * each gets its own tailored question stages (see prompts/create-agent.ts). */
@@ -1227,6 +1249,12 @@ export interface DraftMeta {
   /** The design look (migration 031) this flyer follows; unset means the
    * brand's default look, if it has one, and "none" opts out of it. */
   look_id?: string;
+  /** Designs attached in chat for this flyer to match; they win over
+   * look_id. reference_profile is their design, read once at generation. */
+  reference_urls?: string[];
+  reference_profile?: DesignLookProfile;
+  /** Set when the flyer is for another business: its colors and logo. */
+  client_brand?: ClientBrand;
   /** The image model the flyer's options were made with (picked on the
    * create form). Unset means the brand's default. */
   flyer_model?: ImageModelTier;

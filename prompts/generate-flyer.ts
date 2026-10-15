@@ -504,12 +504,23 @@ export function buildFlyerImagePrompt(
   return parts.join(" ");
 }
 
+/** What each option of a flyer matching attached designs does differently:
+ * the first stays close, the rest keep the style and change the composition,
+ * so the owner gets a real choice instead of four near-copies. */
+export const DESIGN_RIFFS = [
+  "This is option 1: stay as close to the examples' layout, composition, and type treatment as you can, with this piece's own content.",
+  "This is a variation: keep the examples' style, type, and colors, but recompose it, with the headline in a different part of the frame at a different scale.",
+  "This is a variation: keep the examples' style, type, and colors, but build the design around a different main visual element for this subject.",
+  "This is a variation: keep the examples' style and type, but lead with the accent color as a large, confident color block or shape.",
+] as const;
+
 /**
  * Builds the render prompt for a flyer that follows a design look: the image
  * model designs the WHOLE flyer, text included, matching the attached
  * examples. The text it sets is read back and checked (lib/flyer/text-check.ts)
- * before anyone sees it. References arrive in this order: the product photo
- * (when hasProduct), then the look's examples.
+ * before anyone sees it. References arrive in this order, and the prompt
+ * numbers each one by its job: the product photo (when hasProduct), the
+ * look's examples, then the client's logo (when client.hasLogo).
  */
 export function buildFlyerDesignPrompt(
   copy: FlyerCopyOutput,
@@ -523,47 +534,88 @@ export function buildFlyerDesignPrompt(
   opts: {
     hasProduct?: boolean;
     misspelled?: string[];
-    /** Where the real logo is stamped afterwards; that corner is kept clear. */
+    /** Where the logo goes. Stamped afterwards for the brand (the corner is
+     * kept clear); drawn from its reference image for a client. */
     logoCorner?: "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
+    /** Index into DESIGN_RIFFS; unset keeps every option a close match. */
+    riff?: number;
+    /** The flyer is for this business, not the brand. */
+    client?: { name: string; hasLogo: boolean; hasColors: boolean };
   } = {},
 ): string {
   const p = look.profile;
   const showCta = Boolean(copy.cta) && p?.cta_style !== "none";
-  const textLines = [
-    `the headline "${copy.headline}"`,
-    copy.subtext ? `the supporting line "${copy.subtext}"` : "",
-    showCta ? `the call to action "${copy.cta}"${p ? ` styled as a ${p.cta_style}` : ""}` : "",
+  const owner = opts.client
+    ? opts.client.name.endsWith("s") ? `${opts.client.name}'` : `${opts.client.name}'s`
+    : "";
+
+  // Number the references in send order so each one has a clear job.
+  let n = 0;
+  const productImage = opts.hasProduct ? ++n : null;
+  const firstExample = n + 1;
+  n += look.exampleCount;
+  const exampleRange =
+    look.exampleCount === 1 ? `Image ${firstExample} is` : `Images ${firstExample} to ${n} are`;
+  const logoImage = opts.client?.hasLogo ? ++n : null;
+  const roles = [
+    productImage ? `Image ${productImage} is the real product photo.` : "",
+    `${exampleRange} the design ${look.exampleCount === 1 ? "example" : "examples"} to match.`,
+    logoImage ? `Image ${logoImage} shows ${owner} logo.` : "",
   ].filter(Boolean);
+
   const font = tokens.fonts.heading.split(",")[0].replace(/['"]/g, "").trim();
-  const examples =
-    look.exampleCount === 1 ? "the attached example image" : `the ${look.exampleCount} attached example images`;
+  const headlineType = opts.client
+    ? "in the examples' headline type treatment"
+    : `${p ? `${p.headline_treatment}, ` : ""}in the spirit of ${font || "a bold modern sans serif"}`;
+  const lines = [
+    `Headline: "${copy.headline}", ${headlineType}.`,
+    copy.subtext ? `Supporting line: "${copy.subtext}", smaller and quieter than the headline.` : "",
+    showCta ? `Call to action: "${copy.cta}"${p ? `, styled as a ${p.cta_style}` : ""}.` : "",
+  ].filter(Boolean);
+
+  const colors =
+    opts.client && !opts.client.hasColors
+      ? logoImage
+        ? `Colors: take ${owner} colors from their logo (Image ${logoImage}) and use them in the roles the examples use.`
+        : `Colors: a restrained palette of ${look.roles.background} and ${look.roles.text}, with ${look.roles.accent} as the one accent.`
+      : `Colors: use ${opts.client ? owner : "the brand's"} colors in the roles the examples use. Main background or dominant color ${look.roles.background}, text ${look.roles.text}, and ${look.roles.accent} as the one accent${p ? ` (${p.color_roles.accent_usage})` : ""}.`;
+
+  const logo = logoImage
+    ? `Reproduce ${owner} logo from Image ${logoImage} exactly (same letters, colors, and shapes), cleanly and at a readable size, ${opts.logoCorner ? `in the ${opts.logoCorner} corner` : "where the examples place a logo"}. It is the only logo on the flyer.`
+    : opts.client
+      ? "The flyer carries no logo."
+      : opts.logoCorner
+        ? `Keep the ${opts.logoCorner} corner completely empty of text and key subjects: the brand logo is added there afterwards.`
+        : "";
 
   return [
-    `Design a finished, professional social media ad, ${FLYER_ASPECTS[aspect].label.toLowerCase()}.`,
-    `Match the design of ${examples}${opts.hasProduct ? " (the images after the product photo)" : ""} as closely as possible: their layout, kind of imagery and setting, typographic treatment, composition, density, and overall feel. The examples come first; everything below adapts them to this brand and message.`,
+    `Design a finished, professional social media ${opts.client ? "flyer" : "ad"}, ${FLYER_ASPECTS[aspect].label.toLowerCase()}${opts.client ? `, for ${opts.client.name}` : ""}.`,
+    "The image IS the flyer, filling the entire frame edge to edge: not a photo or mockup of a flyer, with no border or backdrop around it.",
+    roles.join(" "),
+    `Use Image${look.exampleCount === 1 ? ` ${firstExample}` : `s ${firstExample} to ${firstExample + look.exampleCount - 1}`} as the design to follow: match its layout, typographic treatment, color use, composition, density, and overall feel as closely as possible, and fill it with entirely new content: a new background, new imagery, and none of its photos, people, objects, or words. Everything below adapts that design to this message.`,
     ...(p
       ? [
-          `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Headline: ${p.headline_treatment}. Imagery: ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
+          `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Imagery: ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
         ]
       : []),
+    ...(opts.riff !== undefined ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
     `Subject for this piece, shown the way the examples show theirs: ${copy.scene.trim().replace(/\.$/, "")}.`,
-    `Typeset EXACTLY this text and nothing else: ${textLines.join(", ")}. Every word spelled exactly as given.`,
+    `Typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
     ...(opts.misspelled?.length
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
       : []),
-    `Colors: use the brand's colors in the roles the examples use. Main background or dominant color ${look.roles.background}, text ${look.roles.text}, and ${look.roles.accent} as the one accent${p ? ` (${p.color_roles.accent_usage})` : ""}.`,
-    `Headline typography in the spirit of ${font || "a bold modern sans serif"}.`,
-    ...(opts.hasProduct
+    colors,
+    ...(productImage
       ? [
-          "The first attached image is the real product: show this exact product, unchanged (same shape, colors, label, and proportions). Do not redesign it.",
+          `Show the product from Image ${productImage} exactly as photographed (same shape, colors, label, and proportions).`,
         ]
       : []),
-    ...(opts.logoCorner
-      ? [`Keep the ${opts.logoCorner} corner completely empty of text and key subjects: the brand logo is added there afterwards.`]
-      : []),
-    "The examples are style references only. Never copy their words, logos, brand names, products, or people.",
-    "No watermarks, no extra words, and no placeholder text anywhere: printed items, screens, signs, and packaging in the scene carry no words (only a real product photo keeps its own label).",
-  ].join(" ");
+    logo,
+    "The examples are style references only. Never copy their words, logos, brand names, products, or people, and never reuse their photos, backgrounds, or decorative objects: draw all imagery new.",
+    "Printed items, screens, signs, and packaging in the scene stay blank (only a real product photo keeps its own label). No watermarks and no placeholder text anywhere.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**
