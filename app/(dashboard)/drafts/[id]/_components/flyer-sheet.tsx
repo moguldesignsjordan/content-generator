@@ -38,13 +38,14 @@ interface FlyerSheetProps {
   onApplied: (image: ContentImage, copy: FlyerCopy | null, aspect: FlyerAspect) => void;
 }
 
-type Tab = "design" | "upload";
+type Tab = "design" | "add" | "upload";
 
 /**
  * The flyer edit sheet, sibling of image-sheet.tsx: tweak the on-image text,
  * post shape, or saved style and re-render (one Gemini call, no Claude), edit
- * the exact prompt for full control, or replace the design with an uploaded
- * image. Caption edits live on the review card, not here.
+ * the exact prompt for full control, add an image (into the design, or as a
+ * style to copy), or replace the design with an uploaded image. Caption edits
+ * live on the review card, not here.
  */
 export function FlyerSheet({
   open,
@@ -68,6 +69,9 @@ export function FlyerSheet({
   const [showPrompt, setShowPrompt] = useState(false);
   const [exactPrompt, setExactPrompt] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [addFile, setAddFile] = useState<File | null>(null);
+  const [addRole, setAddRole] = useState<"place" | "style">("place");
+  const [addNote, setAddNote] = useState("");
   const [busy, setBusy] = useState(false);
   // "" = the brand's default model (Settings).
   const imageModelOptions = useImageModelOptions();
@@ -85,6 +89,9 @@ export function FlyerSheet({
     setExactPrompt("");
     setShowPrompt(false);
     setFile(null);
+    setAddFile(null);
+    setAddRole("place");
+    setAddNote("");
     if (!fetchedStyles.current) {
       fetchedStyles.current = true;
       fetch("/api/style-references")
@@ -133,6 +140,17 @@ export function FlyerSheet({
     void submit(form, "Couldn't regenerate the flyer.");
   }
 
+  function handleAdd() {
+    if (!addFile) return;
+    const form = new FormData();
+    form.set("mode", "generate");
+    form.set("reference", addFile);
+    form.set("referenceRole", addRole);
+    if (addRole === "place" && addNote.trim()) form.set("referenceNote", addNote.trim());
+    if (model) form.set("model", model);
+    void submit(form, "Couldn't add the image.");
+  }
+
   function handleUpload() {
     if (!file) return;
     const form = new FormData();
@@ -163,6 +181,16 @@ export function FlyerSheet({
             >
               Regenerate design
             </Button>
+          ) : tab === "add" ? (
+            <Button
+              variant="gradient"
+              className="flex-1"
+              loading={busy}
+              disabled={!addFile}
+              onClick={handleAdd}
+            >
+              {addRole === "place" ? "Add to design" : "Restyle from it"}
+            </Button>
           ) : (
             <Button
               variant="gradient"
@@ -183,7 +211,8 @@ export function FlyerSheet({
           onChange={(v) => setTab(v as Tab)}
           options={[
             { value: "design", label: "Regenerate" },
-            { value: "upload", label: "Upload my own" },
+            { value: "add", label: "Add an image" },
+            { value: "upload", label: "Replace with mine" },
           ]}
         />
 
@@ -276,6 +305,65 @@ export function FlyerSheet({
                 </Field>
               )}
             </div>
+          </>
+        ) : tab === "add" ? (
+          <>
+            <Field label="Your image" hint="A product, a person, a logo, or a design you like. JPEG, PNG, or WebP up to 10MB.">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setAddFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-sm text-muted file:mr-3 file:rounded-full file:border-0 file:bg-surface-3 file:px-4 file:py-2 file:text-[13px] file:font-medium file:text-foreground hover:file:bg-surface-2"
+              />
+            </Field>
+            <Field
+              label="Use it to"
+              hint={
+                addRole === "place"
+                  ? "Keeps this design and its text, and adds your image into it. One or two renders."
+                  : "Redraws the flyer in the style of your image, with the same text. One render."
+              }
+            >
+              <SegmentedControl
+                value={addRole}
+                onChange={(v) => setAddRole(v as "place" | "style")}
+                options={[
+                  { value: "place", label: "Put it in the design" },
+                  { value: "style", label: "Copy its style" },
+                ]}
+                size="sm"
+              />
+            </Field>
+            {addRole === "place" && (
+              <Field label="Where or how (optional)">
+                <Input
+                  value={addNote}
+                  onChange={(e) => setAddNote(e.target.value)}
+                  placeholder="Put her on the right, holding the phone"
+                  maxLength={300}
+                  disabled={busy}
+                />
+              </Field>
+            )}
+            <Field
+              label="Image model"
+              hint={imageModelOptions.find((m) => m.id === model)?.description ?? "Uses the model picked in Settings."}
+            >
+              <Select value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+                <option value="">My default</option>
+                {imageModelOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {addFile && (
+              <div className="overflow-hidden rounded-xl border border-border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={URL.createObjectURL(addFile)} alt="Image to add" className="max-h-64 w-full object-contain" />
+              </div>
+            )}
           </>
         ) : (
           <>

@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import { requireDraftInBrand } from "@/lib/draft-access";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
-import { regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
+import { placeImageInFlyer, regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
 import { resolveImageModel } from "@/lib/clients/image-render";
 import { isImageModelTier } from "@/lib/image-models";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
@@ -33,6 +33,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
  * POST multipart/form-data — edits to a social flyer draft. Modes:
  *  - "generate" (default): re-renders the design. { headline?, subtext?,
  *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt? }.
+ *    referenceRole "place" (+ referenceNote) edits the current design to
+ *    include the reference instead of copying its style.
  *    Copy fields default to the stored flyer_copy; exactPrompt sends the full
  *    prompt verbatim (the tweak-and-regenerate path). Zero Claude tokens
  *    either way, one image render. { tier } (any image model choice) is
@@ -315,7 +317,27 @@ export async function POST(
     const variantIndex = meta.flyer_variant_index;
 
     const copyForRender = { headline, subtext, cta, caption: currentCopy?.caption ?? "", hashtags: currentCopy?.hashtags, scene };
-    const { image, usage } = await regenerateFlyerImage({
+    // "place": the upload goes INTO the current design; otherwise it's a style.
+    const placing = form.get("referenceRole") === "place";
+    if (placing && (!reference || !meta.flyer_image?.url)) {
+      return NextResponse.json(
+        { error: reference ? "There's no design to add it to yet." : "Add the image to put in the design." },
+        { status: 400 },
+      );
+    }
+    const note = stripEmDashes(String(form.get("referenceNote") ?? "").trim()).slice(0, 300) || undefined;
+    const { image, usage } = placing
+      ? await placeImageInFlyer({
+          ctx,
+          copy: copyForRender,
+          aspect,
+          currentImageUrl: meta.flyer_image!.url,
+          subject: reference!,
+          note,
+          ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
+          draftId: id,
+        })
+      : await regenerateFlyerImage({
       ctx,
       copy: copyForRender,
       aspect,

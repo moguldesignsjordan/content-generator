@@ -565,3 +565,24 @@ export function buildFlyerDesignPrompt(
     "No watermarks, no extra words, and no placeholder text anywhere: printed items, screens, signs, and packaging in the scene carry no words (only a real product photo keeps its own label).",
   ].join(" ");
 }
+
+/**
+ * "Put it in the design": an edit of the finished flyer (first reference)
+ * that brings in the owner's image (second reference), keeping everything
+ * else. `note` is the owner's own placement instruction.
+ */
+export function buildPlaceImagePrompt(
+  aspect: FlyerAspect,
+  opts: { note?: string; misspelled?: string[] } = {},
+): string {
+  const note = opts.note ? stripEmDashes(opts.note).trim().replace(/\.$/, "") : "";
+  return [
+    `Edit the first attached image, a finished ${FLYER_ASPECTS[aspect].label.toLowerCase()} design.`,
+    `Bring the subject of the second attached image into this design: ${note || "place it where it suits the composition best, large enough to read clearly"}.`,
+    "Keep that subject true to the photo: the same person, product, or object, with the same face, shape, colors, and any printed label. Not a lookalike.",
+    "Keep everything else as it is: the layout, background, colors, logo, and every word of text, spelled exactly as it is now and in the same place. Change only what's needed to make room for the new subject, and match its lighting to the design.",    ...(opts.misspelled?.length
+      ? [`A previous attempt changed this text: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Keep it exactly as in the first image.`]
+      : []),
+    "Add no new words, watermarks, or placeholder text.",
+  ].join(" ");
+}

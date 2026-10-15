@@ -90,7 +90,9 @@ are in git history (`git log -p PROJECT_STATE.md`).
    flyers, composed flyers on a brand whose font isn't on Google Fonts
    (falls back to Inter). Also the Create chat's web search (Oct 15):
    ask it to research something mid-interview. And the flyer style picker
-   (Our style, No reference, Add examples) on Create and /flyers/new.
+   (Our style, No reference, Add examples) on Create and /flyers/new. And
+   the flyer edit sheet's "Add an image" tab (Put it in the design / Copy
+   its style).
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

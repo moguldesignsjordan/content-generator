@@ -42,6 +42,7 @@ import {
   buildFlyerCopyMessages,
   buildFlyerDesignPrompt,
   buildFlyerImagePrompt,
+  buildPlaceImagePrompt,
   parseFlyerVariants,
   resolveVariantStyles,
   type FlyerCopyOutput,
@@ -370,8 +371,8 @@ export async function regenerateFlyerImage(args: {
 
   // A flyer that follows a look re-renders as an AI design, text checked; the
   // code-set path below is its fallback, and the exact-prompt path stays the
-  // user's full control.
-  if (!args.exactPrompt && args.lookId) {
+  // user's full control. A one-off reference is a new style, so it skips the look.
+  if (!args.exactPrompt && !args.reference && args.lookId) {
     const look = await resolveLook(args.lookId, args.ctx.brand.id, args.draftId);
     if (look) {
       const designed = await renderDesignedFlyer(args.ctx, args.copy, {
@@ -460,6 +461,95 @@ export async function regenerateFlyerImage(args: {
     },
     usage: usageDeltas,
   };
+}
+
+/**
+ * "Put it in the design": edits the current flyer so it includes the owner's
+ * image (a product, a person, a logo) and keeps the rest. The edit redraws
+ * the text, so it's read back like a designed flyer: the lines the current
+ * flyer shows must survive, one retry, then an error instead of a misspelled
+ * flyer. When the read itself fails the edit is kept, unverified: the owner
+ * is looking right at it, and nothing publishes without their approval.
+ */
+export async function placeImageInFlyer(args: {
+  ctx: TopicContext;
+  copy: FlyerCopyOutput;
+  aspect: FlyerAspect;
+  currentImageUrl: string;
+  subject: { data: string; mimeType: string };
+  note?: string;
+  model?: string;
+  draftId: string;
+}): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
+  if (!isGeminiConfigured()) {
+    throw new Error("Image generation isn't set up yet: add GEMINI_API_KEY to .env.local.");
+  }
+  const usageDeltas: UsageDelta[] = [];
+  const readOpts = { brandId: args.ctx.brand.id, draftId: args.draftId, usageDeltas };
+  const toPreview = (data: Buffer) =>
+    sharp(data).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+
+  const res = await fetch(args.currentImageUrl);
+  if (!res.ok) throw new Error("Couldn't load the current flyer. Try again.");
+  const current = Buffer.from(await res.arrayBuffer());
+
+  // Only the lines this design actually shows (a look can drop the CTA).
+  const lines = [args.copy.headline, args.copy.subtext ?? "", args.copy.cta ?? ""].filter(Boolean);
+  const before = await readImageText(await toPreview(current), readOpts);
+  const expected =
+    before === null ? [args.copy.headline] : lines.filter((l) => checkRenderedText([l], before).missing.length === 0);
+
+  const model = args.model ?? resolveImageModel(args.ctx.brand.visual_identity?.image_gen?.model);
+  const references = [await prepareReferenceImage(current), args.subject];
+  let misspelled: string[] | undefined;
+  for (let attempt = 0; attempt < DESIGN_ATTEMPTS; attempt++) {
+    const prompt = buildPlaceImagePrompt(args.aspect, { note: args.note, misspelled });
+    const rendered = await renderImage({ model, prompt, aspectRatio: args.aspect, references, minSize: "2K" });
+    usageDeltas.push({ model: rendered.billedModel, images: 1 });
+    logImageUsage("flyer-place-image", rendered.billedModel, 1, {
+      brandId: args.ctx.brand.id,
+      draftId: args.draftId,
+      metered: true,
+    });
+
+    const seen = await readImageText(await toPreview(rendered.data), readOpts);
+    if (seen !== null) {
+      const check = checkRenderedText(expected, seen);
+      if (!check.ok) {
+        logWarn("pipeline:generate-flyer:place-text-check", "edited flyer text didn't match", {
+          draftId: args.draftId,
+          missing: check.missing,
+          extra: check.extra.slice(0, 12),
+        });
+        misspelled = check.missing.length ? check.missing : undefined;
+        continue;
+      }
+    } else {
+      logWarn("pipeline:generate-flyer:place-text-check", "couldn't read the edit back; kept unverified", {
+        draftId: args.draftId,
+      });
+    }
+
+    const size = FLYER_ASPECTS[args.aspect];
+    const optimized = await optimizeFlyerImage(rendered.data, size);
+    const { url, path } = await uploadContentImage(optimized.data);
+    const alt = stripEmDashes(args.copy.headline).slice(0, 160);
+    recordFlyerMediaAsset({
+      brandId: args.ctx.brand.id,
+      url,
+      storagePath: path,
+      alt,
+      prompt,
+      width: optimized.width,
+      height: optimized.height,
+      draftId: args.draftId,
+    });
+    return {
+      image: { url, alt, width: optimized.width, height: optimized.height, style: "illustration", prompt },
+      usage: usageDeltas,
+    };
+  }
+  throw new Error("The image model kept changing the flyer's text, so nothing was saved. Try again or add a note on where it goes.");
 }
 
 /**

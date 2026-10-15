@@ -7,6 +7,7 @@ import {
   buildFlyerCopyMessages,
   buildFlyerDesignPrompt,
   buildFlyerImagePrompt,
+  buildPlaceImagePrompt,
   flyerVariantsTool,
   isFlyerAspect,
   isFlyerStyle,
@@ -429,5 +430,22 @@ describe("buildFlyerDesignPrompt", () => {
     const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { hasProduct: true });
     expect(prompt).toContain("(the images after the product photo)");
     expect(prompt).toContain("The first attached image is the real product");
+  });
+});
+
+describe("buildPlaceImagePrompt", () => {
+  it("edits the current design with the owner's placement note, keeping the text", () => {
+    const prompt = buildPlaceImagePrompt("4:5", { note: "Put her on the right \u2014 holding the phone." });
+    expect(prompt).toContain("Edit the first attached image, a finished portrait post (4:5) design.");
+    expect(prompt).toContain("into this design: Put her on the right");
+    expect(prompt).toContain("holding the phone. Keep that subject");
+    expect(prompt).toContain("every word of text, spelled exactly as it is now");
+    expect(prompt).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it("falls back to a sensible placement and names text a retry must restore", () => {
+    const prompt = buildPlaceImagePrompt("1:1", { misspelled: ["Book a call"] });
+    expect(prompt).toContain("place it where it suits the composition best");
+    expect(prompt).toContain('A previous attempt changed this text: "Book a call"');
   });
 });
