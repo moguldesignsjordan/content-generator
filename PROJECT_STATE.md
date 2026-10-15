@@ -49,6 +49,20 @@ the older-standing **migrations 020 AND 021** — until 021 is applied, prompt
 capture silently no-ops and /prompts stays empty; until 020, rating an email
 500s).
 
+## Session 2026-10-14 (night): one Create page, two modes
+
+- **Create (`/`) has a One piece | Campaign switch** (`/?mode=campaign`).
+  One piece is the chat (moved from `/chat`, which now redirects to `/`);
+  Campaign is the factory. "Quick chat" is gone from the nav; "New campaign"
+  links point at `/?mode=campaign`.
+- **Chat quick buttons are Email | Blog | Flyer | Ad** (was Email | Image |
+  Campaign). Flyer and Ad show the look picker above the composer; the chat
+  route checks the look is the brand's and stores it as the flyer's
+  `look_id`. Typing "make a flyer" without the button still works but uses
+  the brand default look (no picker).
+- Typecheck + 719 tests + build green. `npm run lint` isn't configured (opens
+  Next's ESLint setup prompt). UNCOMMITTED, no logged-in click-through yet.
+
 ## Session 2026-10-14 (evening): design looks
 
 - **Looks:** a named group of 1-6 example ads/posts (upload, library,

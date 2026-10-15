@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
+  BlogIcon,
   CheckIcon,
   CloseIcon,
   FlyerIcon,
@@ -33,6 +34,7 @@ import type {
   MediaAsset,
   SeriesDraftRef,
 } from "@/lib/db/types";
+import { LookPicker } from "./look-picker";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
 // unset, generation derives the type from the topic as before; picking one
@@ -74,8 +76,19 @@ const PROMPT_IDEAS = [
   "Make a square flyer for Instagram",
   "Announce a new service to the list",
   "Turn our best email into a flyer",
-  "Plan a launch campaign for this month",
+  "Write a blog post about how we work",
 ];
+
+/** The one-piece kinds the quick buttons start. Flyer and ad both ride the
+ * standalone image flow; the agent picks social_format "ad" from the wording. */
+type PieceKind = "email" | "blog" | "flyer" | "ad";
+
+const PIECE_OPENERS: Record<PieceKind, string> = {
+  email: "I want to create an email",
+  blog: "I want to create a blog post",
+  flyer: "I want to create an image: a social flyer",
+  ad: "I want to create an image: a paid Facebook or Instagram ad",
+};
 
 export interface CreateAgentSuggestion {
   label: string;
@@ -198,6 +211,10 @@ export function CreateAgent({
   // "" (Auto), generation derives the type from the topic as before.
   const [emailType, setEmailType] = useState<EmailType | "">("");
   const [blogType, setBlogType] = useState<BlogType | "">("");
+  // Set by the quick buttons. A flyer or ad shows the look picker beside the
+  // chat; null = the brand default look, same as the factory.
+  const [pieceKind, setPieceKind] = useState<PieceKind | null>(null);
+  const [lookId, setLookId] = useState<string | null>(null);
 
   // Which example prompt the empty composer is showing (landing only).
   const [phIndex, setPhIndex] = useState(0);
@@ -371,6 +388,7 @@ export function CreateAgent({
           campaignId,
           images: imageUrls.length ? imageUrls : undefined,
           auto: mode === "auto",
+          ...(lookId ? { lookId } : {}),
         }),
         signal: controller.signal,
       });
@@ -439,6 +457,14 @@ export function CreateAgent({
     setError(null);
     setActionsOpen(true);
     setPendingImages([]);
+    setPieceKind(null);
+    setLookId(null);
+  }
+
+  function startPiece(kind: PieceKind) {
+    setPieceKind(kind);
+    if (kind === "email" || kind === "blog") setChannel(kind);
+    send(PIECE_OPENERS[kind]);
   }
 
   async function generate() {
@@ -522,11 +548,7 @@ export function CreateAgent({
             />
             {actionsOpen && (
               <ActionGrid
-                onEmail={() => send("I want to create an email")}
-                onImage={() => send("I want to create an image: a social flyer")}
-                onCampaign={() =>
-                  send("I want to plan a campaign: a series of emails")
-                }
+                onPick={startPiece}
                 disabled={loading || generating}
                 className="mt-3"
               />
@@ -645,6 +667,21 @@ export function CreateAgent({
           </div>
 
           {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
+
+          {(pieceKind === "flyer" || pieceKind === "ad") && (
+            <details open className="mx-3 border-t border-border pt-2">
+              <summary className="cursor-pointer text-[12.5px] font-medium text-foreground">
+                Make {pieceKind === "ad" ? "the ad" : "the flyer"} look like
+              </summary>
+              <div className="mt-2 max-h-48 overflow-y-auto">
+                <LookPicker
+                  value={lookId}
+                  onChange={setLookId}
+                  disabled={loading || generating}
+                />
+              </div>
+            </details>
+          )}
 
           <div className="p-3 pt-2">
             <ComposerBar
@@ -931,36 +968,38 @@ function ComposerBar({
 }
 
 function ActionGrid({
-  onEmail,
-  onImage,
-  onCampaign,
+  onPick,
   disabled,
   className,
 }: {
-  onEmail: () => void;
-  onImage: () => void;
-  onCampaign: () => void;
+  onPick: (kind: PieceKind) => void;
   disabled: boolean;
   className?: string;
 }) {
   return (
-    <div className={cn("grid grid-cols-3 gap-2", className)}>
+    <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}>
       <ActionButton
         icon={<MailIcon size={15} />}
         label="Email"
-        onClick={onEmail}
+        onClick={() => onPick("email")}
+        disabled={disabled}
+      />
+      <ActionButton
+        icon={<BlogIcon size={15} />}
+        label="Blog"
+        onClick={() => onPick("blog")}
         disabled={disabled}
       />
       <ActionButton
         icon={<FlyerIcon size={15} />}
-        label="Image"
-        onClick={onImage}
+        label="Flyer"
+        onClick={() => onPick("flyer")}
         disabled={disabled}
       />
       <ActionButton
         icon={<MegaphoneIcon size={15} />}
-        label="Campaign"
-        onClick={onCampaign}
+        label="Ad"
+        onClick={() => onPick("ad")}
         disabled={disabled}
       />
     </div>

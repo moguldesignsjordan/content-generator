@@ -1,7 +1,6 @@
 import {
   ActivityIcon,
   ArchiveIcon,
-  BoltIcon,
   CheckIcon,
   CreditIcon,
   GearIcon,
@@ -82,13 +81,6 @@ export const NAV: NavItem[] = [
     label: "Content plan",
     Icon: LightbulbIcon,
     match: (p) => p.startsWith("/plan"),
-    group: "more",
-  },
-  {
-    href: "/chat",
-    label: "Quick chat",
-    Icon: BoltIcon,
-    match: (p) => p.startsWith("/chat"),
     group: "more",
   },
   {

@@ -90,7 +90,7 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
       <Card className="p-7 text-center">
         <p className="text-sm text-muted">
           No campaigns yet.{" "}
-          <Link href="/" className="font-medium text-accent hover:text-accent-press">
+          <Link href="/?mode=campaign" className="font-medium text-accent hover:text-accent-press">
             Plan one from Create
           </Link>
           .
@@ -216,7 +216,7 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                       <p className="py-2 text-[13px] text-muted">
                         No emails yet.{" "}
                         <Link
-                          href="/"
+                          href="/?mode=campaign"
                           className="font-medium text-accent hover:text-accent-press"
                         >
                           Start a new campaign

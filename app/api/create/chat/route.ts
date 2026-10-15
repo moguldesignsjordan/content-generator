@@ -22,6 +22,7 @@ import {
   getBlogDraftFromEmail,
   getBrandWithIcps,
   getCampaign,
+  getDesignLook,
   getDraftForReview,
   getDraftWithJobContext,
   getFlyerDraftFromEmail,
@@ -215,12 +216,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, campaignId, images, auto } = (await req.json()) as {
+    const { message, history, campaignId, images, auto, lookId } = (await req.json()) as {
       message?: string;
       history?: ChatMsg[];
       campaignId?: string | null;
       images?: string[];
       auto?: boolean;
+      lookId?: string | null;
     };
     if (!message?.trim()) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -235,6 +237,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
     const { brand, strategy, icps } = data;
+    // A look id from the client must be one of this brand's looks.
+    if (lookId && lookId !== "none" && !(await getDesignLook(lookId, brand.id))) {
+      return NextResponse.json({ error: "That look doesn't exist." }, { status: 404 });
+    }
     const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
 
     // The campaign row holds the brief across turns (history lives on the
@@ -329,7 +335,14 @@ export async function POST(req: NextRequest) {
       channel: null,
       series: null,
     };
-    const dispatchCtx = { brand, strategy, topics, products, campaignId: campaign.id };
+    const dispatchCtx = {
+      brand,
+      strategy,
+      topics,
+      products,
+      campaignId: campaign.id,
+      lookId: lookId || undefined,
+    };
 
     // Snapshot readiness BEFORE this turn: if the brief was already complete
     // walking in and the whole turn produces zero tool calls, the model
@@ -552,6 +565,8 @@ async function dispatchTool(
     topics: CampaignTopicOption[];
     products: Product[];
     campaignId: string;
+    /** The flyer look picked on Create; social drafts only. */
+    lookId?: string;
   },
 ): Promise<string> {
   switch (block.name) {
@@ -684,6 +699,7 @@ async function dispatchTool(
               flyerBrief,
               competitorReferenceId: state.brief.competitor_reference_id,
               flyerFormat: input.social_format === "ad" ? "ad" : "post",
+              ...(ctx.lookId ? { lookId: ctx.lookId } : {}),
             }
           : {}),
       });
