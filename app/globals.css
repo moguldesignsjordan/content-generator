@@ -286,6 +286,34 @@
   .momentum {
     -webkit-overflow-scrolling: touch;
   }
+
+  /* Showcase frame for the glass art, which is rendered on pure black. It
+     stays black in light mode too: a lit window on Paper. */
+  .art-frame {
+    background: #000;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+
+  /* A sideways-scrolling row fades out at its right edge, so a phone shows
+     there's more to swipe to. */
+  .rail-fade {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+  }
+}
+
+/* Empty-state art drifts a little, as if hanging in its frame. */
+@keyframes art-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(-1.2deg);
+  }
+}
+.art-float {
+  animation: art-float 7s ease-in-out infinite;
 }
 
 /* ── Hero creation surface ──────────────────────────────────────────────

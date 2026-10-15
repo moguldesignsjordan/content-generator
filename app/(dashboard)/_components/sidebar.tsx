@@ -22,10 +22,12 @@ export function Sidebar({
   pathname,
   userEmail,
   role,
+  reviewCount,
 }: {
   pathname: string;
   userEmail: string | null;
   role: UserRole;
+  reviewCount: number;
 }) {
   const initials = (userEmail?.[0] ?? "M").toUpperCase();
   const items = NAV.filter((item) => !item.adminOnly || role === "admin");
@@ -54,7 +56,12 @@ export function Sidebar({
       <nav className="flex-1 overflow-y-auto px-3 py-2 no-scrollbar">
         <div className="space-y-0.5">
           {top.map((item) => (
-            <NavRow key={item.href} item={item} pathname={pathname} />
+            <NavRow
+              key={item.href}
+              item={item}
+              pathname={pathname}
+              count={item.href === "/review" ? reviewCount : 0}
+            />
           ))}
         </div>
         {moreItems.length > 0 && (
@@ -122,8 +129,17 @@ export function Sidebar({
   );
 }
 
-/** Standard nav row: icon + label, with a magenta tick + filled surface when current. */
-function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
+/** Standard nav row: icon + label, with a magenta tick + filled surface when
+ *  current, and a count pill when something is waiting there. */
+function NavRow({
+  item,
+  pathname,
+  count = 0,
+}: {
+  item: NavItem;
+  pathname: string;
+  count?: number;
+}) {
   const active = item.match(pathname);
   const { href, label, Icon } = item;
   return (
@@ -141,6 +157,12 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
       )}
       <Icon size={20} className={active ? "text-accent" : ""} />
       {label}
+      {count > 0 && (
+        <span className="ml-auto min-w-6 rounded-full bg-accent/15 px-2 py-0.5 text-center text-[12px] font-semibold tabular-nums text-accent">
+          {count}
+          <span className="sr-only"> waiting</span>
+        </span>
+      )}
     </Link>
   );
 }

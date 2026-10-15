@@ -78,7 +78,7 @@ are in git history (`git log -p PROJECT_STATE.md`).
 
 ## Current state
 
-- **Create (`/`) is one chat.** Kind chips (Flyer, Email, Campaign, Blog, Ad)
+- **Create (`/`) is one chat.** Kind tiles (Flyer, Email, Campaign, Blog post, Ad)
   then the owner describes it; Claude reflects the details back, asks at most
   three missing items, and confirms. Streams over SSE. A made piece
   generates as a live preview in the thread (no jump to the review page);
@@ -86,6 +86,13 @@ are in git history (`git log -p PROJECT_STATE.md`).
   through the review page's own endpoints. Campaigns hand off to
   the factory (research optional, editable plan, quote, "Test 3 first" or
   "Make all", approve-all).
+- **UI (Oct 15):** the home landing is a Launchpad: 3D glass kind tiles,
+  then "Waiting on you" and "Recent work" rows (hidden while a chat thread is
+  open). Library is a visual hub with counts and a Latest grid; Review has
+  kind filters and a sticky approve-all; campaigns are cards with send
+  progress; empty states carry art. Mobile tab bar has a raised Create button
+  and a Review count badge (sidebar too). The art (Higgsfield, Nano Banana
+  Pro) lives in `assets/art/`.
 - **Pipelines:** email (angle pick, draft, QA that revises once, optional
   design critique), blog (Portable Text, FAQ, internal links, live Sanity
   publish), flyers (4 options per click, design looks, FB/IG ad copy mode).
@@ -101,7 +108,7 @@ are in git history (`git log -p PROJECT_STATE.md`).
   monthly allowance cron.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
 - **Migrations:** all through 031 are applied (checked live 2026-10-14).
-- **Checks:** `npm run typecheck`, `npm test` (723 tests), `npm run lint`
+- **Checks:** `npm run typecheck`, `npm test` (770 tests), `npm run lint`
   (0 errors, 14 warnings), `npm run build`. `next build` runs lint, so a lint
   error now fails the deploy.
 
@@ -124,6 +131,10 @@ are in git history (`git log -p PROJECT_STATE.md`).
    for a client business (Oct 15): attach a design plus their logo in the
    Create chat, confirm no look picker appears, the 4 options follow the
    design in the client's colors with their logo, and "save as a look" works.
+   And the Oct 15 UI upgrade, which passed typecheck, lint, tests and build
+   but hasn't been seen rendered: the home Launchpad (tiles, rows, tile tap
+   starting the chat), Review, Library, Campaigns, empty states, and the mobile
+   tab bar, at phone and desktop widths in light and dark.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

@@ -3,10 +3,19 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, ConfirmDialog, ListGroup, SegmentedControl, Spinner, useToast } from "@/components/ui";
+import {
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  LinkButton,
+  SegmentedControl,
+  Spinner,
+  useToast,
+} from "@/components/ui";
 import { ArchiveIcon, ChevronRightIcon, TrashIcon, UnarchiveIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { CampaignSummary } from "@/lib/db/types";
+import { KIND_ART } from "./art";
 import { CampaignStatusBadge } from "./topic-badges";
 
 type Filter = "all" | "active" | "done" | "archived";
@@ -87,15 +96,18 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
 
   if (campaigns.length === 0) {
     return (
-      <Card className="p-7 text-center">
-        <p className="text-sm text-muted">
-          No campaigns yet.{" "}
-          <Link href="/?mode=campaign" className="font-medium text-accent hover:text-accent-press">
-            Plan one from Create
-          </Link>
-          .
-        </p>
-      </Card>
+      <EmptyState
+        art={KIND_ART.campaign}
+        title="No campaigns yet"
+        action={
+          <LinkButton href="/?mode=campaign" variant="outline" size="sm">
+            Plan a campaign
+          </LinkButton>
+        }
+      >
+        A campaign is a full set of posts, emails and ads around one goal. Describe it once and
+        you get a plan to edit before anything is made.
+      </EmptyState>
     );
   }
 
@@ -120,7 +132,7 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
           <p className="text-sm text-muted">Nothing here in this state yet.</p>
         </Card>
       ) : (
-        <ListGroup>
+        <div className="space-y-3">
           {filtered.map((c) => {
             const series = c.chat_state?.series ?? [];
             const isOpen = expanded === c.id;
@@ -132,38 +144,53 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                 : `${c.emails} email${c.emails === 1 ? "" : "s"}`,
               c.sent > 0 ? `${c.sent} sent` : null,
               c.scheduled > 0 ? `${c.scheduled} scheduled` : null,
-              new Date(c.updated_at).toLocaleDateString(),
             ].filter(Boolean);
 
             return (
-              <div key={c.id} className={cn(c.archived && "opacity-60")}>
-                <div className="flex items-center">
+              <Card
+                key={c.id}
+                className={cn(
+                  "overflow-hidden transition-colors hover:border-border-strong",
+                  c.archived && "opacity-60",
+                )}
+              >
+                <div className="flex items-start gap-1 p-1.5 pr-2">
                   <button
                     type="button"
                     onClick={() => setExpanded(isOpen ? null : c.id)}
-                    className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2 active:bg-surface-3"
+                    aria-expanded={isOpen}
+                    className="flex min-w-0 flex-1 items-start gap-3 rounded-[var(--radius-md)] p-2.5 text-left transition-colors hover:bg-surface-2/60 active:bg-surface-3"
                   >
                     <ChevronRightIcon
                       size={16}
                       className={cn(
-                        "shrink-0 text-muted-2 transition-transform",
+                        "mt-1 shrink-0 text-muted-2 transition-transform",
                         isOpen && "rotate-90",
                       )}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[15px] font-medium text-foreground">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CampaignStatusBadge status={c.status} />
+                        <span className="text-[12px] tabular-nums text-muted-2">
+                          {new Date(c.updated_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 line-clamp-2 font-display text-[17px] font-semibold leading-snug text-foreground">
                         {title}
                       </div>
-                      <div className="mt-0.5 truncate text-[13px] text-muted">
+                      <div className="mt-1 text-[13px] text-muted">
                         {subtitleParts.join(" · ")}
                       </div>
+                      {c.emails > 0 && (
+                        <SendProgress emails={c.emails} sent={c.sent} scheduled={c.scheduled} />
+                      )}
                     </div>
-                    <CampaignStatusBadge status={c.status} />
                   </button>
                   <RowIconButton
                     label={c.archived ? "Unarchive campaign" : "Archive campaign"}
                     loading={actingId === c.id}
                     disabled={!!actingId}
+                    className="mt-1"
                     onClick={() => handleArchive(c.id, !c.archived)}
                   >
                     {c.archived ? <UnarchiveIcon size={18} /> : <ArchiveIcon size={18} />}
@@ -171,7 +198,7 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                   <RowIconButton
                     label="Delete campaign"
                     danger
-                    className="mr-2"
+                    className="mt-1"
                     onClick={() => setConfirmDeleteId(c.id)}
                   >
                     <TrashIcon size={18} />
@@ -226,10 +253,10 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
                     )}
                   </div>
                 )}
-              </div>
+              </Card>
             );
           })}
-        </ListGroup>
+        </div>
       )}
 
       <ConfirmDialog
@@ -242,6 +269,28 @@ export function CampaignsList({ campaigns: initialCampaigns }: { campaigns: Camp
         confirmLabel="Delete"
         loading={deleting}
       />
+    </div>
+  );
+}
+
+/** How many of a campaign's emails went out (green) or are booked (cyan). */
+function SendProgress({
+  emails,
+  sent,
+  scheduled,
+}: {
+  emails: number;
+  sent: number;
+  scheduled: number;
+}) {
+  return (
+    <div
+      role="img"
+      aria-label={`${sent} of ${emails} emails sent, ${scheduled} scheduled`}
+      className="mt-3 flex h-1.5 max-w-xs overflow-hidden rounded-full bg-surface-3"
+    >
+      <span className="bg-success" style={{ width: `${(sent / emails) * 100}%` }} />
+      <span className="bg-cyan" style={{ width: `${(scheduled / emails) * 100}%` }} />
     </div>
   );
 }

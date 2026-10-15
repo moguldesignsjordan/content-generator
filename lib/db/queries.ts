@@ -3533,6 +3533,19 @@ export async function countScheduledAwaitingReview(brandId: string): Promise<num
   return count ?? 0;
 }
 
+/** Every draft waiting for a decision, scheduled or not (the nav's Review badge). */
+export async function countDraftsInReview(brandId: string): Promise<number> {
+  const db = getAdminClient();
+  const { count, error } = await db
+    .from("drafts")
+    .select("id, content_jobs!inner(brand_id)", { count: "exact", head: true })
+    .eq("state", "in_review")
+    .eq("archived", false)
+    .eq("content_jobs.brand_id", brandId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 // ── User roles (migration 013) ──────────────────────────────────────────────
 
 /** The caller's role, defaulting to 'user' if no profile row exists yet

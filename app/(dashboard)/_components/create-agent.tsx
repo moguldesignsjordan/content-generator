@@ -11,23 +11,12 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  AnimatePresence,
-  MotionConfig,
-  motion,
-  useMotionValue,
-  useSpring,
-} from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
-  BlogIcon,
-  BoltIcon,
   CheckIcon,
   CloseIcon,
-  FlyerIcon,
   ImageIcon,
-  MailIcon,
-  MegaphoneIcon,
   PaperclipIcon,
   SendIcon,
 } from "@/components/ui/icons";
@@ -36,6 +25,7 @@ import { toastApiError } from "@/lib/billing/toast-error";
 import { readSse } from "@/lib/read-sse";
 import { useGenerationStream } from "@/lib/use-generation-stream";
 import { HomeHero } from "./home-hero";
+import { KindTiles } from "./kind-tiles";
 import type {
   BlogType,
   ClientBrand,
@@ -92,34 +82,29 @@ const PROMPT_IDEAS = [
   "Write a blog post about how we work",
 ];
 
-/** The landing's starter chips: clicking one starts the conversation with its
+/** The landing's kind tiles: tapping one starts the conversation with its
  * text (plus anything already typed). A preset startKind instead shows the
  * describe-it hint and rides at the front of their description on send. */
-type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
+export type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
 
-const STARTERS: Record<StarterKind, { label: string; text: string; hint: string }> = {
+const STARTERS: Record<StarterKind, { text: string; hint: string }> = {
   flyer: {
-    label: "Flyer",
     text: "I want to make a flyer",
     hint: "Describe your flyer: what it's for, the offer, dates, where it'll post...",
   },
   email: {
-    label: "Email",
     text: "I want to write an email",
     hint: "Describe your email: what it's about, who it's for, any deal...",
   },
   campaign: {
-    label: "Campaign",
     text: "I want to plan a campaign",
     hint: "Describe your campaign: what you're promoting, the offer, how long...",
   },
   blog: {
-    label: "Blog",
     text: "I want to write a blog post",
     hint: "Describe your post: the topic, who's reading, your take on it...",
   },
   ad: {
-    label: "Ad",
     text: "I want to make a paid Facebook or Instagram ad",
     hint: "Describe your ad: what you're selling, the offer, who should see it...",
   },
@@ -233,12 +218,15 @@ export function CreateAgent({
   initial,
   suggestions = [],
   startKind,
+  landing,
 }: {
   className?: string;
   initial?: CreateAgentInitialState;
   suggestions?: CreateAgentSuggestion[];
   /** Prefills the composer (e.g. a "New campaign" link). */
   startKind?: StarterKind;
+  /** Server-rendered rows shown under the kind tiles until the chat starts. */
+  landing?: ReactNode;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -683,15 +671,17 @@ export function CreateAgent({
   return (
     <MotionConfig reducedMotion="user">
       <div
-        className={cn("flex flex-col overflow-hidden", className)}
-        style={{ height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
+        // The thread is a fixed-height chat window. The landing flows at its
+        // natural height so the tiles and rows under the composer fit.
+        className={cn("flex flex-col", !empty && "overflow-hidden", className)}
+        style={empty ? undefined : { height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
       >
         <AnimatePresence mode="wait">
           {empty ? (
-            // Landing — a centered prompt: beacon, headline, input, actions.
+            // Landing: headline, composer, kind tiles, ideas, then the rows.
             <motion.div
               key="landing"
-              className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-10"
+              className="flex flex-col items-center gap-8 pb-4 pt-6 sm:pt-10"
               exit={{ opacity: 0, y: -16, filter: "blur(6px)" }}
               transition={{ duration: 0.3, ease: EASE_OUT }}
             >
@@ -741,17 +731,13 @@ export function CreateAgent({
                     onRemoveImage={(url) =>
                       setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
                     }
-                    footer={
-                      <ActionGrid
-                        picked={picked}
-                        onPick={pickKind}
-                        disabled={loading || generating}
-                      />
-                    }
                   />
                 </motion.div>
+              </div>
+              <div className="w-full max-w-3xl space-y-8">
+                <KindTiles picked={picked} onPick={pickKind} disabled={loading || generating} />
                 {suggestions.length > 0 && (
-                  <div className="mt-5">
+                  <div>
                     <motion.p
                       className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2"
                       {...rise(1)}
@@ -774,6 +760,7 @@ export function CreateAgent({
                     </div>
                   </div>
                 )}
+                {landing && <motion.div {...rise(1.15)}>{landing}</motion.div>}
               </div>
             </motion.div>
           ) : (
@@ -1068,7 +1055,6 @@ function ComposerBar({
   placeholderCycle,
   pendingImages,
   onRemoveImage,
-  footer,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -1092,8 +1078,6 @@ function ComposerBar({
   /** Images uploaded and staged, waiting to ride with the next send. */
   pendingImages?: PendingImage[];
   onRemoveImage?: (url: string) => void;
-  /** Sits inside the bar under the input, e.g. the landing's kind chips. */
-  footer?: ReactNode;
 }) {
   const attachRef = useRef<HTMLInputElement>(null);
   const cycling = placeholderCycle !== undefined && !ready;
@@ -1206,43 +1190,6 @@ function ComposerBar({
         <SendIcon size={18} />
       </Button>
       </div>
-      {footer && <div className="border-t border-border px-0.5 pb-0.5 pt-2.5">{footer}</div>}
-    </div>
-  );
-}
-
-const STARTER_ICONS: Record<StarterKind, ReactNode> = {
-  flyer: <FlyerIcon size={15} />,
-  email: <MailIcon size={15} />,
-  campaign: <MegaphoneIcon size={15} />,
-  blog: <BlogIcon size={15} />,
-  ad: <BoltIcon size={15} />,
-};
-
-function ActionGrid({
-  picked,
-  onPick,
-  disabled,
-  className,
-}: {
-  picked: StarterKind | null;
-  onPick: (kind: StarterKind) => void;
-  disabled: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={cn("flex flex-wrap gap-2", className)}>
-      {(Object.keys(STARTERS) as StarterKind[]).map((kind, i) => (
-        <motion.div key={kind} {...rise(0.85 + i * 0.06)}>
-          <ActionButton
-            icon={STARTER_ICONS[kind]}
-            label={STARTERS[kind].label}
-            onClick={() => onPick(kind)}
-            disabled={disabled}
-            pressed={picked === kind}
-          />
-        </motion.div>
-      ))}
     </div>
   );
 }
@@ -1329,62 +1276,6 @@ function CampaignRunView({
         {run.phase === "opening" ? "Opening your plan..." : "This takes a minute or two. The plan opens when it's ready."}
       </li>
     </ol>
-  );
-}
-
-/* Quiet, uniform tiles: muted icon that wakes to foreground on hover. The
-   color in this view belongs to the chat bar, not the shortcuts. They lean
-   a little toward the pointer and spring back when it leaves. */
-function ActionButton({
-  icon,
-  label,
-  onClick,
-  disabled,
-  pressed,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled: boolean;
-  pressed: boolean;
-}) {
-  const x = useSpring(useMotionValue(0), { stiffness: 260, damping: 18 });
-  const y = useSpring(useMotionValue(0), { stiffness: 260, damping: 18 });
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={pressed}
-      style={{ x, y }}
-      whileTap={{ scale: 0.95 }}
-      onPointerMove={(e) => {
-        if (e.pointerType !== "mouse") return;
-        const r = e.currentTarget.getBoundingClientRect();
-        x.set((e.clientX - r.left - r.width / 2) * 0.22);
-        y.set((e.clientY - r.top - r.height / 2) * 0.3);
-      }}
-      onPointerLeave={() => {
-        x.set(0);
-        y.set(0);
-      }}
-      className={cn(
-        "group flex items-center justify-center gap-2 overflow-hidden rounded-full border px-3.5 py-2 text-[13px] font-medium backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-200 disabled:opacity-50",
-        pressed
-          ? "glow-spectrum-soft border-accent/60 bg-surface-3 text-foreground"
-          : "border-border bg-surface-2/80 text-foreground hover:border-border-strong hover:bg-surface-3",
-      )}
-    >
-      <span
-        className={cn(
-          "shrink-0 transition-colors duration-150 group-hover:text-foreground",
-          pressed ? "text-foreground" : "text-muted",
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-    </motion.button>
   );
 }
 

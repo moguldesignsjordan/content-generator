@@ -6,11 +6,13 @@ import {
   countScheduledAwaitingReview,
   getBrandStrategy,
   getBrandWithIcps,
+  getDraftStatuses,
   getLatestActiveCampaign,
+  listDrafts,
   listProducts,
   listTopPerformingEmails,
 } from "@/lib/db/queries";
-import type { Icp } from "@/lib/db/types";
+import type { DraftListRow, Icp } from "@/lib/db/types";
 import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
 import { Card, LinkButton } from "@/components/ui";
 import {
@@ -18,6 +20,7 @@ import {
   type CreateAgentInitialState,
   type CreateAgentSuggestion,
 } from "./_components/create-agent";
+import { LandingRails, type RailPiece } from "./_components/landing-rails";
 
 // Always read fresh from the DB.
 export const dynamic = "force-dynamic";
@@ -59,9 +62,10 @@ export default async function HomePage({
   // "New campaign" links land here with ?mode=campaign: skip straight past
   // "what are we creating?".
   const startKind = (await searchParams).mode === "campaign" ? "campaign" : undefined;
-  const [awaitingReview, chat] = await Promise.all([
+  const [awaitingReview, chat, pieces] = await Promise.all([
     countScheduledAwaitingReview(data.brand.id).catch(() => 0),
     loadChat(user.id, data.icps),
+    loadPieces(data.brand.id),
   ]);
 
   return (
@@ -76,24 +80,52 @@ export default async function HomePage({
         initial={startKind ? undefined : chat.initial}
         suggestions={chat.suggestions}
         startKind={startKind}
+        landing={
+          <LandingRails
+            waiting={pieces.waiting}
+            waitingTotal={pieces.waitingTotal}
+            scheduledWaiting={awaitingReview}
+            recent={pieces.recent}
+          />
+        }
       />
-
-      {awaitingReview > 0 && (
-        <Link
-          href="/emails"
-          className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-accent/25 bg-accent/[0.07] px-4 py-3 transition-colors hover:bg-accent/[0.12]"
-        >
-          <span className="text-[14px]">
-            <span className="font-medium text-foreground">
-              {awaitingReview} scheduled draft{awaitingReview === 1 ? "" : "s"} awaiting review.
-            </span>{" "}
-            <span className="text-muted">Auto-generated, still needs your approval.</span>
-          </span>
-          <span className="shrink-0 text-[13px] font-medium text-accent">View →</span>
-        </Link>
-      )}
     </div>
   );
+}
+
+/**
+ * The landing's rows: pieces waiting for a decision, then the latest approved
+ * or published work. The same two reads the Review page makes; a failure just
+ * leaves the rows out.
+ */
+async function loadPieces(
+  brandId: string,
+): Promise<{ waiting: RailPiece[]; waitingTotal: number; recent: RailPiece[] }> {
+  try {
+    const rows = (await listDrafts(brandId)).filter((d) => !d.archived);
+    const inReview = rows.filter((d) => d.state === "in_review");
+    const waitingRows = inReview.slice(0, 8);
+    const recentRows = rows
+      .filter((d) => d.state === "approved" || d.state === "published")
+      .slice(0, 8);
+    const statuses = await getDraftStatuses(
+      brandId,
+      [...waitingRows, ...recentRows].map((d) => d.id),
+    );
+    const toRail = (list: DraftListRow[]): RailPiece[] =>
+      list.flatMap((d) => {
+        const piece = statuses[d.id];
+        if (!piece) return [];
+        return [{ piece, title: piece.subject || d.subject || d.topic_title || "Untitled" }];
+      });
+    return {
+      waiting: toRail(waitingRows),
+      waitingTotal: inReview.length,
+      recent: toRail(recentRows),
+    };
+  } catch {
+    return { waiting: [], waitingTotal: 0, recent: [] };
+  }
 }
 
 /**

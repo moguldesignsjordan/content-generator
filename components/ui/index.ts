@@ -26,3 +26,4 @@ export { Skeleton } from "./skeleton";
 export type { SkeletonVariant, SkeletonProps } from "./skeleton";
 export { ConfirmDialog } from "./confirm-dialog";
 export type { ConfirmDialogProps } from "./confirm-dialog";
+export { EmptyState } from "./empty-state";

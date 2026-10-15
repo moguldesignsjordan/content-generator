@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getDraftStatuses, getSingleBrand, listDrafts } from "@/lib/db/queries";
 import { getSessionUser } from "@/lib/supabase/server";
-import { Card } from "@/components/ui";
+import { EmptyState, LinkButton } from "@/components/ui";
+import { REVIEW_DONE_ART } from "../_components/art";
 import { ScreenHeader } from "../_components/screen-header";
 import { ReviewGrid } from "./_components/review-grid";
 
@@ -34,9 +35,17 @@ export default async function ReviewPage() {
           statuses={statuses}
         />
       ) : (
-        <Card className="p-6 text-sm text-muted">
-          Nothing to review right now. New pieces show up here as soon as they&apos;re made.
-        </Card>
+        <EmptyState
+          art={REVIEW_DONE_ART}
+          title="All caught up"
+          action={
+            <LinkButton href="/" variant="gradient" size="sm">
+              Make something
+            </LinkButton>
+          }
+        >
+          Nothing is waiting for your approval. New pieces land here the moment they&apos;re made.
+        </EmptyState>
       )}
     </>
   );

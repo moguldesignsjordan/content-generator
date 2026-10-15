@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import {
   Card,
   ConfirmDialog,
+  EmptyState,
+  LinkButton,
   ListGroup,
   SegmentedControl,
   Spinner,
@@ -18,10 +20,32 @@ import {
   UnarchiveIcon,
 } from "@/components/ui/icons";
 import type { DraftListRow } from "@/lib/db/types";
+import { PIECE_ART } from "./art";
 import { DraftStateBadge } from "./topic-badges";
 
 type Filter = "all" | "in_review" | "approved" | "archived";
 type Kind = "email" | "blog" | "social";
+
+const EMPTY: Record<Kind, { title: string; body: string; href: string; cta: string }> = {
+  email: {
+    title: "No emails yet",
+    body: "Start one on Create: tap Email and say what it's about. Nothing sends until you approve it.",
+    href: "/",
+    cta: "Make an email",
+  },
+  blog: {
+    title: "No blog posts yet",
+    body: "Open an email's review page and tap Create blog post, or start one on Create.",
+    href: "/",
+    cta: "Write a post",
+  },
+  social: {
+    title: "No flyers yet",
+    body: "Design one from a topic or a quick brief, then pick from 4 options.",
+    href: "/flyers/new",
+    cta: "New flyer",
+  },
+};
 
 /**
  * The shared Emails/Blogs list. Both tabs are the same flat list of drafts,
@@ -106,34 +130,41 @@ export function DraftsList({
     }
   }
 
-  const emptyCopy =
-    kind === "blog"
-      ? "No blog posts yet. Open an email's review page and tap Create blog post, or generate one from a topic in Create."
-      : kind === "social"
-        ? "No flyers yet. Tap New flyer to design one from a topic or a quick brief."
-        : "No emails yet. Ask the assistant to draft one, or generate from a topic in Create.";
+  const empty = EMPTY[kind];
 
   return (
     <div>
-      <SegmentedControl
-        className="mb-5"
-        value={filter}
-        onChange={(v) => setFilter(v as Filter)}
-        options={[
-          { value: "all", label: `All ${counts.all}` },
-          { value: "in_review", label: `Review ${counts.in_review}` },
-          { value: "approved", label: `Approved ${counts.approved}` },
-          ...(counts.archived > 0
-            ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
-            : []),
-        ]}
-      />
+      {drafts.length > 0 && (
+        <SegmentedControl
+          className="mb-5"
+          value={filter}
+          onChange={(v) => setFilter(v as Filter)}
+          options={[
+            { value: "all", label: `All ${counts.all}` },
+            { value: "in_review", label: `Review ${counts.in_review}` },
+            { value: "approved", label: `Approved ${counts.approved}` },
+            ...(counts.archived > 0
+              ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
+              : []),
+          ]}
+        />
+      )}
 
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && filter === "all" ? (
+        <EmptyState
+          art={PIECE_ART[kind]}
+          title={empty.title}
+          action={
+            <LinkButton href={empty.href} variant="outline" size="sm">
+              {empty.cta}
+            </LinkButton>
+          }
+        >
+          {empty.body}
+        </EmptyState>
+      ) : filtered.length === 0 ? (
         <Card className="p-7 text-center">
-          <p className="text-sm text-muted">
-            {filter === "all" ? emptyCopy : "Nothing here in this state yet."}
-          </p>
+          <p className="text-sm text-muted">Nothing here in this state yet.</p>
         </Card>
       ) : (
         <ListGroup>

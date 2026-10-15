@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 import { isSupabaseConfigured } from "@/lib/db/client";
-import { getUserRole } from "@/lib/db/queries";
+import { countDraftsInReview, getSingleBrand, getUserRole } from "@/lib/db/queries";
 import { availableImageTiers } from "@/lib/clients/image-render";
 import { AppShell } from "./_components/app-shell";
 import { ImageModelsProvider } from "./_components/image-models-context";
@@ -23,7 +23,7 @@ export default async function DashboardLayout({
       redirect("/login");
     }
     return (
-      <AppShell userEmail={null} role="user">
+      <AppShell userEmail={null} role="user" reviewCount={0}>
         {children}
       </AppShell>
     );
@@ -39,12 +39,22 @@ export default async function DashboardLayout({
 
   // Role gates admin-only nav (Logs). Fail closed to 'user' if the
   // user_profiles table isn't migrated yet (isSupabaseConfigured checks the
-  // service-role client getUserRole needs).
-  const role = isSupabaseConfigured() ? await getUserRole(user.id) : "user";
+  // service-role client getUserRole needs). The Review badge is a nicety, so
+  // any failure there just hides it.
+  const configured = isSupabaseConfigured();
+  const [role, reviewCount] = await Promise.all([
+    configured ? getUserRole(user.id) : ("user" as const),
+    configured ? countReviewFor(user.id).catch(() => 0) : 0,
+  ]);
 
   return (
-    <AppShell userEmail={user.email ?? null} role={role}>
+    <AppShell userEmail={user.email ?? null} role={role} reviewCount={reviewCount}>
       <ImageModelsProvider tiers={availableImageTiers()}>{children}</ImageModelsProvider>
     </AppShell>
   );
+}
+
+async function countReviewFor(userId: string): Promise<number> {
+  const brand = await getSingleBrand(userId);
+  return brand ? countDraftsInReview(brand.id) : 0;
 }
