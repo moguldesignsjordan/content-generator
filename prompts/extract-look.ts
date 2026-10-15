@@ -23,6 +23,7 @@ export const LookProfileSchema = z.object({
   cta_style: z.enum(["pill", "box", "underline", "text", "none"]),
   logo_placement: z.enum(["top-left", "top-right", "bottom-left", "bottom-right", "none"]),
   mood: z.array(z.string()).max(6),
+  text_slots: z.array(z.string()).max(4).optional(),
 });
 
 export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
@@ -83,6 +84,13 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
         maxItems: 6,
         description: "3 to 6 mood words.",
       },
+      text_slots: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 4,
+        description:
+          "Every text element BESIDES the headline, one supporting line, the button, and the logo, by its job and form, e.g. 'date and time in two side-by-side pills', 'location line with a pin icon', 'three short values in a footer bar separated by dots', 'short slogan of three parts under the headline'. Never their actual words. Empty when there are none.",
+      },
     },
     required: [
       "summary",
@@ -129,5 +137,6 @@ export function parseLookProfile(input: unknown): DesignLookProfile | null {
     color_roles: { ...p.color_roles, accent_usage: clean(p.color_roles.accent_usage) },
     imagery: clean(p.imagery),
     mood: p.mood.map(clean).filter(Boolean),
+    ...(p.text_slots?.length ? { text_slots: p.text_slots.map(clean).filter(Boolean) } : {}),
   };
 }

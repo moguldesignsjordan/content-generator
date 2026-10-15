@@ -8,6 +8,7 @@ import {
   type EmailCopy,
   type FlyerAspect,
   type FlyerCopy,
+  type FlyerExtra,
   type FlyerFormat,
   type FlyerStyleId,
 } from "@/lib/db/types";
@@ -204,9 +205,35 @@ const AD_PROPERTIES = {
 };
 const AD_REQUIRED = ["headline", "ad", "scene"];
 
+/** Only offered when the look has extra text spots to fill. */
+const EXTRAS_PROPERTY = {
+  extras: {
+    type: "array",
+    description:
+      "Text for the design's EXTRA TEXT SPOTS, one entry per spot you can " +
+      "fill truthfully, typeset into the image exactly as written. Leave a " +
+      "spot out when the brief has nothing real for it. Never use em dashes.",
+    items: {
+      type: "object",
+      properties: {
+        slot: { type: "string", description: "The spot, copied exactly from the EXTRA TEXT SPOTS list." },
+        text: { type: "string", description: "Short text for it, sized to the spot." },
+      },
+      required: ["slot", "text"],
+    },
+  },
+};
+
+/** Cap per extra line: a spot is a tagline or a pill, not a paragraph. */
+const MAX_EXTRA_CHARS = 90;
+
 /** Forced tool: several complete alternative flyers in one cheap call. */
-export function flyerVariantsTool(format: FlyerFormat = "post"): Anthropic.Tool {
+export function flyerVariantsTool(format: FlyerFormat = "post", withExtras = false): Anthropic.Tool {
   const ad = format === "ad";
+  const properties = {
+    ...(ad ? AD_PROPERTIES : FLYER_COPY_PROPERTIES),
+    ...(withExtras ? EXTRAS_PROPERTY : {}),
+  };
   return {
     name: "save_flyer_variants",
     description:
@@ -221,7 +248,7 @@ export function flyerVariantsTool(format: FlyerFormat = "post"): Anthropic.Tool 
           type: "array",
           items: {
             type: "object",
-            properties: ad ? AD_PROPERTIES : FLYER_COPY_PROPERTIES,
+            properties,
             required: ad ? AD_REQUIRED : FLYER_COPY_REQUIRED,
           },
         },
@@ -259,6 +286,8 @@ export function buildFlyerCopyMessages(args: {
    * own design direction, by position; when they're all the same (or absent),
    * `style` (if any) applies to every option instead. */
   variants: { count: number; styles?: (FlyerStyleId | undefined)[] };
+  /** The look's extra text spots (DesignLookProfile.text_slots). */
+  textSlots?: string[];
 }): { system: string; user: string } {
   const variants = args.variants;
   const perVariantStyles =
@@ -325,6 +354,18 @@ export function buildFlyerCopyMessages(args: {
       ]
     : [];
 
+  const slotLines = args.textSlots?.length
+    ? [
+        "",
+        "EXTRA TEXT SPOTS: the design this flyer follows also has these text",
+        "elements. For each variant, fill each one in extras with short text",
+        "built ONLY from real facts in the brief (dates, times, places, the",
+        "offer, real values). Leave a spot out when the brief has nothing true",
+        "for it: an empty spot is dropped from the design, invented text isn't.",
+        ...args.textSlots.map((slot) => `  - ${slot}`),
+      ]
+    : [];
+
   const rejectionLines = args.rejection
     ? [
         "",
@@ -360,6 +401,7 @@ export function buildFlyerCopyMessages(args: {
     args.brief ? `CREATIVE BRIEF FROM THE USER (follow it): ${args.brief}` : "",
     ...emailLines,
     ...competitorLines,
+    ...slotLines,
     ...rejectionLines,
     "",
     `Call save_flyer_variants with ${variants.count} complete variants.`,
@@ -405,7 +447,24 @@ export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
       .filter(Boolean)
       .map((h) => (h.startsWith("#") ? h : `#${h}`)),
     scene: plain(out.scene.trim()),
+    ...cleanExtras(out.extras),
   };
+}
+
+/** Keeps extras with a slot and short text, deduped by slot. */
+function cleanExtras(raw: unknown): { extras?: FlyerExtra[] } {
+  if (!Array.isArray(raw)) return {};
+  const seen = new Set<string>();
+  const extras: FlyerExtra[] = [];
+  for (const item of raw.slice(0, 4)) {
+    const e = item as Partial<FlyerExtra> | null;
+    const slot = typeof e?.slot === "string" ? e.slot.trim() : "";
+    const text = typeof e?.text === "string" ? plain(e.text.trim()) : "";
+    if (!slot || !text || text.length > MAX_EXTRA_CHARS || seen.has(slot)) continue;
+    seen.add(slot);
+    extras.push({ slot, text });
+  }
+  return extras.length ? { extras } : {};
 }
 
 /**
@@ -434,6 +493,7 @@ export function parseFlyerVariants(
           cta: c.cta,
           caption: ad.primary_text,
           scene: c.scene,
+          extras: c.extras,
         });
         return { ...copy, ad };
       })
@@ -570,6 +630,7 @@ export function buildFlyerDesignPrompt(
   const lines = [
     `Headline: "${copy.headline}", ${headlineType}.`,
     copy.subtext ? `Supporting line: "${copy.subtext}", smaller and quieter than the headline.` : "",
+    ...(copy.extras ?? []).map((e) => `${e.slot.charAt(0).toUpperCase()}${e.slot.slice(1).replace(/\.$/, "")}: "${e.text}".`),
     showCta ? `Call to action: "${copy.cta}"${p ? `, styled as a ${p.cta_style}` : ""}.` : "",
   ].filter(Boolean);
 
@@ -601,6 +662,7 @@ export function buildFlyerDesignPrompt(
     ...(opts.riff !== undefined ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
     `Subject for this piece, shown the way the examples show theirs: ${copy.scene.trim().replace(/\.$/, "")}.`,
     `Typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
+    "Any other text element the examples have (taglines, footers, lists, labels) is left out of this design entirely.",
     ...(opts.misspelled?.length
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
       : []),

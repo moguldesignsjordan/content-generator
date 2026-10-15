@@ -242,6 +242,28 @@ describe("parseFlyerVariants", () => {
       expect(v.ad).toBeUndefined();
     });
   });
+
+  it("keeps clean extras and drops empty, duplicate, or overlong ones", () => {
+    const [v] = parseFlyerVariants(
+      {
+        variants: [
+          {
+            headline: "Tax season prep",
+            caption: "Join us.",
+            scene: "A laptop.",
+            extras: [
+              { slot: "date pills", text: "Nov 2 | 8 PM" },
+              { slot: "date pills", text: "again" },
+              { slot: "footer", text: "" },
+              { slot: "tagline", text: "x".repeat(91) },
+            ],
+          },
+        ],
+      },
+      4,
+    );
+    expect(v.extras).toEqual([{ slot: "date pills", text: "Nov 2 | 8 PM" }]);
+  });
 });
 
 describe("flyerVariantsTool", () => {
@@ -261,6 +283,13 @@ describe("flyerVariantsTool", () => {
     expect(items("ad").properties).not.toHaveProperty("caption");
     expect(items("ad").properties).not.toHaveProperty("hashtags");
     expect(items("ad").properties).toHaveProperty("headline");
+  });
+
+  it("offers extras only when the look has text spots", () => {
+    const withExtras = (flyerVariantsTool("post", true).input_schema.properties as { variants: { items: Items } })
+      .variants.items;
+    expect(items().properties).not.toHaveProperty("extras");
+    expect(withExtras.properties).toHaveProperty("extras");
   });
 });
 
@@ -386,6 +415,14 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).not.toContain("PER VARIANT");
     expect(user).toContain(FLYER_STYLE_DIRECTIONS.minimal);
   });
+
+  it("lists the look's extra text spots, filled only from real facts", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, textSlots: ["date and time in two pills"] });
+    expect(user).toContain("EXTRA TEXT SPOTS");
+    expect(user).toContain("  - date and time in two pills");
+    expect(user).toContain("Leave a spot out when the brief has nothing true");
+    expect(buildFlyerCopyMessages(base).user).not.toContain("EXTRA TEXT SPOTS");
+  });
 });
 
 describe("buildFlyerDesignPrompt", () => {
@@ -474,6 +511,17 @@ describe("buildFlyerDesignPrompt", () => {
     expect(close).toContain(DESIGN_RIFFS[0]);
     expect(riff).toContain(DESIGN_RIFFS[1]);
     for (const r of DESIGN_RIFFS) expect(none).not.toContain(r);
+  });
+
+  it("typesets extras under their own label and drops the examples' other text", () => {
+    const prompt = buildFlyerDesignPrompt(
+      { ...copy, extras: [{ slot: "date and time in two pills", text: "Nov 2 | 8 PM" }] },
+      tokens,
+      "1:1",
+      { profile, exampleCount: 1, roles },
+    );
+    expect(prompt).toContain('Date and time in two pills: "Nov 2 | 8 PM".');
+    expect(prompt).toContain("Any other text element the examples have");
   });
 });
 

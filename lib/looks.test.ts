@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanExamples, cleanLookName } from "./looks";
+import { cleanClientBrand, cleanExamples, cleanLookName, cleanReferenceUrls } from "./looks";
 
 const host = "stujpgjxhyivsqvnhdfs.supabase.co";
 const ok = `https://${host}/storage/v1/object/public/content-images/a.jpg`;
@@ -37,5 +37,23 @@ describe("cleanLookName", () => {
     expect(cleanLookName("x".repeat(80))).toHaveLength(60);
     expect(cleanLookName("   ")).toBeNull();
     expect(cleanLookName(42)).toBeNull();
+  });
+});
+
+describe("cleanReferenceUrls and cleanClientBrand", () => {
+  const own = (u: string) => u.startsWith("https://own.example/");
+
+  it("keeps only allowed, deduped reference URLs, at most 3", () => {
+    const urls = ["https://own.example/1", "https://own.example/1", "https://evil.example/2", "https://own.example/3", "https://own.example/4", "https://own.example/5"];
+    expect(cleanReferenceUrls(urls, own)).toEqual(["https://own.example/1", "https://own.example/3", "https://own.example/4"]);
+    expect(cleanReferenceUrls("nope", own)).toEqual([]);
+  });
+
+  it("drops a logo outside the allowed host but keeps the brand", () => {
+    expect(cleanClientBrand({ name: "Acme", colors: ["#112233", "red"], logo_url: "https://evil.example/l.png" }, own)).toEqual({
+      name: "Acme",
+      colors: ["#112233"],
+    });
+    expect(cleanClientBrand({ colors: ["#112233"] }, own)).toBeNull();
   });
 });

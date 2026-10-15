@@ -145,6 +145,7 @@ export async function generateFlyerForTopicStreamed(
       competitorRef,
       format: meta.flyer_format ?? "post",
       usageDeltas,
+      textSlots: look?.profile?.text_slots,
     });
 
     const rendering = {
@@ -269,6 +270,7 @@ export async function regenerateFlyerDraft(
     competitorRef,
     format: meta.flyer_format ?? "post",
     usageDeltas,
+    textSlots: look?.profile?.text_slots,
     rejection: {
       feedback,
       previousHeadline: meta.flyer_copy?.headline ?? draftCtx.content.subject,
@@ -520,7 +522,12 @@ export async function placeImageInFlyer(args: {
   const current = Buffer.from(await res.arrayBuffer());
 
   // Only the lines this design actually shows (a look can drop the CTA).
-  const lines = [args.copy.headline, args.copy.subtext ?? "", args.copy.cta ?? ""].filter(Boolean);
+  const lines = [
+    args.copy.headline,
+    args.copy.subtext ?? "",
+    ...(args.copy.extras ?? []).map((e) => e.text),
+    args.copy.cta ?? "",
+  ].filter(Boolean);
   const before = await readImageText(await toPreview(current), readOpts);
   const expected =
     before === null ? [args.copy.headline] : lines.filter((l) => checkRenderedText([l], before).missing.length === 0);
@@ -783,6 +790,7 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
     caption: copy.caption,
     ...(copy.hashtags?.length ? { hashtags: copy.hashtags } : {}),
     ...(copy.ad ? { ad: copy.ad } : {}),
+    ...(copy.extras?.length ? { extras: copy.extras } : {}),
   };
 }
 
@@ -825,6 +833,8 @@ async function generateFlyerVariants(
     competitorRef: CompetitorReference | null;
     format: FlyerFormat;
     usageDeltas: UsageDelta[];
+    /** The look's extra text spots, for the copy to fill. */
+    textSlots?: string[];
     rejection?: {
       feedback: string;
       previousHeadline?: string;
@@ -846,6 +856,7 @@ async function generateFlyerVariants(
     format: opts.format,
     rejection: opts.rejection,
     variants: { count, styles: opts.styles },
+    textSlots: opts.textSlots,
   });
 
   const call = async (label: string): Promise<FlyerCopyOutput[]> => {
@@ -854,7 +865,7 @@ async function generateFlyerVariants(
       max_tokens: 4096,
       system: cacheableSystem(system),
       messages: [{ role: "user", content: user }],
-      tools: [flyerVariantsTool(opts.format)],
+      tools: [flyerVariantsTool(opts.format, Boolean(opts.textSlots?.length))],
       tool_choice: { type: "tool", name: "save_flyer_variants" },
     });
     logUsage(label, FAST_MODEL, response.usage, {
@@ -888,7 +899,7 @@ interface ResolvedLook {
   id: string;
   profile: DesignLookProfile | null;
   images: { data: string; mimeType: string }[];
-  /** Attached designs: option 1 stays close, the rest riff on it. */
+  /** Option 1 stays close to the examples, the rest riff on them. */
   riffs?: boolean;
 }
 
@@ -1000,7 +1011,7 @@ async function resolveLook(
       const look = await getDesignLook(lookId, brandId);
       if (!look?.examples.length) return null;
       const images = await loadLookImages(look.examples, LOOK_EXAMPLES_PER_RENDER);
-      return images.length ? { id: look.id, profile: look.profile, images } : null;
+      return images.length ? { id: look.id, profile: look.profile, images, riffs: true } : null;
     }
     const ours = await describeOurStyle(brandId);
     if (!ours) return null;
@@ -1008,7 +1019,7 @@ async function resolveLook(
       ours.urls.map((url) => ({ url, source: "library" as const })),
       LOOK_EXAMPLES_PER_RENDER,
     );
-    return images.length ? { id: ours.lookId, profile: ours.profile, images } : null;
+    return images.length ? { id: ours.lookId, profile: ours.profile, images, riffs: true } : null;
   } catch (err) {
     logWarn("pipeline:generate-flyer:look", err instanceof Error ? err.message : String(err), {
       draftId,
@@ -1051,7 +1062,7 @@ async function renderDesignedFlyer(
     draftId: string;
     usageDeltas: UsageDelta[];
     client?: LoadedClient | null;
-    /** Index into DESIGN_RIFFS for this option (attached designs only). */
+    /** Index into DESIGN_RIFFS for this option. */
     riff?: number;
   },
 ): Promise<ContentImage | null> {
@@ -1068,6 +1079,7 @@ async function renderDesignedFlyer(
   const expected = [
     copy.headline,
     copy.subtext ?? "",
+    ...(copy.extras ?? []).map((e) => e.text),
     copy.cta && profile?.cta_style !== "none" ? copy.cta : "",
   ].filter(Boolean);
   const size = FLYER_ASPECTS[opts.aspect];

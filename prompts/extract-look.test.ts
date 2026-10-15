@@ -27,4 +27,12 @@ describe("parseLookProfile", () => {
     expect(parseLookProfile({ ...valid, color_roles: { background: "plaid", accent_usage: "" } })).toBeNull();
     expect(parseLookProfile({ summary: "x" })).toBeNull();
   });
+
+  it("keeps the extra text spots when present, and accepts a profile without them", () => {
+    const p = parseLookProfile({ ...valid, text_slots: [`date pills ${EM_DASH} two`, " "] })!;
+    expect(p.text_slots).toHaveLength(1);
+    expect(p.text_slots![0]).toMatch(/^date pills/);
+    expect(p.text_slots![0]).not.toContain(EM_DASH);
+    expect(parseLookProfile(valid)!.text_slots).toBeUndefined();
+  });
 });

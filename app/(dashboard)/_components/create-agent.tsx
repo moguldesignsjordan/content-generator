@@ -38,6 +38,7 @@ import { useGenerationStream } from "@/lib/use-generation-stream";
 import { HomeHero } from "./home-hero";
 import type {
   BlogType,
+  ClientBrand,
   EmailType,
   FactoryKind,
   FunnelStage,
@@ -132,6 +133,8 @@ interface CampaignHandoff {
   days: number;
   research: boolean;
   photo_url?: string;
+  reference_urls?: string[];
+  client_brand?: ClientBrand;
 }
 
 interface CampaignRun {
@@ -608,6 +611,8 @@ export function CreateAgent({
           campaign_id: chatCampaignId,
           ...(handoff.photo_url ? { photo_url: handoff.photo_url } : {}),
           ...(lookId ? { look_id: lookId } : {}),
+          ...(handoff.reference_urls?.length ? { reference_urls: handoff.reference_urls } : {}),
+          ...(handoff.client_brand ? { client_brand: handoff.client_brand } : {}),
         }),
       });
       if (!res.ok) {

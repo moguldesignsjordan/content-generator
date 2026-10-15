@@ -316,7 +316,15 @@ export async function POST(
     const renderTier = finalizeTier ?? (isImageModelTier(rawModel) ? rawModel : null);
     const variantIndex = meta.flyer_variant_index;
 
-    const copyForRender = { headline, subtext, cta, caption: currentCopy?.caption ?? "", hashtags: currentCopy?.hashtags, scene };
+    const copyForRender = {
+      headline,
+      subtext,
+      cta,
+      caption: currentCopy?.caption ?? "",
+      hashtags: currentCopy?.hashtags,
+      ...(currentCopy?.extras?.length ? { extras: currentCopy.extras } : {}),
+      scene,
+    };
     // "place": the upload goes INTO the current design; otherwise it's a style.
     const placing = form.get("referenceRole") === "place";
     if (placing && (!reference || !meta.flyer_image?.url)) {
@@ -367,6 +375,7 @@ export async function POST(
       caption: currentCopy?.caption ?? "",
       ...(currentCopy?.hashtags?.length ? { hashtags: currentCopy.hashtags } : {}),
       ...(currentCopy?.ad ? { ad: currentCopy.ad } : {}),
+      ...(currentCopy?.extras?.length ? { extras: currentCopy.extras } : {}),
     };
 
     await updateDraftContent(

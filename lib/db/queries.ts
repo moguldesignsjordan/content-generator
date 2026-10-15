@@ -336,8 +336,10 @@ export async function createDraftShell(args: {
   flyerModel?: ImageModelTier;
   /** Social only: the design look to follow (meta.look_id). */
   lookId?: string;
-  /** Social only: designs attached in chat to match (meta.reference_urls). */
+  /** Social only: designs attached in chat to match (meta.reference_urls),
+   * and their profile when it was already read (a campaign reads it once). */
   referenceUrls?: string[];
+  referenceProfile?: DesignLookProfile;
   /** Social only: the business the flyer is for, when it isn't this brand. */
   clientBrand?: ClientBrand;
 }): Promise<string> {
@@ -363,6 +365,7 @@ export async function createDraftShell(args: {
     flyerModel,
     lookId,
     referenceUrls,
+    referenceProfile,
     clientBrand,
   } = args;
 
@@ -407,6 +410,7 @@ export async function createDraftShell(args: {
     ...(flyerModel ? { flyer_model: flyerModel } : {}),
     ...(lookId ? { look_id: lookId } : {}),
     ...(referenceUrls?.length ? { reference_urls: referenceUrls } : {}),
+    ...(referenceUrls?.length && referenceProfile ? { reference_profile: referenceProfile } : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),
   };
 

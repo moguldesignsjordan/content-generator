@@ -604,6 +604,12 @@ export interface FactoryState {
   offer_slug?: string;
   /** The design look picked for this campaign's social posts and ads. */
   look_id?: string;
+  /** Designs attached in chat for the posts and ads to match; they win over
+   * look_id. reference_profile is read once at launch and shared. */
+  reference_urls?: string[];
+  reference_profile?: DesignLookProfile;
+  /** The business the campaign's posts and ads are for, when not this brand. */
+  client_brand?: ClientBrand;
   research?: FactoryResearch;
   plan?: FactoryPlanItem[];
   quote?: FactoryQuote;
@@ -973,6 +979,15 @@ export interface FlyerCopy {
   hashtags?: string[];
   /** Present only on ad-format flyers. */
   ad?: AdCopy;
+  /** Text for the look's extra text spots (DesignLookProfile.text_slots),
+   * rendered in the image on the designed path. */
+  extras?: FlyerExtra[];
+}
+
+export interface FlyerExtra {
+  /** Which text spot it fills, as the look profile names it. */
+  slot: string;
+  text: string;
 }
 
 /** One option from a multi-variant flyer generation (meta.flyer_variants). */
@@ -1020,6 +1035,11 @@ export interface DesignLookProfile {
   cta_style: "pill" | "box" | "underline" | "text" | "none";
   logo_placement: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "none";
   mood: string[];
+  /** Text elements beyond the headline, supporting line, button, and logo,
+   * by job and form (e.g. "date and time in two side-by-side pills"). The
+   * copy step fills them so the image model doesn't invent words for them.
+   * Absent on looks read before this existed. */
+  text_slots?: string[];
 }
 
 export interface DesignLook {

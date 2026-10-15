@@ -1,7 +1,6 @@
 import {
   CAMPAIGN_BRIEF_TEXT_FIELDS,
   MAX_CONVERSATION_NOTES_CHARS,
-  MAX_FLYER_REFERENCES,
   type CampaignBrief,
   type CampaignKind,
   type VisualVibe,
@@ -11,6 +10,7 @@ import { emailHtmlToText, stripEmDashes } from "@/lib/text";
 import { MAX_BRIEF_PHOTOS } from "@/lib/email/brief-photos";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
+import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
 
 // Pulled out of route.ts (which Next.js only allows GET/POST/config exports
 // from) so mergeBrief's field-by-field merge rules can be unit tested
@@ -19,8 +19,6 @@ import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 const VISUAL_VIBES: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
 
 const CAMPAIGN_KINDS: CampaignKind[] = ["product", "promotion", "newsletter", "launch"];
-
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 /** True for a well-formed http(s) URL; guards against the model inventing one. */
 export function isHttpUrl(value: string): boolean {
@@ -104,29 +102,12 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
     next.competitor_reference_id = input.competitor_reference_id.trim();
   }
   if (Array.isArray(input.style_reference_urls)) {
-    const urls = Array.from(
-      new Set(
-        input.style_reference_urls
-          .filter((u): u is string => typeof u === "string")
-          .map((u) => u.trim())
-          .filter(isHttpUrl),
-      ),
-    ).slice(0, MAX_FLYER_REFERENCES);
+    const urls = cleanReferenceUrls(input.style_reference_urls, isHttpUrl);
     if (urls.length) next.style_reference_urls = urls;
     else delete next.style_reference_urls;
   }
-  if (input.client_brand && typeof input.client_brand.name === "string" && input.client_brand.name.trim()) {
-    const colors = (input.client_brand.colors ?? [])
-      .filter((c): c is string => typeof c === "string" && HEX_COLOR.test(c.trim()))
-      .map((c) => c.trim())
-      .slice(0, 4);
-    const logo = input.client_brand.logo_url?.trim();
-    next.client_brand = {
-      name: stripEmDashes(input.client_brand.name.trim()).slice(0, 80),
-      ...(colors.length ? { colors } : {}),
-      ...(logo && isHttpUrl(logo) ? { logo_url: logo } : {}),
-    };
-  }
+  const client = input.client_brand ? cleanClientBrand(input.client_brand, isHttpUrl) : null;
+  if (client) next.client_brand = client;
   // Campaign mode is an explicit enum, entered and left deliberately:
   // "single" drops the whole campaign interview state (kind, products,
   // count) so the generate_content guard stops refusing.

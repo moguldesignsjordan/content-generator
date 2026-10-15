@@ -128,6 +128,9 @@ function createShell(
     flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research),
     ...(args.photoUrl ? { productPhotoUrl: args.photoUrl } : {}),
     ...(args.factory.look_id ? { lookId: args.factory.look_id } : {}),
+    ...(args.factory.reference_urls?.length ? { referenceUrls: args.factory.reference_urls } : {}),
+    ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),
+    ...(args.factory.client_brand ? { clientBrand: args.factory.client_brand } : {}),
     // Organic posts go out on their day through the daily cron once approved.
     // Ads never get a posting date: that cron would publish them as organic
     // posts. They're run from Ads Manager instead.

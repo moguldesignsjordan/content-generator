@@ -36,6 +36,7 @@ import {
 } from "@/lib/db/queries";
 import type {
   Brand,
+  ClientBrand,
   CampaignBrief,
   ChatPreviewRef,
   FactoryKind,
@@ -115,6 +116,8 @@ interface StartedCampaign {
   days: number;
   research: boolean;
   photo_url?: string;
+  reference_urls?: string[];
+  client_brand?: ClientBrand;
 }
 
 const NO_OUR_STYLE =
@@ -976,7 +979,8 @@ async function dispatchTool(
       if (!summary) return "start_campaign needs a summary of the campaign.";
       const kinds = FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
       const hasImages = !kinds.length || kinds.includes("social") || kinds.includes("ad");
-      if (hasImages && !(await canUseOurStyle(ctx))) {
+      const references = state.brief.style_reference_urls;
+      if (hasImages && !references?.length && !(await canUseOurStyle(ctx))) {
         state.showLookPicker = true;
         return `Not planned yet. ${NO_OUR_STYLE}`;
       }
@@ -988,6 +992,8 @@ async function dispatchTool(
         // Research spends money: only with the owner's own yes in this chat.
         research: input.research === true && userAskedForResearch(ctx.userMessages),
         ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
+        ...(references?.length ? { reference_urls: references } : {}),
+        ...(state.brief.client_brand ? { client_brand: state.brief.client_brand } : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
     }

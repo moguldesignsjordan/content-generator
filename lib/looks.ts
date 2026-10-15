@@ -1,4 +1,4 @@
-import type { LookExample, LookExampleSource } from "@/lib/db/types";
+import { MAX_FLYER_REFERENCES, type ClientBrand, type LookExample, type LookExampleSource } from "@/lib/db/types";
 import { stripEmDashes } from "@/lib/text";
 
 // Validation for design looks coming from the client. Pure, so the API routes
@@ -54,4 +54,36 @@ export function storageHostFromEnv(): string | null {
   } catch {
     return null;
   }
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/** Attached designs for a flyer to match: strings `allowed` accepts,
+ * trimmed, deduped, and capped. */
+export function cleanReferenceUrls(value: unknown, allowed: (url: string) => boolean): string[] {
+  if (!Array.isArray(value)) return [];
+  const urls = value
+    .filter((u): u is string => typeof u === "string")
+    .map((u) => u.trim())
+    .filter(allowed);
+  return Array.from(new Set(urls)).slice(0, MAX_FLYER_REFERENCES);
+}
+
+/** The business a flyer is for, from untrusted input; null without a name.
+ * Colors must be #RRGGBB, and the logo survives only when `allowed` accepts
+ * its URL. */
+export function cleanClientBrand(value: unknown, allowed: (url: string) => boolean): ClientBrand | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const name = typeof raw.name === "string" ? stripEmDashes(raw.name).trim().slice(0, 80) : "";
+  if (!name) return null;
+  const colors = (Array.isArray(raw.colors) ? raw.colors : [])
+    .filter((c): c is string => typeof c === "string" && HEX_COLOR.test(c.trim()))
+    .map((c) => c.trim())
+    .slice(0, 4);
+  const logo = typeof raw.logo_url === "string" ? raw.logo_url.trim() : "";
+  return {
+    name,
+    ...(colors.length ? { colors } : {}),
+    ...(logo && allowed(logo) ? { logo_url: logo } : {}),
+  };
 }

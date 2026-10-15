@@ -21,6 +21,8 @@ import {
 } from "@/lib/pipeline/campaign-factory";
 import { FACTORY_KINDS } from "@/prompts/campaign-formats";
 import { stripEmDashes } from "@/lib/text";
+import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
+import { extractLookProfile } from "@/lib/pipeline/extract-look";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 
@@ -48,8 +50,8 @@ function isOwnStorageUrl(value: string): boolean {
 }
 
 /**
- * POST { sentence, kinds, size, days, photo_url?, look_id?, research?,
- * campaign_id? }: starts a factory campaign and streams its phases
+ * POST { sentence, kinds, size, days, photo_url?, look_id?, reference_urls?,
+ * client_brand?, research?, campaign_id? }: starts a factory campaign and streams its phases
  * (researching only when the owner said yes, planning, pricing), ending in
  * `done` with the campaign id. Nothing is generated here; the plan table is
  * the checkpoint before any spend on content.
@@ -75,6 +77,9 @@ export async function POST(req: NextRequest) {
     typeof body.photo_url === "string" && isOwnStorageUrl(body.photo_url)
       ? body.photo_url
       : undefined;
+  // Same own-storage rule as the photo: the image model fetches these.
+  const referenceUrls = cleanReferenceUrls(body.reference_urls, isOwnStorageUrl);
+  const clientBrand = cleanClientBrand(body.client_brand, isOwnStorageUrl);
   // Web research costs real money and time, so it only runs when asked.
   const doResearch = body.research === true;
   if (!sentence) {
@@ -128,6 +133,8 @@ export async function POST(req: NextRequest) {
     days,
     ...(photoUrl ? { photo_url: photoUrl } : {}),
     ...(lookId ? { look_id: lookId } : {}),
+    ...(referenceUrls.length ? { reference_urls: referenceUrls } : {}),
+    ...(clientBrand ? { client_brand: clientBrand } : {}),
   };
   await updateCampaign(campaign.id, {
     brief: { goal: sentence, conversation_notes: sentence },
@@ -145,6 +152,15 @@ export async function POST(req: NextRequest) {
         }
       };
       let saved = false;
+      // The attached designs are read once here, alongside planning, so every
+      // post and ad the launch makes shares the profile. Never throws: null
+      // just means the images alone steer the renders.
+      const profileRead = referenceUrls.length
+        ? extractLookProfile(
+            referenceUrls.map((url) => ({ url, source: "upload" as const })),
+            brand.id,
+          )
+        : Promise.resolve(null);
       try {
         let research: Awaited<ReturnType<typeof researchCampaign>> | null = null;
         if (doResearch) {
@@ -170,6 +186,7 @@ export async function POST(req: NextRequest) {
         const quote = await quotePlan(planned.plan, await loadUnitCosts(brand.id));
         // A plan that's mostly about one saved product carries its photo.
         const offerSlug = planned.plan.find((i) => i.offer_slug)?.offer_slug;
+        const referenceProfile = await profileRead;
 
         await updateCampaign(campaign.id, {
           chat_state: {
@@ -177,6 +194,7 @@ export async function POST(req: NextRequest) {
               ...factory,
               ...(offerSlug ? { offer_slug: offerSlug } : {}),
               ...(research ? { research: research.research } : {}),
+              ...(referenceProfile ? { reference_profile: referenceProfile } : {}),
               plan: planned.plan,
               quote,
               planning_usd: Number(((research?.usd ?? 0) + planned.usd).toFixed(4)),

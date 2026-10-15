@@ -60,7 +60,13 @@ are in git history (`git log -p PROJECT_STATE.md`).
   style and change the composition. It's one-off; the chat offers to save it
   as a look. A flyer for another business uses that business's colors and
   logo (from an attached logo or card); if neither is known the chat asks.
-  The account brand's logo is never stamped on a client's flyer.
+  The account brand's logo is never stamped on a client's flyer. Saved looks
+  and Our style also give 1 close + 3 variations. A look's extra text spots
+  (date pills, footer bars) are read into the profile and filled by the copy
+  step from real facts only; any spot left empty is dropped from the design,
+  so the image model has nothing to invent. Campaigns from the chat carry
+  attached designs and the client brand to their posts and ads (the design is
+  read once, during planning); their emails and blogs stay on our brand.
 
 ## Current state
 
@@ -125,6 +131,9 @@ are in git history (`git log -p PROJECT_STATE.md`).
    publish one real blog from here and confirm it's live with its FAQ;
    submit the sitemap in Search Console; redirect www to the apex.
 7. **Optional:** `OPENAI_API_KEY` (local + Vercel) to turn on GPT Image.
+8. **Local Gemini key returns 402 (Payment Required)** since 2026-10-15
+   afternoon; renders worked earlier that day. Check the Google AI billing
+   or prepaid credits, and whether production uses the same key.
 
 ## Open: code (not started)
 
