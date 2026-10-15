@@ -420,7 +420,7 @@ export interface CampaignBrief {
    * user's words (e.g. "2 per product, 6 total" or "5"). */
   email_count?: string;
   /** Id of a saved competitor_references row (migration 025) to adapt this
-   * piece's hook/angle/structure/CTA from, strategy only, never its words.
+   * piece's hook/angle/structure/CTA from, with its wording as a suggestion.
    * Single (mirrors email_style's design-ref [0]-only pattern). Non-text
    * field (an id, not free text a chat turn would author): does NOT go in
    * CAMPAIGN_BRIEF_TEXT_FIELDS, needs its own mergeBrief branch like
@@ -581,6 +581,8 @@ export interface FactoryPlanItem {
   /** The real detail the user typed into the plan table. Wins over invention. */
   detail?: string;
   offer_slug?: string;
+  /** The planner chose this piece to follow the campaign's competitor ad. */
+  uses_reference?: boolean;
   /** Set once launched. */
   draft_id?: string;
 }
@@ -610,6 +612,8 @@ export interface FactoryState {
   reference_profile?: DesignLookProfile;
   /** The business the campaign's posts and ads are for, when not this brand. */
   client_brand?: ClientBrand;
+  /** A competitor ad picked in chat; only plan items with uses_reference follow it. */
+  competitor_reference_id?: string;
   /** One design direction for every post and ad, so the set looks related
    * when no look or attached design leads. Picked by the planner. */
   flyer_style?: FlyerStyleId;

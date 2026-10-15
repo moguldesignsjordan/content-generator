@@ -292,7 +292,7 @@ export function buildFlyerCopyMessages(args: {
   style?: FlyerStyleId;
   /** When the flyer is spun off an email draft: distill this email's offer. */
   emailCopy?: EmailCopy;
-  /** A saved competitor ad to learn the approach from (strategy only). */
+  /** A saved competitor ad to learn the approach (and some phrasing) from. */
   competitorRef?: CompetitorReference | null;
   /** "ad" writes paid-ad text fields instead of a caption. */
   format?: FlyerFormat;
@@ -376,7 +376,7 @@ export function buildFlyerCopyMessages(args: {
           : []),
         "Treat it as inspiration, not a template. Every variant must read as",
         "this brand's own post about the FLYER TOPIC, with this brand's offer",
-        "and wording. At least two variants follow the reference's hook type",
+        "in this brand's voice. At least two variants follow the reference's hook type",
         "and structure; the rest may try something else. A layout idea may",
         "shape a scene, but never recreate the competitor's products, people,",
         "or imagery.",

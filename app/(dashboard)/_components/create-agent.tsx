@@ -39,6 +39,7 @@ import type {
   SeriesDraftRef,
 } from "@/lib/db/types";
 import { LookPicker } from "./look-picker";
+import { AdLibraryPicker } from "./ad-library-picker";
 import { ChatPreviewCard, type ChatPreview, type QueuedPreviewAction } from "./chat-preview-card";
 import type { PreviewAction } from "@/lib/chat-preview";
 
@@ -125,6 +126,7 @@ interface CampaignHandoff {
   photo_url?: string;
   reference_urls?: string[];
   client_brand?: ClientBrand;
+  competitor_reference_id?: string;
 }
 
 interface CampaignRun {
@@ -189,6 +191,8 @@ interface CreateResponse {
   campaign?: CampaignHandoff | null;
   /** The agent asked the user to pick a design look. */
   showLookPicker?: boolean;
+  /** The user shared an Ad Library page: its ads show under the reply. */
+  adLibraryUrl?: string | null;
   /** The piece shown live in the thread, and a change the agent asked for. */
   preview?: ChatPreview | null;
   previewAction?: PreviewAction | null;
@@ -285,6 +289,7 @@ export function CreateAgent({
   const [lookPickerOpen, setLookPickerOpen] = useState(false);
   // null = the brand default look, same as the factory.
   const [lookId, setLookId] = useState<string | null>(null);
+  const [adLibraryUrl, setAdLibraryUrl] = useState<string | null>(null);
   // The brief card stays out of the thread unless opened (or Auto mode is
   // waiting on Generate).
   const [briefOpen, setBriefOpen] = useState(false);
@@ -409,7 +414,7 @@ export function CreateAgent({
   useEffect(() => {
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, card, options, series, preview, liveText, liveStatus, lookPickerOpen, campaignRun]);
+  }, [messages, loading, card, options, series, preview, liveText, liveStatus, lookPickerOpen, adLibraryUrl, campaignRun]);
 
   useEffect(() => {
     if (!confirmClear) return;
@@ -425,7 +430,8 @@ export function CreateAgent({
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
 
-  function send(text: string) {
+  /** competitorAdId: the first ad ticked in the Ad Library picker. */
+  function send(text: string, competitorAdId?: string) {
     const t = text.trim();
     const imageUrls = pendingImages.map((p) => p.url);
     if ((!t && imageUrls.length === 0) || loading || generating) return;
@@ -437,6 +443,7 @@ export function CreateAgent({
     setHint(false);
     setOptions(null);
     setLookPickerOpen(false);
+    setAdLibraryUrl(null);
     setMessages((m) => [
       ...m,
       {
@@ -445,7 +452,7 @@ export function CreateAgent({
         ...(imageUrls.length ? { images: imageUrls } : {}),
       },
     ]);
-    void postToAgent(displayText, imageUrls);
+    void postToAgent(displayText, imageUrls, competitorAdId);
   }
 
   function sendFromLanding() {
@@ -465,7 +472,7 @@ export function CreateAgent({
     setPicked(null);
   }
 
-  async function postToAgent(text: string, imageUrls: string[]) {
+  async function postToAgent(text: string, imageUrls: string[], competitorAdId?: string) {
     setLoading(true);
     setLiveText("");
     setLiveStatus(imageUrls.length ? "Looking at your photos" : "Thinking");
@@ -487,6 +494,7 @@ export function CreateAgent({
           images: imageUrls.length ? imageUrls : undefined,
           auto: mode === "auto",
           ...(lookId ? { lookId } : {}),
+          ...(competitorAdId ? { competitorAdId } : {}),
         }),
         signal: controller.signal,
       });
@@ -521,6 +529,7 @@ export function CreateAgent({
       setCard(data.card ?? null);
       setOptions(data.options ?? null);
       setLookPickerOpen(Boolean(data.showLookPicker));
+      setAdLibraryUrl(data.adLibraryUrl ?? null);
       if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
       if (typeof data.auto === "boolean") setMode(data.auto ? "auto" : "guided");
@@ -611,6 +620,9 @@ export function CreateAgent({
           ...(lookId ? { look_id: lookId } : {}),
           ...(handoff.reference_urls?.length ? { reference_urls: handoff.reference_urls } : {}),
           ...(handoff.client_brand ? { client_brand: handoff.client_brand } : {}),
+          ...(handoff.competitor_reference_id
+            ? { competitor_reference_id: handoff.competitor_reference_id }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -906,6 +918,26 @@ export function CreateAgent({
                             : lookId
                               ? "I picked a saved look to follow."
                               : "Use our style.",
+                        )
+                      }
+                    />
+                  </div>
+                )}
+
+                {adLibraryUrl && !loading && (
+                  <div className="bubble-in space-y-3 rounded-[22px] border border-border bg-surface-2 p-3.5 sm:ml-9">
+                    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+                      <span className="bar-spectrum h-1 w-4 rounded-full" />
+                      Pick ads to learn from
+                    </span>
+                    <AdLibraryPicker
+                      url={adLibraryUrl}
+                      onDone={(ids) =>
+                        send(
+                          ids.length === 1
+                            ? "Learn from the ad I picked."
+                            : `I saved ${ids.length} ads. Learn from the first one I picked.`,
+                          ids[0],
                         )
                       }
                     />

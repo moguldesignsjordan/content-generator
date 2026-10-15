@@ -108,13 +108,18 @@ function createShell(
 ): Promise<string> {
   const format = getCampaignFormat(item.format);
   const common = { ctx: args.ctx, campaignId: args.campaignId };
+  // Only the pieces the planner chose to follow the competitor ad carry it.
+  const competitorRefId = item.uses_reference ? args.factory.competitor_reference_id : undefined;
   if (item.kind === "email" || item.kind === "blog") {
     return createDraftShell({
       ...common,
       type: item.kind,
       ...(format?.emailType ? { emailType: format.emailType } : {}),
       ...(format?.blogType ? { blogType: format.blogType } : {}),
-      seriesBrief: buildPieceBrief(item, args.factory, args.photoUrl),
+      seriesBrief: {
+        ...buildPieceBrief(item, args.factory, args.photoUrl),
+        ...(competitorRefId ? { competitor_reference_id: competitorRefId } : {}),
+      },
       // Distinct email styles across the batch, by position in the plan.
       seriesSeedIndex: args.plan.findIndex((p) => p.id === item.id),
     });
@@ -133,6 +138,7 @@ function createShell(
     ...(args.factory.reference_urls?.length ? { referenceUrls: args.factory.reference_urls } : {}),
     ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),
     ...(args.factory.client_brand ? { clientBrand: args.factory.client_brand } : {}),
+    ...(competitorRefId ? { competitorReferenceId: competitorRefId } : {}),
     // Organic posts go out on their day through the daily cron once approved.
     // Ads never get a posting date: that cron would publish them as organic
     // posts. They're run from Ads Manager instead.

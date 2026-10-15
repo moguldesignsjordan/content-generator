@@ -10,6 +10,7 @@ import { getAverageDraftCostByKind } from "@/lib/db/queries";
 import type {
   Brand,
   BrandMemory,
+  CompetitorReference,
   FactoryKind,
   FactoryPlanItem,
   FactoryQuote,
@@ -180,6 +181,8 @@ export async function planCampaign(
     size: number;
     days: number;
     startDate: string;
+    /** A competitor ad picked in chat for some pieces to adapt. */
+    competitorRef?: CompetitorReference | null;
   },
 ): Promise<{ plan: FactoryPlanItem[]; flyerStyle?: FlyerStyleId; usd: number }> {
   const counts = splitEvenly(args.size, args.kinds);
@@ -188,6 +191,7 @@ export async function planCampaign(
     sentence: args.sentence,
     research: args.research,
     counts,
+    competitorRef: args.competitorRef,
   });
 
   const resp = await getAnthropic()

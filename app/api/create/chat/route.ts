@@ -29,6 +29,7 @@ import {
   getFlyerDraftFromEmail,
   getTopicContext,
   listBrandMemory,
+  listCompetitorReferences,
   listDrafts,
   listProducts,
   listTopics,
@@ -78,6 +79,8 @@ import { cleanExamples, cleanLookName, storageHostFromEnv } from "@/lib/looks";
 import { extractLookProfile } from "@/lib/pipeline/extract-look";
 import { loadOnScreen, type OnScreen } from "@/lib/chat-on-screen";
 import { scrapeCompetitorAdUrl } from "@/lib/scrape";
+import { parseAdLibraryUrl } from "@/lib/scrape/url";
+import { adLibraryAdUrl } from "@/lib/clients/scrapecreators";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
 import { logError } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -118,6 +121,7 @@ interface StartedCampaign {
   photo_url?: string;
   reference_urls?: string[];
   client_brand?: ClientBrand;
+  competitor_reference_id?: string;
 }
 
 const NO_OUR_STYLE =
@@ -254,6 +258,15 @@ function withImageBlocks(
 }
 
 const BARE_URL_RE = /https?:\/\/[^\s<>"')\]]+/i;
+// Its own pattern: Ad Library links carry sort_data[...] brackets, which
+// BARE_URL_RE stops at before view_all_page_id.
+const AD_LIBRARY_URL_RE = /https?:\/\/(?:[\w-]+\.)*facebook\.com\/ads\/library\/?\?\S+/i;
+
+/** An advertiser's Ad Library link in the message, for the chat's ad picker. */
+function findAdLibraryUrl(message: string): string | null {
+  const url = message.match(AD_LIBRARY_URL_RE)?.[0];
+  return url && parseAdLibraryUrl(url) ? url : null;
+}
 
 /**
  * When the message contains a bare URL and no image is attached, scrapes it
@@ -305,6 +318,8 @@ interface TurnState {
   campaign: StartedCampaign | null;
   // Set by show_look_picker: the client shows the look picker under the reply.
   showLookPicker: boolean;
+  // An Ad Library link from this message: the client shows its ads to pick from.
+  adLibraryUrl: string | null;
   // Set by edit_flyer / revise_piece: the client's preview card applies it.
   previewAction: PreviewAction | null;
 }
@@ -329,14 +344,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, campaignId, images, auto, lookId } = (await req.json()) as {
-      message?: string;
-      history?: ChatMsg[];
-      campaignId?: string | null;
-      images?: string[];
-      auto?: boolean;
-      lookId?: string | null;
-    };
+    const { message, history, campaignId, images, auto, lookId, competitorAdId } =
+      (await req.json()) as {
+        message?: string;
+        history?: ChatMsg[];
+        campaignId?: string | null;
+        images?: string[];
+        auto?: boolean;
+        lookId?: string | null;
+        /** The first ad ticked in the chat's Ad Library picker (an ad archive id). */
+        competitorAdId?: string | null;
+      };
     if (!message?.trim()) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
@@ -417,10 +435,30 @@ export async function POST(req: NextRequest) {
     // its own handling) might be a competitor ad the user wants saved: scrape
     // it server-side now so the model sees real extracted text or an honest
     // "couldn't read it" note, never a naked link it would have to guess about.
-    const messageForModel = await withScrapedCompetitorUrl(
-      message.trim(),
-      !!sanitizedImages?.length,
-    );
+    // An Ad Library page is never scraped here: the client shows its ads to
+    // pick from, through the same preview/save routes the Media page uses.
+    const adLibraryUrl = sanitizedImages?.length ? null : findAdLibraryUrl(message);
+    // The picker saved the ticked ads before sending; the first one shapes
+    // this piece. Looked up by source_url so an ad saved earlier counts too.
+    const pickedAd =
+      competitorAdId && /^\d+$/.test(competitorAdId)
+        ? ((await listCompetitorReferences(brand.id)).find(
+            (r) => r.source_url === adLibraryAdUrl(competitorAdId),
+          ) ?? null)
+        : null;
+    let messageForModel = adLibraryUrl
+      ? `${message.trim()}\n\nSYSTEM NOTE: ${adLibraryUrl} is a Facebook Ad Library page. ` +
+        "Its top ads are showing as a picker under your reply. In one short line, ask " +
+        "them to tick the ads worth learning from; the first one they tick shapes this " +
+        "piece. Don't call save_competitor_reference for it."
+      : await withScrapedCompetitorUrl(message.trim(), !!sanitizedImages?.length);
+    if (pickedAd) {
+      messageForModel +=
+        `\n\nSYSTEM NOTE: the ads they ticked are saved to Competitor Ads, and ` +
+        `"${pickedAd.name}" is attached to this piece. Say in one line you'll adapt ` +
+        "its hook, structure, and some of its phrasing in the brand's own voice, never " +
+        "copy it, then carry on.";
+    }
     const messages: Anthropic.MessageParam[] = [
       ...priorTurns,
       {
@@ -440,6 +478,7 @@ export async function POST(req: NextRequest) {
       brief: {
         ...(campaign.brief ?? {}),
         ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
+        ...(pickedAd ? { competitor_reference_id: pickedAd.id } : {}),
       },
       topicId: campaign.topic_id,
       // Seed the card's topic/CTA rows from the attached topic so they show
@@ -451,6 +490,7 @@ export async function POST(req: NextRequest) {
       series: null,
       campaign: null,
       showLookPicker: false,
+      adLibraryUrl,
       previewAction: null,
     };
     const dispatchCtx = {
@@ -651,7 +691,8 @@ export async function POST(req: NextRequest) {
           const askedSomething =
             /\?/.test(joinReplySegments(replyParts)) ||
             Boolean(state.options?.length) ||
-            state.showLookPicker;
+            state.showLookPicker ||
+            Boolean(state.adLibraryUrl);
           if (!state.draftId && !state.campaign && !state.previewAction && !askedSomething) {
             try {
               pushUserNote(
@@ -755,6 +796,7 @@ export async function POST(req: NextRequest) {
             series,
             campaign: state.campaign,
             showLookPicker: state.showLookPicker,
+            adLibraryUrl: state.adLibraryUrl,
             preview: state.draftId && state.channel
               ? { draftId: state.draftId, channel: state.channel }
               : onScreen
@@ -992,6 +1034,9 @@ async function dispatchTool(
         research: input.research === true && userAskedForResearch(ctx.userMessages),
         ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
         ...(references?.length ? { reference_urls: references } : {}),
+        ...(state.brief.competitor_reference_id
+          ? { competitor_reference_id: state.brief.competitor_reference_id }
+          : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
     }

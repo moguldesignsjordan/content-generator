@@ -6,6 +6,7 @@ import {
   deleteCampaign,
   getBrandWithIcps,
   getCampaign,
+  getCompetitorReference,
   getDesignLook,
   listBrandMemory,
   listProducts,
@@ -51,7 +52,7 @@ function isOwnStorageUrl(value: string): boolean {
 
 /**
  * POST { sentence, kinds, size, days, photo_url?, look_id?, reference_urls?,
- * client_brand?, research?, campaign_id? }: starts a factory campaign and streams its phases
+ * client_brand?, competitor_reference_id?, research?, campaign_id? }: starts a factory campaign and streams its phases
  * (researching only when the owner said yes, planning, pricing), ending in
  * `done` with the campaign id. Nothing is generated here; the plan table is
  * the checkpoint before any spend on content.
@@ -98,6 +99,10 @@ export async function POST(req: NextRequest) {
   const rawLook = typeof body.look_id === "string" ? body.look_id : "";
   const lookId =
     rawLook === "none" || (rawLook && (await getDesignLook(rawLook, brand.id))) ? rawLook : undefined;
+  // The competitor ad picked in chat must be one of this brand's saved ads.
+  const rawRef = typeof body.competitor_reference_id === "string" ? body.competitor_reference_id : "";
+  const foundRef = rawRef ? await getCompetitorReference(rawRef).catch(() => null) : null;
+  const competitorRef = foundRef?.brand_id === brand.id ? foundRef : null;
   const guard = await guardAiRoute("factory", { brandId: brand.id, limit: 3 });
   if (!guard.ok) {
     return NextResponse.json(
@@ -135,6 +140,7 @@ export async function POST(req: NextRequest) {
     ...(lookId ? { look_id: lookId } : {}),
     ...(referenceUrls.length ? { reference_urls: referenceUrls } : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),
+    ...(competitorRef ? { competitor_reference_id: competitorRef.id } : {}),
   };
   await updateCampaign(campaign.id, {
     brief: { goal: sentence, conversation_notes: sentence },
@@ -180,6 +186,7 @@ export async function POST(req: NextRequest) {
           size,
           days,
           startDate: factoryStartDate(),
+          competitorRef,
         });
 
         send("phase", { phase: "pricing", label: "Pricing the batch" });

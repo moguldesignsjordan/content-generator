@@ -2,6 +2,7 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 import type {
   Brand,
   BrandMemory,
+  CompetitorReference,
   FactoryKind,
   FactoryResearch,
   Icp,
@@ -9,6 +10,7 @@ import type {
 } from "@/lib/db/types";
 import {
   buildBrandVoiceBlock,
+  buildCompetitorReferenceBlock,
   buildGuidelinesBlock,
   buildMemoryBlock,
   buildPositioningBlock,
@@ -86,6 +88,11 @@ export const SAVE_PLAN_TOOL: Anthropic.Tool = {
               type: "string",
               description: "Slug of the product or service this piece promotes, if any.",
             },
+            uses_reference: {
+              type: "boolean",
+              description:
+                "True when this piece adapts the COMPETITOR REFERENCE. Only when one is given.",
+            },
           },
           required: [
             "kind",
@@ -151,9 +158,12 @@ export function buildPlanMessages(args: {
   /** Absent when the owner chose to skip web research. */
   research?: FactoryResearch;
   counts: Record<FactoryKind, number>;
+  /** A competitor ad picked in chat for some pieces to adapt. */
+  competitorRef?: CompetitorReference | null;
 }): { system: string; user: string } {
   const kinds = FACTORY_KINDS.filter((k) => args.counts[k] > 0);
   const total = kinds.reduce((sum, k) => sum + args.counts[k], 0);
+  const competitorBlock = buildCompetitorReferenceBlock(args.competitorRef);
 
   const system = [
     "You plan marketing campaigns for one small business. A plan is a table of",
@@ -181,6 +191,7 @@ export function buildPlanMessages(args: {
           "No research for this one: plan from the owner's words and the brand info alone.",
           "REAL FACTS ABOUT THIS BUSINESS: only what the owner said above and the brand info. Flag needs_detail wherever proof would help.",
         ]),
+    ...(competitorBlock ? ["", competitorBlock] : []),
     "",
     `PLAN EXACTLY ${total} PIECES: ${kinds.map((k) => `${args.counts[k]} ${k}`).join(", ")}.`,
     "",
@@ -192,6 +203,9 @@ export function buildPlanMessages(args: {
     "- Hooks are concrete and specific to this business: a real detail, a number from the facts, a named situation the reader recognizes. Never generic openers like 'Unlock', 'Elevate', 'In today's world', 'Ever wondered', or 'Look no further'.",
     ...(args.research
       ? ["- Build on the research: use the hook patterns and trends where they fit, and set inspired_by to the source URL that sparked the piece."]
+      : []),
+    ...(competitorBlock
+      ? [`- Adapt the COMPETITOR REFERENCE in about a third of the pieces (${Math.max(1, Math.round(total / 3))} of ${total}), the ones it suits best: their hook and structure follow it, in this brand's own words and offer. Set uses_reference true on exactly those. The rest stay their own ideas.`]
       : []),
     "- State as true only the REAL FACTS above and the brand info. Never invent numbers, results, testimonials, client names, prices, or deadlines. When a piece would be stronger with proof that isn't there, set needs_detail true and write detail_prompt as the one question to ask the owner.",
     "- Social and ad visuals show the real product or work when there is one, in a setting that fits the brand. No stock-photo cliches (handshakes, people pointing at laptops, lightbulbs).",

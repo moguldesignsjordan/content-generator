@@ -70,6 +70,15 @@ describe("cleanPlanItems", () => {
     expect(out).toHaveLength(1);
   });
 
+  it("keeps uses_reference only when it's literally true", () => {
+    const [kept, dropped] = cleanPlanItems(
+      [raw({ uses_reference: true }), raw({ uses_reference: "yes" })],
+      opts,
+    );
+    expect(kept.uses_reference).toBe(true);
+    expect(dropped).not.toHaveProperty("uses_reference");
+  });
+
   it("caps each kind at its planned count", () => {
     const out = cleanPlanItems(
       [raw({ kind: "ad", format: "ad_social_proof" }), raw({ kind: "ad", format: "ad_direct_benefit" })],

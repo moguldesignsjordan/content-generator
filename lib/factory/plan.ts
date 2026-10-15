@@ -26,6 +26,7 @@ export interface RawPlanItem {
   needs_detail?: unknown;
   detail_prompt?: unknown;
   offer_slug?: unknown;
+  uses_reference?: unknown;
 }
 
 function text(value: unknown, max = 400): string {
@@ -114,6 +115,7 @@ export function cleanPlanItems(
       needs_detail: needsDetail,
       ...(detailPrompt ? { detail_prompt: detailPrompt } : {}),
       ...(slug && opts.productSlugs.has(slug) ? { offer_slug: slug } : {}),
+      ...(item.uses_reference === true ? { uses_reference: true } : {}),
     });
     remaining[kind]--;
   }

@@ -341,15 +341,15 @@ describe("buildFlyerCopyMessages", () => {
     created_at: "2026-10-11T00:00:00Z",
   };
 
-  it("adds the competitor strategy and layout idea, never its words or name", () => {
+  it("adds the competitor strategy, layout idea, and wording as a suggestion, never its name", () => {
     const { user } = buildFlyerCopyMessages({ ...base, competitorRef });
-    expect(user).toContain("COMPETITOR REFERENCE (strategy only, DO NOT COPY)");
+    expect(user).toContain("COMPETITOR REFERENCE (adapt, DO NOT COPY)");
     expect(user).toContain("Hook type: product + price anchor");
     expect(user).toContain("Layout idea: Product photo fills the frame");
     expect(user).toContain("inspiration, not a template");
-    expect(user).not.toContain("Turn big ideas");
-    expect(user).not.toContain("Holiday Cards");
-    expect(user).not.toContain("$8.56");
+    expect(user).toContain("THEIR WORDING (a suggestion, not a script)");
+    expect(user).toContain("Turn big ideas");
+    expect(user).not.toContain("VistaPrint");
   });
 
   it("adds no competitor lines without a reference or a distilled profile", () => {

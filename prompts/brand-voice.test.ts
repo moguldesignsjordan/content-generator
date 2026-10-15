@@ -356,9 +356,23 @@ describe("buildCompetitorReferenceBlock", () => {
     expect(block).toContain("Register: casual");
   });
 
-  it("never includes the raw ad copy itself", () => {
+  it("includes the ad's wording as a suggestion, with the no-copy rules", () => {
     const block = buildCompetitorReferenceBlock(makeCompetitorReference());
-    expect(block).not.toContain("50% off everything, today only!");
+    expect(block).toContain("THEIR WORDING (a suggestion, not a script)");
+    expect(block).toContain("50% off everything, today only!");
+    expect(block).toContain("any whole sentence or headline as written");
+  });
+
+  it("omits the wording section when no ad text was saved", () => {
+    const block = buildCompetitorReferenceBlock(makeCompetitorReference({ content: null }));
+    expect(block).not.toContain("THEIR WORDING");
+  });
+
+  it("truncates long ad text", () => {
+    const block = buildCompetitorReferenceBlock(
+      makeCompetitorReference({ content: "word ".repeat(1000) }),
+    );
+    expect(block).toContain("[truncated]");
   });
 
   it("leaves out the saved name, which can carry the competitor's headline", () => {
