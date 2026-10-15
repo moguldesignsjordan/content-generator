@@ -585,3 +585,62 @@ html.light .hero-glow {
     transform: translateX(300%);
   }
 }
+
+/* ── Home hero ──────────────────────────────────────────────────────────
+   The landing backdrop (home-hero.tsx). The art is black glass ribbons, so
+   on Ink it's screened in (the black vanishes, only the light remains) and
+   feathered on every edge into the page. On Paper it's inverted with its
+   hues turned back, then multiplied, so the white vanishes instead. */
+.home-hero {
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  mask-composite: intersect;
+}
+.home-hero-art {
+  mix-blend-mode: screen;
+  opacity: 0.85;
+}
+html.light .home-hero-art {
+  filter: invert(1) hue-rotate(180deg) saturate(1.3);
+  mix-blend-mode: multiply;
+  opacity: 0.5;
+}
+.home-hero-sweep {
+  mix-blend-mode: screen;
+  background-image: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.09) 48%,
+    rgba(255, 174, 60, 0.06) 52%,
+    transparent 62%
+  );
+  background-size: 250% 100%;
+}
+.home-hero-spot {
+  mix-blend-mode: screen;
+}
+html.light .home-hero-sweep,
+html.light .home-hero-spot {
+  display: none;
+}
+/* Fine film grain over the art: an inline SVG noise tile. */
+.home-grain {
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* A word set in the spectrum, its gradient slowly flowing. */
+.text-spectrum-flow {
+  background: var(--spectrum);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: bar-pan 6s ease-in-out infinite;
+}

@@ -11,6 +11,13 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  AnimatePresence,
+  MotionConfig,
+  motion,
+  useMotionValue,
+  useSpring,
+} from "motion/react";
 import { AccentSpinner, Button, Logo, Select, Sheet, useToast } from "@/components/ui";
 import {
   BlogIcon,
@@ -28,6 +35,7 @@ import { cn } from "@/lib/cn";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { readSse } from "@/lib/read-sse";
 import { useGenerationStream } from "@/lib/use-generation-stream";
+import { HomeHero } from "./home-hero";
 import type {
   BlogType,
   EmailType,
@@ -661,287 +669,338 @@ export function CreateAgent({
   }
 
   return (
-    <div
-      className={cn("flex flex-col overflow-hidden", className)}
-      style={{ height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
-    >
-      {empty ? (
-        // Landing — a centered prompt: beacon, headline, input, actions.
-        <div className="flex flex-1 flex-col items-center justify-center gap-7 px-4 py-10">
-          <h2 className="max-w-md text-center font-display text-[26px] font-semibold leading-tight text-foreground [text-wrap:balance] sm:text-[30px]">
-            What are we{" "}
-            <span className="relative inline-block">
-              creating
-              <span
-                aria-hidden
-                className="bar-spectrum bar-live absolute -bottom-1 left-0 h-[3px] w-full rounded-full"
-              />
-            </span>{" "}
-            today?
-          </h2>
-          <div className="w-full max-w-xl">
-            <ActionGrid
-              picked={picked}
-              onPick={pickKind}
-              disabled={loading || generating}
-              className="mb-4"
-            />
-            <div className="mb-2 flex justify-end">
-              <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
-            </div>
-            <ComposerBar
-              inputRef={inputRef}
-              input={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendFromLanding();
-                }
-              }}
-              onSend={sendFromLanding}
-              onAttachFiles={handleAttachFiles}
-              onOpenLibrary={() => setLibraryOpen(true)}
-              uploading={uploading}
-              ready={ready}
-              disabled={loading || generating}
-              placeholderCycle={picked ? STARTERS[picked].hint : PROMPT_IDEAS[phIndex]}
-              pendingImages={pendingImages}
-              onRemoveImage={(url) =>
-                setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
-              }
-            />
-            {suggestions.length > 0 && (
-              <div className="mt-5">
-                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-                  Ideas for you
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s.text}
-                      type="button"
-                      onClick={() => send(s.text)}
-                      disabled={loading || generating}
-                      className="max-w-full truncate rounded-full border border-border bg-surface-2 px-3.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        // Conversation — scrolling thread + docked composer.
-        <>
-          <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-            <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
-            {card && (
-              <button
-                type="button"
-                onClick={() => setBriefOpen((v) => !v)}
-                aria-expanded={briefOpen}
-                className="ml-auto mr-1 shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
-              >
-                {briefOpen ? "Hide what I have" : "What I have so far"}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={clearChat}
-              className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+    <MotionConfig reducedMotion="user">
+      <div
+        className={cn("flex flex-col overflow-hidden", className)}
+        style={{ height: "clamp(480px, calc(100dvh - 200px), 800px)" }}
+      >
+        <AnimatePresence mode="wait">
+          {empty ? (
+            // Landing — a centered prompt: beacon, headline, input, actions.
+            <motion.div
+              key="landing"
+              className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-10"
+              exit={{ opacity: 0, y: -16, filter: "blur(6px)" }}
+              transition={{ duration: 0.3, ease: EASE_OUT }}
             >
-              {confirmClear ? "Confirm clear?" : "Clear chat"}
-            </button>
-          </div>
-          <div
-            ref={scrollRef}
-            className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
-          >
-            {card && (briefOpen || (ready && mode === "auto")) && (
-              <BriefCardView
-                card={card}
-                disabled={loading || generating}
-                ready={ready && Boolean(topicId)}
-                generating={generating}
-                channel={channel}
-                onChannelChange={setChannel}
-                emailType={emailType}
-                onEmailTypeChange={setEmailType}
-                blogType={blogType}
-                onBlogTypeChange={setBlogType}
-                onApply={(pending) => {
-                  const parts: string[] = [];
-                  if (pending.Topic) parts.push(`the topic to "${pending.Topic}"`);
-                  if (pending.Name) parts.push(`the email's name (subject line) to "${pending.Name}"`);
-                  if (pending.Subheader) parts.push(`the subheader to "${pending.Subheader}"`);
-                  if (pending.For) parts.push(`the audience to "${pending.For}"`);
-                  if (pending.Goal) parts.push(`the goal to "${pending.Goal}"`);
-                  if (pending.Message) parts.push(`the key message to "${pending.Message}"`);
-                  if (pending.Proof) parts.push(`the proof to "${pending.Proof}"`);
-                  if (pending.Hook) parts.push(`the hook to "${pending.Hook}"`);
-                  if (pending.Angle) parts.push(`the angle to "${pending.Angle}"`);
-                  if (pending.Offer) parts.push(`the offer to "${pending.Offer}"`);
-                  if (pending["Reader belief"]) {
-                    parts.push(
-                      `what readers should believe after reading to "${pending["Reader belief"]}"`,
-                    );
-                  }
-                  if (pending.Tone) parts.push(`the tone to "${pending.Tone}"`);
-                  if (pending.Vibe) parts.push(`the vibe to "${pending.Vibe}"`);
-                  if (pending.Length) parts.push(`the length to ${pending.Length.toLowerCase()}`);
-                  if (pending.Picture) {
-                    parts.push(pending.Picture === "Yes" ? "include a picture" : "no picture");
-                  }
-                  if (!parts.length) return;
-                  send(`Update the brief: change ${parts.join(", ")}.`);
-                }}
-                onGenerate={generate}
-              />
-            )}
-
-            {series && series.length > 0 && <SeriesCardView items={series} />}
-
-            {messages.map((m, i) => (
-              <Bubble key={i} msg={m} />
-            ))}
-
-            {options && options.length > 0 && !loading && (
-              <div className="bubble-in flex flex-wrap gap-2">
-                {options.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => send(opt.label)}
-                    disabled={loading || generating}
-                    className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
-                  >
-                    {opt.label}
-                  </button>
+              <h2 className="max-w-xl text-center font-display text-[32px] font-semibold leading-[1.05] tracking-[-0.02em] text-foreground [text-wrap:balance] sm:text-[48px]">
+                {["What", "are", "we"].map((word, i) => (
+                  <motion.span key={word} className="mr-[0.24em] inline-block" {...rise(0.15 + i * 0.08)}>
+                    {word}
+                  </motion.span>
                 ))}
+                <motion.span className="relative mr-[0.24em] inline-block" {...rise(0.39)}>
+                  <span className="text-spectrum-flow">creating</span>
+                  <motion.span
+                    aria-hidden
+                    className="bar-spectrum bar-live absolute -bottom-1 left-0 h-[3px] w-full origin-left rounded-full"
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.9, delay: 0.8, ease: EASE_OUT }}
+                  />
+                </motion.span>
+                <motion.span className="inline-block" {...rise(0.47)}>
+                  today?
+                </motion.span>
+              </h2>
+              <div className="w-full max-w-xl">
+                <ActionGrid
+                  picked={picked}
+                  onPick={pickKind}
+                  disabled={loading || generating}
+                  className="mb-4"
+                />
+                <motion.div {...rise(0.8)}>
+                  <div className="mb-2 flex justify-end">
+                    <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
+                  </div>
+                  <ComposerBar
+                    inputRef={inputRef}
+                    input={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendFromLanding();
+                      }
+                    }}
+                    onSend={sendFromLanding}
+                    onAttachFiles={handleAttachFiles}
+                    onOpenLibrary={() => setLibraryOpen(true)}
+                    uploading={uploading}
+                    ready={ready}
+                    disabled={loading || generating}
+                    placeholderCycle={picked ? STARTERS[picked].hint : PROMPT_IDEAS[phIndex]}
+                    pendingImages={pendingImages}
+                    onRemoveImage={(url) =>
+                      setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
+                    }
+                  />
+                </motion.div>
+                {suggestions.length > 0 && (
+                  <div className="mt-5">
+                    <motion.p
+                      className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-2"
+                      {...rise(1)}
+                    >
+                      Ideas for you
+                    </motion.p>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestions.map((s, i) => (
+                        <motion.button
+                          key={s.text}
+                          type="button"
+                          onClick={() => send(s.text)}
+                          disabled={loading || generating}
+                          className="max-w-full truncate rounded-full border border-border bg-surface-2/80 px-3.5 py-2 text-left text-[13px] font-medium text-foreground backdrop-blur-md transition-colors hover:border-border-strong hover:bg-surface-3 disabled:opacity-50"
+                          {...rise(1.05 + i * 0.07)}
+                        >
+                          {s.label}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </motion.div>
+          ) : (
+            // Conversation — scrolling thread + docked composer.
+            <motion.div
+              key="thread"
+              className="flex min-h-0 flex-1 flex-col"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: EASE_OUT }}
+            >
+              <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+                <ModeToggle mode={mode} onChange={setMode} disabled={loading || generating} />
+                {card && (
+                  <button
+                    type="button"
+                    onClick={() => setBriefOpen((v) => !v)}
+                    aria-expanded={briefOpen}
+                    className="ml-auto mr-1 shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+                  >
+                    {briefOpen ? "Hide what I have" : "What I have so far"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={clearChat}
+                  className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+                >
+                  {confirmClear ? "Confirm clear?" : "Clear chat"}
+                </button>
+              </div>
+              <div
+                ref={scrollRef}
+                className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 momentum"
+              >
+                {card && (briefOpen || (ready && mode === "auto")) && (
+                  <BriefCardView
+                    card={card}
+                    disabled={loading || generating}
+                    ready={ready && Boolean(topicId)}
+                    generating={generating}
+                    channel={channel}
+                    onChannelChange={setChannel}
+                    emailType={emailType}
+                    onEmailTypeChange={setEmailType}
+                    blogType={blogType}
+                    onBlogTypeChange={setBlogType}
+                    onApply={(pending) => {
+                      const parts: string[] = [];
+                      if (pending.Topic) parts.push(`the topic to "${pending.Topic}"`);
+                      if (pending.Name) parts.push(`the email's name (subject line) to "${pending.Name}"`);
+                      if (pending.Subheader) parts.push(`the subheader to "${pending.Subheader}"`);
+                      if (pending.For) parts.push(`the audience to "${pending.For}"`);
+                      if (pending.Goal) parts.push(`the goal to "${pending.Goal}"`);
+                      if (pending.Message) parts.push(`the key message to "${pending.Message}"`);
+                      if (pending.Proof) parts.push(`the proof to "${pending.Proof}"`);
+                      if (pending.Hook) parts.push(`the hook to "${pending.Hook}"`);
+                      if (pending.Angle) parts.push(`the angle to "${pending.Angle}"`);
+                      if (pending.Offer) parts.push(`the offer to "${pending.Offer}"`);
+                      if (pending["Reader belief"]) {
+                        parts.push(
+                          `what readers should believe after reading to "${pending["Reader belief"]}"`,
+                        );
+                      }
+                      if (pending.Tone) parts.push(`the tone to "${pending.Tone}"`);
+                      if (pending.Vibe) parts.push(`the vibe to "${pending.Vibe}"`);
+                      if (pending.Length) parts.push(`the length to ${pending.Length.toLowerCase()}`);
+                      if (pending.Picture) {
+                        parts.push(pending.Picture === "Yes" ? "include a picture" : "no picture");
+                      }
+                      if (!parts.length) return;
+                      send(`Update the brief: change ${parts.join(", ")}.`);
+                    }}
+                    onGenerate={generate}
+                  />
+                )}
 
-            {lookPickerOpen && !loading && (
-              <div className="bubble-in space-y-3 rounded-2xl border border-border p-3">
-                <LookPicker value={lookId} onChange={setLookId} />
-                <StepChip
-                  primary
-                  label="Use this"
-                  onClick={() =>
-                    send(
-                      lookId === "none"
-                        ? "No saved look, use your own layouts."
-                        : lookId
-                          ? "I picked a look to follow."
-                          : "Go with my default look.",
-                    )
+                {series && series.length > 0 && <SeriesCardView items={series} />}
+
+                {messages.map((m, i) => (
+                  <Bubble key={i} msg={m} />
+                ))}
+
+                {options && options.length > 0 && !loading && (
+                  <div className="bubble-in flex flex-wrap gap-2">
+                    {options.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => send(opt.label)}
+                        disabled={loading || generating}
+                        className="rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-3 disabled:opacity-50"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {lookPickerOpen && !loading && (
+                  <div className="bubble-in space-y-3 rounded-2xl border border-border p-3">
+                    <LookPicker value={lookId} onChange={setLookId} />
+                    <StepChip
+                      primary
+                      label="Use this"
+                      onClick={() =>
+                        send(
+                          lookId === "none"
+                            ? "No saved look, use your own layouts."
+                            : lookId
+                              ? "I picked a look to follow."
+                              : "Go with my default look.",
+                        )
+                      }
+                    />
+                  </div>
+                )}
+
+                {(loading || navigating) && (
+                  <div className="space-y-2">
+                    {liveText && <Bubble msg={{ role: "assistant", content: liveText }} live />}
+                    {(!liveText || liveStatus || navigating) && (
+                      <WorkingLine
+                        label={navigating ?? liveStatus ?? "Thinking"}
+                        hint={hint && !navigating}
+                        showDot={!liveText}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {campaignRun && <CampaignRunView run={campaignRun} onRetry={runFactory} />}
+              </div>
+
+              {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
+
+              <div className="p-3 pt-2">
+                <ComposerBar
+                  inputRef={inputRef}
+                  input={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send(input);
+                    }
+                  }}
+                  onSend={() => send(input)}
+                  onAttachFiles={handleAttachFiles}
+                  onOpenLibrary={() => setLibraryOpen(true)}
+                  uploading={uploading}
+                  ready={ready}
+                  disabled={loading || generating || Boolean(campaignRun) || Boolean(navigating)}
+                  pendingImages={pendingImages}
+                  onRemoveImage={(url) =>
+                    setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
                   }
                 />
               </div>
-            )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            {(loading || navigating) && (
-              <div className="space-y-2">
-                {liveText && <Bubble msg={{ role: "assistant", content: liveText }} live />}
-                {(!liveText || liveStatus || navigating) && (
-                  <WorkingLine
-                    label={navigating ?? liveStatus ?? "Thinking"}
-                    hint={hint && !navigating}
-                    showDot={!liveText}
-                  />
-                )}
-              </div>
-            )}
-
-            {campaignRun && <CampaignRunView run={campaignRun} onRetry={runFactory} />}
-          </div>
-
-          {error && <p className="px-4 pb-1 text-xs text-danger">{error}</p>}
-
-          <div className="p-3 pt-2">
-            <ComposerBar
-              inputRef={inputRef}
-              input={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              onSend={() => send(input)}
-              onAttachFiles={handleAttachFiles}
-              onOpenLibrary={() => setLibraryOpen(true)}
-              uploading={uploading}
-              ready={ready}
-              disabled={loading || generating || Boolean(campaignRun) || Boolean(navigating)}
-              pendingImages={pendingImages}
-              onRemoveImage={(url) =>
-                setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
-              }
-            />
-          </div>
-        </>
-      )}
-
-      <Sheet
-        open={libraryOpen}
-        onClose={() => setLibraryOpen(false)}
-        title="Your saved images"
-        description="Tap to add photos to your message. They'll be placed in the email."
-        size="lg"
-      >
-        {libraryAssets === null ? (
-          <p className="mt-3 text-[12.5px] text-muted">Loading…</p>
-        ) : libraryAssets.length === 0 ? (
-          <p className="mt-3 text-[12.5px] text-muted">
-            Nothing saved yet. Images you upload or generate show up here to
-            reuse later, for free.
-          </p>
-        ) : (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {libraryAssets.map((asset) => {
-              const staged = pendingImages.some((i) => i.url === asset.url);
-              return (
-                <button
-                  key={asset.id}
-                  type="button"
-                  onClick={() => toggleLibraryImage(asset)}
-                  aria-pressed={staged}
-                  className={cn(
-                    "relative h-[76px] w-[100px] shrink-0 overflow-hidden rounded-xl border text-left transition-colors",
-                    staged ? "border-accent ring-2 ring-accent/40" : "border-border hover:border-accent",
-                  )}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={asset.url}
-                    alt={asset.alt ?? ""}
-                    className="h-full w-full object-cover"
-                  />
-                  {staged && (
-                    <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white">
-                      <CheckIcon size={12} />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        <Sheet
+          open={libraryOpen}
+          onClose={() => setLibraryOpen(false)}
+          title="Your saved images"
+          description="Tap to add photos to your message. They'll be placed in the email."
+          size="lg"
+        >
+          {libraryAssets === null ? (
+            <p className="mt-3 text-[12.5px] text-muted">Loading…</p>
+          ) : libraryAssets.length === 0 ? (
+            <p className="mt-3 text-[12.5px] text-muted">
+              Nothing saved yet. Images you upload or generate show up here to
+              reuse later, for free.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {libraryAssets.map((asset) => {
+                const staged = pendingImages.some((i) => i.url === asset.url);
+                return (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    onClick={() => toggleLibraryImage(asset)}
+                    aria-pressed={staged}
+                    className={cn(
+                      "relative h-[76px] w-[100px] shrink-0 overflow-hidden rounded-xl border text-left transition-colors",
+                      staged ? "border-accent ring-2 ring-accent/40" : "border-border hover:border-accent",
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={asset.url}
+                      alt={asset.alt ?? ""}
+                      className="h-full w-full object-cover"
+                    />
+                    {staged && (
+                      <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white">
+                        <CheckIcon size={12} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {pendingImages.length > 0 && (
+            <div className="mt-4 flex justify-end">
+              <Button variant="gradient" size="sm" onClick={() => setLibraryOpen(false)}>
+                Done ({pendingImages.length} added)
+              </Button>
+            </div>
+          )}
+        </Sheet>
+      </div>
+      {/* After the chat box: the page stacks its children with space-y, and
+          an absolute backdrop placed first would still push the box down. */}
+      <AnimatePresence>
+        {empty && (
+          <HomeHero
+            key="home-hero"
+            className="absolute -inset-x-4 -top-4 -z-10 h-[620px] md:-inset-x-8 md:-top-9 md:h-[720px]"
+          />
         )}
-        {pendingImages.length > 0 && (
-          <div className="mt-4 flex justify-end">
-            <Button variant="gradient" size="sm" onClick={() => setLibraryOpen(false)}>
-              Done ({pendingImages.length} added)
-            </Button>
-          </div>
-        )}
-      </Sheet>
-    </div>
+      </AnimatePresence>
+    </MotionConfig>
   );
+}
+
+const EASE_OUT = [0.22, 1, 0.36, 1] as const;
+
+/** One-shot entrance: rises out of a soft blur, starting after `delay`s. */
+function rise(delay: number) {
+  return {
+    initial: { opacity: 0, y: 14, filter: "blur(8px)" },
+    animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+    transition: { duration: 0.7, delay, ease: EASE_OUT },
+  };
 }
 
 /** Guided runs today's staged chip interview; Auto fills the brief silently
@@ -1154,15 +1213,16 @@ function ActionGrid({
 }) {
   return (
     <div className={cn("flex flex-wrap justify-center gap-2", className)}>
-      {(Object.keys(STARTERS) as StarterKind[]).map((kind) => (
-        <ActionButton
-          key={kind}
-          icon={STARTER_ICONS[kind]}
-          label={STARTERS[kind].label}
-          onClick={() => onPick(kind)}
-          disabled={disabled}
-          pressed={picked === kind}
-        />
+      {(Object.keys(STARTERS) as StarterKind[]).map((kind, i) => (
+        <motion.div key={kind} {...rise(0.55 + i * 0.06)}>
+          <ActionButton
+            icon={STARTER_ICONS[kind]}
+            label={STARTERS[kind].label}
+            onClick={() => onPick(kind)}
+            disabled={disabled}
+            pressed={picked === kind}
+          />
+        </motion.div>
       ))}
     </div>
   );
@@ -1254,7 +1314,8 @@ function CampaignRunView({
 }
 
 /* Quiet, uniform tiles: muted icon that wakes to foreground on hover. The
-   color in this view belongs to the chat bar, not the shortcuts. */
+   color in this view belongs to the chat bar, not the shortcuts. They lean
+   a little toward the pointer and spring back when it leaves. */
 function ActionButton({
   icon,
   label,
@@ -1268,17 +1329,31 @@ function ActionButton({
   disabled: boolean;
   pressed: boolean;
 }) {
+  const x = useSpring(useMotionValue(0), { stiffness: 260, damping: 18 });
+  const y = useSpring(useMotionValue(0), { stiffness: 260, damping: 18 });
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
       disabled={disabled}
       aria-pressed={pressed}
+      style={{ x, y }}
+      whileTap={{ scale: 0.95 }}
+      onPointerMove={(e) => {
+        if (e.pointerType !== "mouse") return;
+        const r = e.currentTarget.getBoundingClientRect();
+        x.set((e.clientX - r.left - r.width / 2) * 0.22);
+        y.set((e.clientY - r.top - r.height / 2) * 0.3);
+      }}
+      onPointerLeave={() => {
+        x.set(0);
+        y.set(0);
+      }}
       className={cn(
-        "group flex items-center justify-center gap-2 overflow-hidden rounded-full border px-3.5 py-2 text-[13px] font-medium transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px disabled:opacity-50",
+        "group flex items-center justify-center gap-2 overflow-hidden rounded-full border px-3.5 py-2 text-[13px] font-medium backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-200 disabled:opacity-50",
         pressed
-          ? "border-foreground bg-surface-3 text-foreground"
-          : "border-border bg-surface-2 text-foreground hover:border-border-strong hover:bg-surface-3",
+          ? "glow-spectrum-soft border-accent/60 bg-surface-3 text-foreground"
+          : "border-border bg-surface-2/80 text-foreground hover:border-border-strong hover:bg-surface-3",
       )}
     >
       <span
@@ -1290,7 +1365,7 @@ function ActionButton({
         {icon}
       </span>
       <span className="min-w-0 truncate">{label}</span>
-    </button>
+    </motion.button>
   );
 }
 
