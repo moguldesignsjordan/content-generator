@@ -271,6 +271,11 @@ export function flyerVariantsTool(format: FlyerFormat = "post", withExtras = fal
   };
 }
 
+/** "https://www.example.com/" → "example.com": how a flyer prints a site. */
+export function displayDomain(url: string): string {
+  return url.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+}
+
 /** Builds the (system, user) pair for the flyer variants call. */
 export function buildFlyerCopyMessages(args: {
   brandName: string;
@@ -278,6 +283,8 @@ export function buildFlyerCopyMessages(args: {
   guidelinesBlock?: string;
   topicTitle: string;
   aspect: FlyerAspect;
+  /** The brand's real site, so a website spot never gets a guessed domain. */
+  website?: string;
   /** Freeform creative brief typed at creation time, if any. */
   brief?: string;
   /** The design-direction preset, so the scene the model writes fits it
@@ -413,6 +420,9 @@ export function buildFlyerCopyMessages(args: {
     "",
     `FLYER TOPIC: ${args.topicTitle}`,
     `FLYER SHAPE: ${FLYER_ASPECTS[args.aspect].label}`,
+    args.website
+      ? `WEBSITE (write it exactly like this wherever a website goes, never any other address): ${displayDomain(args.website)}`
+      : "",
     perVariantStyles
       ? [
           "DESIGN DIRECTION PER VARIANT (write each variant's scene to fit its own direction, in this order):",

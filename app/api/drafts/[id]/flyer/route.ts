@@ -28,6 +28,9 @@ import { guardAiRoute } from "@/lib/ai-guard";
 export const maxDuration = 240;
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// The edit sheet pre-fills the full prompt a design was made with (about 4,000
+// chars for a designed flyer); a cut-off one loses its colors and text.
+const MAX_EXACT_PROMPT_CHARS = 8000;
 
 /**
  * POST multipart/form-data — edits to a social flyer draft. Modes:
@@ -306,7 +309,7 @@ export async function POST(
         : rawStyleId?.trim() || meta.style_reference_id;
 
     const exactPrompt =
-      (form.get("exactPrompt") as string | null)?.trim().slice(0, 2000) || undefined;
+      (form.get("exactPrompt") as string | null)?.trim().slice(0, MAX_EXACT_PROMPT_CHARS) || undefined;
     const rawTier = form.get("tier");
     const finalizeTier = isImageModelTier(rawTier) ? rawTier : null;
     const finalize = finalizeTier !== null;

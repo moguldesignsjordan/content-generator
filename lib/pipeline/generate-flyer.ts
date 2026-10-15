@@ -147,6 +147,7 @@ export async function generateFlyerForTopicStreamed(
       format: meta.flyer_format ?? "post",
       usageDeltas,
       textSlots: look?.profile?.text_slots,
+      website: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.website,
     });
 
     const rendering = {
@@ -273,6 +274,7 @@ export async function regenerateFlyerDraft(
     format: meta.flyer_format ?? "post",
     usageDeltas,
     textSlots: look?.profile?.text_slots,
+    website: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.website,
     rejection: {
       feedback,
       previousHeadline: meta.flyer_copy?.headline ?? draftCtx.content.subject,
@@ -870,6 +872,7 @@ async function generateFlyerVariants(
     usageDeltas: UsageDelta[];
     /** The look's extra text spots, for the copy to fill. */
     textSlots?: string[];
+    website?: string;
     rejection?: {
       feedback: string;
       previousHeadline?: string;
@@ -892,6 +895,7 @@ async function generateFlyerVariants(
     rejection: opts.rejection,
     variants: { count, styles: opts.styles },
     textSlots: opts.textSlots,
+    website: opts.website,
   });
 
   const call = async (label: string): Promise<FlyerCopyOutput[]> => {

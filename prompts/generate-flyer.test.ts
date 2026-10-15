@@ -388,6 +388,12 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain("never a description of how they look");
   });
 
+  it("gives the brand's real website as a bare domain, and nothing without one", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, website: "https://www.moguldesignagency.com/" });
+    expect(user).toContain("never any other address): moguldesignagency.com");
+    expect(buildFlyerCopyMessages(base).user).not.toContain("WEBSITE");
+  });
+
   it("distills the source email when emailCopy is provided", () => {
     const { user } = buildFlyerCopyMessages({
       ...base,
