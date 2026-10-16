@@ -4,7 +4,9 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Button,
   Card,
+  Checkbox,
   ConfirmDialog,
   EmptyState,
   LinkButton,
@@ -69,6 +71,11 @@ export function DraftsList({
   const [actingId, setActingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Select mode swaps each row's actions for a checkbox and opens a bulk
+  // delete bar.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
 
   // Archived drafts are hidden from all/review/approved (tucked away by
   // design); the Archived tab is the only place they show.
@@ -130,24 +137,83 @@ export function DraftsList({
     }
   }
 
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+
+  async function handleBulkDelete() {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/drafts/delete-many", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftIds: [...selected] }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        deleted?: number;
+        published?: number;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete.");
+      toast.success(`Deleted ${data.deleted}.`);
+      if (data.published) {
+        toast.warning(
+          `${data.published} already published, so they were kept. Archive them instead.`,
+        );
+      }
+      stopSelecting();
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete.");
+    } finally {
+      setDeleting(false);
+      setConfirmBulk(false);
+    }
+  }
+
   const empty = EMPTY[kind];
 
   return (
     <div>
       {drafts.length > 0 && (
-        <SegmentedControl
-          className="mb-5"
-          value={filter}
-          onChange={(v) => setFilter(v as Filter)}
-          options={[
-            { value: "all", label: `All ${counts.all}` },
-            { value: "in_review", label: `Review ${counts.in_review}` },
-            { value: "approved", label: `Approved ${counts.approved}` },
-            ...(counts.archived > 0
-              ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
-              : []),
-          ]}
-        />
+        <div className="mb-5 flex items-center gap-3">
+          <div className="no-scrollbar -ml-4 min-w-0 flex-1 overflow-x-auto pl-4 sm:ml-0 sm:pl-0">
+            <SegmentedControl
+              value={filter}
+              onChange={(v) => {
+                setFilter(v as Filter);
+                // A tick on a row the new tab hides would be deleted unseen.
+                setSelected(new Set());
+              }}
+              options={[
+                { value: "all", label: `All ${counts.all}` },
+                { value: "in_review", label: `Review ${counts.in_review}` },
+                { value: "approved", label: `Approved ${counts.approved}` },
+                ...(counts.archived > 0
+                  ? [{ value: "archived" as const, label: `Archived ${counts.archived}` }]
+                  : []),
+              ]}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={selecting ? stopSelecting : () => setSelecting(true)}
+            className="ml-auto shrink-0"
+          >
+            {selecting ? "Done" : "Select"}
+          </Button>
+        </div>
       )}
 
       {filtered.length === 0 && filter === "all" ? (
@@ -176,19 +242,19 @@ export function DraftsList({
                 d.archived && "opacity-60",
               )}
             >
-              {/* The whole text block opens the draft. Action buttons and the
-                  source-email link are siblings, not children, so they never
-                  navigate to the draft. */}
-              <Link href={`/drafts/${d.id}`} className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-medium text-foreground">
-                  {d.subject || "Untitled draft"}
-                </div>
-                <div className="mt-0.5 truncate text-[13px] text-muted">
-                  {[d.topic_title, `v${d.version}`]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-              </Link>
+              {/* The whole text block opens the draft (or ticks it in select
+                  mode). Action buttons and the source-email link are siblings,
+                  not children, so they never navigate to the draft. */}
+              {selecting ? (
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                  <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
+                  <DraftRowText draft={d} />
+                </label>
+              ) : (
+                <Link href={`/drafts/${d.id}`} className="min-w-0 flex-1">
+                  <DraftRowText draft={d} />
+                </Link>
+              )}
 
               {/* A blog spun off an email: jump straight to that email. Sibling
                   link (not nested) and desktop-only, so mobile keeps a clean
@@ -205,26 +271,60 @@ export function DraftsList({
 
               <DraftStateBadge state={d.state} />
 
-              <RowIconButton
-                label={d.archived ? "Unarchive" : "Archive"}
-                loading={actingId === d.id}
-                disabled={!!actingId}
-                onClick={() => handleArchive(d.id, !d.archived)}
-              >
-                {d.archived ? <UnarchiveIcon size={18} /> : <ArchiveIcon size={18} />}
-              </RowIconButton>
-              <RowIconButton
-                label="Delete"
-                danger
-                disabled={!!actingId || deleting}
-                onClick={() => setConfirmDeleteId(d.id)}
-              >
-                <TrashIcon size={18} />
-              </RowIconButton>
+              {!selecting && (
+                <>
+                  <RowIconButton
+                    label={d.archived ? "Unarchive" : "Archive"}
+                    loading={actingId === d.id}
+                    disabled={!!actingId}
+                    onClick={() => handleArchive(d.id, !d.archived)}
+                  >
+                    {d.archived ? <UnarchiveIcon size={18} /> : <ArchiveIcon size={18} />}
+                  </RowIconButton>
+                  <RowIconButton
+                    label="Delete"
+                    danger
+                    disabled={!!actingId || deleting}
+                    onClick={() => setConfirmDeleteId(d.id)}
+                  >
+                    <TrashIcon size={18} />
+                  </RowIconButton>
+                </>
+              )}
             </div>
           ))}
         </ListGroup>
       )}
+
+      {selecting && (
+        <div className="sticky bottom-[calc(88px+var(--sab))] z-20 mt-5 md:bottom-6">
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border-strong bg-surface/90 p-2.5 pl-4 shadow-[0_18px_40px_-18px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+            <p className="min-w-0 text-[13.5px] leading-snug text-muted">
+              <span className="font-semibold text-foreground">{selected.size} selected.</span>
+            </p>
+            <Button
+              variant="solid"
+              size="sm"
+              disabled={!selected.size}
+              onClick={() => setConfirmBulk(true)}
+              className="shrink-0 bg-danger hover:bg-danger/90"
+            >
+              Delete {selected.size || ""}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        onConfirm={() => void handleBulkDelete()}
+        tone="danger"
+        title={`Delete ${selected.size} permanently?`}
+        description="This removes them and their edit history. It can't be undone. Published ones are kept."
+        confirmLabel="Delete"
+        loading={deleting}
+      />
 
       <ConfirmDialog
         open={confirmDeleteId !== null}
@@ -236,6 +336,19 @@ export function DraftsList({
         confirmLabel="Delete"
         loading={deleting}
       />
+    </div>
+  );
+}
+
+function DraftRowText({ draft }: { draft: DraftListRow }) {
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[15px] font-medium text-foreground">
+        {draft.subject || "Untitled draft"}
+      </div>
+      <div className="mt-0.5 truncate text-[13px] text-muted">
+        {[draft.topic_title, `v${draft.version}`].filter(Boolean).join(" · ")}
+      </div>
     </div>
   );
 }
