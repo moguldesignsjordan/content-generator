@@ -96,6 +96,11 @@ export const SAVE_PLAN_TOOL: Anthropic.Tool = {
               description:
                 "Only when PRODUCT PHOTOS are attached: the numbers of the photos (1, 2, ...) this piece shows, one, or several together for a lineup.",
             },
+            product: {
+              type: "string",
+              description:
+                "Only with ONE PRODUCT PER PIECE: the one product this piece is about, its name exactly as listed.",
+            },
           },
           required: [
             "kind",
@@ -143,6 +148,34 @@ function researchLines(research: FactoryResearch): string[] {
   ];
 }
 
+/** One product's share of a one-per-product plan, as the planner sees it. */
+export interface PlanProduct {
+  name: string;
+  total: number;
+  kinds: Record<FactoryKind, number>;
+  description?: string | null;
+  price?: string | null;
+  /** 1-based number of its saved photo among the PRODUCT PHOTOS. */
+  photo?: number;
+}
+
+function productLines(products: PlanProduct[]): string[] {
+  return [
+    "ONE PRODUCT PER PIECE: every piece is about exactly one of these products. Set product on every item to its name exactly as written, and give each product exactly its count:",
+    ...products.map((p) => {
+      const kinds = FACTORY_KINDS.filter((k) => p.kinds[k] > 0)
+        .map((k) => `${p.kinds[k]} ${k}`)
+        .join(", ");
+      const details = [
+        p.description ? `About it: ${p.description}` : "",
+        p.price ? `Price: ${p.price}` : "",
+        p.photo ? `Its photo: number ${p.photo}` : "",
+      ].filter(Boolean);
+      return `  - ${p.name}: ${p.total} piece${p.total === 1 ? "" : "s"} (${kinds}).${details.length ? ` ${details.join(". ")}.` : ""}`;
+    }),
+  ];
+}
+
 function formatLines(kinds: FactoryKind[]): string[] {
   return kinds.flatMap((kind) => [
     `${FACTORY_KIND_LABELS[kind]} (kind "${kind}"):`,
@@ -165,7 +198,10 @@ export function buildPlanMessages(args: {
   competitorRef?: CompetitorReference | null;
   /** How many product photos ride ahead of the user text as image blocks. */
   photoCount?: number;
+  /** One design per product: each product's exact share of the plan. */
+  productPlan?: PlanProduct[];
 }): { system: string; user: string } {
+  const perProduct = Boolean(args.productPlan?.length);
   const kinds = FACTORY_KINDS.filter((k) => args.counts[k] > 0);
   const total = kinds.reduce((sum, k) => sum + args.counts[k], 0);
   const competitorBlock = buildCompetitorReferenceBlock(args.competitorRef);
@@ -200,18 +236,29 @@ export function buildPlanMessages(args: {
       : []),
     "",
     `PLAN EXACTLY ${total} PIECES: ${kinds.map((k) => `${args.counts[k]} ${k}`).join(", ")}.`,
+    ...(perProduct ? ["", ...productLines(args.productPlan!)] : []),
     "",
     "FORMATS (use only these ids, each with its own kind):",
     ...formatLines(kinds),
     "",
     "RULES",
     "- Every piece is a different idea. No two pieces share a hook, an opening word pattern, or a core idea. Rotate formats within each kind.",
+    ...(perProduct
+      ? [
+          "- Each piece's hook, message, and visual are about its one product only. Never show, list, or mention the other products in it: they get their own pieces. No lineups, no 'our full range'.",
+          "- Rotate formats within each product, so one product's pieces don't all look alike.",
+        ]
+      : []),
     "- Hooks are concrete and specific to this business: a real detail, a number from the facts, a named situation the reader recognizes. Never generic openers like 'Unlock', 'Elevate', 'In today's world', 'Ever wondered', or 'Look no further'.",
     ...(args.research
       ? ["- Build on the research: use the hook patterns and trends where they fit, and set inspired_by to the source URL that sparked the piece."]
       : []),
     ...(args.photoCount
-      ? ["- Set photos on every piece to the PRODUCT PHOTOS it shows: the one that best fits its idea, or several together when the piece is about more than one product (a lineup). Use each photo at least once when there are enough pieces. Write its visual around the real products in those photos, exactly as they look. Never describe a product that isn't in one of the photos."]
+      ? [
+          perProduct
+            ? "- Set photos on a piece only to photos of ITS product (its listed photo, or an attached photo that shows it), never another product's. Write its visual around that real product, exactly as it looks. A product with no photo gets a visual that describes it plainly."
+            : "- Set photos on every piece to the PRODUCT PHOTOS it shows: the one that best fits its idea, or several together when the piece is about more than one product (a lineup). Use each photo at least once when there are enough pieces. Write its visual around the real products in those photos, exactly as they look. Never describe a product that isn't in one of the photos.",
+        ]
       : []),
     ...(competitorBlock
       ? [`- Adapt the COMPETITOR REFERENCE in about a third of the pieces (${Math.max(1, Math.round(total / 3))} of ${total}), the ones it suits best: their hook and structure follow it, in this brand's own words and offer. Set uses_reference true on exactly those. The rest stay their own ideas.`]

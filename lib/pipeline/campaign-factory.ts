@@ -13,6 +13,7 @@ import type {
   CompetitorReference,
   FactoryKind,
   FactoryPlanItem,
+  FactoryProduct,
   FactoryQuote,
   FactoryResearch,
   FlyerStyleId,
@@ -26,13 +27,15 @@ import {
   buildResearchMessages,
   parseResearch,
 } from "@/prompts/campaign-research";
-import { SAVE_PLAN_TOOL, buildPlanMessages } from "@/prompts/campaign-plan";
+import { SAVE_PLAN_TOOL, buildPlanMessages, type PlanProduct } from "@/prompts/campaign-plan";
 import { FACTORY_KINDS, splitEvenly } from "@/prompts/campaign-formats";
 import {
   addDays,
   assignDates,
   cleanPlanItems,
   pickTestItems,
+  planProductSlots,
+  slotCounts,
   sumPlanUsd,
   type RawPlanItem,
 } from "@/lib/factory/plan";
@@ -185,10 +188,40 @@ export async function planCampaign(
     competitorRef?: CompetitorReference | null;
     /** The owner's product photos, shown to the planner to match to pieces. */
     photoUrls?: string[];
+    /** One design per product: the products, and how many each gets. */
+    products?: FactoryProduct[];
+    perProduct?: number;
   },
 ): Promise<{ plan: FactoryPlanItem[]; flyerStyle?: FlyerStyleId; usd: number }> {
-  const counts = splitEvenly(args.size, args.kinds);
-  const photoUrls = args.photoUrls ?? [];
+  const slots = args.products?.length
+    ? planProductSlots(
+        args.products.map((p) => p.name),
+        args.perProduct ?? 1,
+        args.kinds,
+      )
+    : [];
+  const counts = slots.length ? slotCounts(slots) : splitEvenly(args.size, args.kinds);
+  const size = slots.length ? slots.reduce((sum, s) => sum + s.total, 0) : args.size;
+  // A saved product's photo joins the photos the planner sees, so it can put
+  // each product's real photo on that product's pieces.
+  const photoUrls = [...(args.photoUrls ?? [])];
+  const productPlan: PlanProduct[] = slots.map((slot) => {
+    const slug = args.products?.find((p) => p.name === slot.product)?.slug;
+    const saved = slug ? ctx.products.find((p) => p.slug === slug) : undefined;
+    let photo: number | undefined;
+    if (saved?.image_url) {
+      if (!photoUrls.includes(saved.image_url)) photoUrls.push(saved.image_url);
+      photo = photoUrls.indexOf(saved.image_url) + 1;
+    }
+    return {
+      name: slot.product,
+      total: slot.total,
+      kinds: slot.kinds,
+      description: saved?.description,
+      price: saved?.price_point,
+      ...(photo ? { photo } : {}),
+    };
+  });
   const { system, user } = buildPlanMessages({
     ...ctx,
     sentence: args.sentence,
@@ -196,6 +229,7 @@ export async function planCampaign(
     counts,
     competitorRef: args.competitorRef,
     photoCount: photoUrls.length,
+    ...(productPlan.length ? { productPlan } : {}),
   });
 
   const resp = await getAnthropic()
@@ -236,12 +270,21 @@ export async function planCampaign(
     productSlugs: new Set(ctx.products.map((p) => p.slug)),
     newId: () => crypto.randomUUID(),
     photoUrls,
+    ...(slots.length
+      ? {
+          products: slots.map((slot) => ({
+            name: slot.product,
+            slug: args.products?.find((p) => p.name === slot.product)?.slug,
+            max: slot.total,
+          })),
+        }
+      : {}),
   });
   if (!cleaned.length) throw new Error("The plan came back empty. Try again.");
-  if (cleaned.length < args.size) {
+  if (cleaned.length < size) {
     logWarn(
       "pipeline:campaign-factory:short-plan",
-      `planned ${cleaned.length} of ${args.size} pieces after cleanup`,
+      `planned ${cleaned.length} of ${size} pieces after cleanup`,
       { brandId: ctx.brand.id },
     );
   }

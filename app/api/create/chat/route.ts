@@ -42,7 +42,10 @@ import type {
   ChatPreviewRef,
   CompetitorReference,
   FactoryKind,
+  FactoryProduct,
   FunnelStage,
+  MakingKind,
+  PerProduct,
   PieceInputs,
   Product,
   SeriesDraftRef,
@@ -58,6 +61,7 @@ import {
   lookPickerValue,
   styleFromPicker,
   withInputs,
+  withPickedAds,
   withStyleImages,
 } from "@/lib/inputs";
 import {
@@ -101,6 +105,14 @@ import { getSessionUser } from "@/lib/supabase/server";
 import { buildConversationNotes, isHttpUrl, mergeBrief } from "./brief-merge";
 import { userAskedForResearch } from "./research-consent";
 import { FACTORY_KINDS } from "@/prompts/campaign-formats";
+import {
+  applyAnswers,
+  cleanAsk,
+  inferSplit,
+  isProductSet,
+  makesCampaign,
+  type ChatQuestion,
+} from "@/lib/create-questions";
 
 // A turn can chain several tool round-trips (brief -> topic -> generate); give
 // it real headroom rather than the old single-call budget.
@@ -116,7 +128,9 @@ const MAX_STEPS = 8;
 // them. select_topic is the one that can fail (a bad id); the loop checks for
 // that before ending the turn.
 const INTERVIEW_ONLY_TOOLS = new Set([
+  "ask",
   "show_look_picker",
+  "show_product_import",
   "update_brief",
   "suggest_options",
   "remember",
@@ -135,6 +149,27 @@ interface StartedCampaign {
   /** The chat's photos, style, and competitor ads, whole. */
   inputs?: PieceInputs;
   client_brand?: ClientBrand;
+  /** One design per product: the products (saved ones carry their slug). */
+  products?: FactoryProduct[];
+  split?: "each";
+  per_product?: PerProduct;
+}
+
+/** The planner kind a one-kind set of pieces makes. */
+const SET_KIND: Record<Exclude<MakingKind, "campaign">, FactoryKind> = {
+  email: "email",
+  flyer: "social",
+  ad: "ad",
+  blog: "blog",
+};
+
+/** The brief's product names, matched to saved products by name or slug. */
+function factoryProducts(names: string[], products: Product[]): FactoryProduct[] {
+  return names.map((name) => {
+    const key = name.trim().toLowerCase();
+    const saved = products.find((p) => p.name.trim().toLowerCase() === key || p.slug === key);
+    return saved ? { name: saved.name, slug: saved.slug } : { name };
+  });
 }
 
 const NO_OUR_STYLE =
@@ -174,6 +209,10 @@ function toolStatusLabel(block: Anthropic.Messages.ToolUseBlock): string | null 
     }
     case "start_campaign":
       return "Handing it to the planner";
+    case "ask":
+      return "Lining up a few questions";
+    case "show_product_import":
+      return "Opening your products";
     case "edit_flyer":
     case "revise_piece":
       return "Lining up the change";
@@ -347,8 +386,12 @@ interface TurnState {
   series: SeriesDraftRef[] | null;
   // Set by start_campaign: what the client hands to /api/factory.
   campaign: StartedCampaign | null;
+  // Set by ask: the question card the client shows under the reply.
+  questions: ChatQuestion[] | null;
   // Set by show_look_picker: the client shows the look picker under the reply.
   showLookPicker: boolean;
+  // Set by show_product_import: the website product import shows under the reply.
+  productImport: { brandId: string; website: string; existing: string[] } | null;
   // An Ad Library link from this message: the client shows its ads to pick from.
   adLibraryUrl: string | null;
   // Set by edit_flyer / revise_piece: the client's preview card applies it.
@@ -375,8 +418,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, campaignId, images, styleImages, auto, lookChoice, competitorAdIds } =
-      (await req.json()) as {
+    const {
+      message,
+      history,
+      campaignId,
+      images,
+      styleImages,
+      auto,
+      lookChoice,
+      competitorAdIds,
+      competitorRefIds,
+      answers,
+      action,
+    } = (await req.json()) as {
         message?: string;
         history?: ChatMsg[];
         campaignId?: string | null;
@@ -385,10 +439,16 @@ export async function POST(req: NextRequest) {
         /** Attached images the user labeled "Style". */
         styleImages?: string[];
         auto?: boolean;
-        /** A look picker tap: "our", "none", "images", or a saved look's id. */
+        /** A look picker tap: "our", "none", "images", "ads", or a saved look's id. */
         lookChoice?: string | null;
+        /** With lookChoice "ads": the saved competitor ads picked, in pick order. */
+        competitorRefIds?: string[];
         /** The ads ticked in the chat's Ad Library picker (ad archive ids), in tick order. */
         competitorAdIds?: string[];
+        /** The question card's answers; code-owned ones are saved before the model runs. */
+        answers?: unknown;
+        /** The id of a tapped chip (e.g. "go" on the confirm). */
+        action?: string;
       };
     if (!message?.trim()) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -406,7 +466,7 @@ export async function POST(req: NextRequest) {
     // A look id from the client must be one of this brand's looks.
     if (
       lookChoice &&
-      !["our", "none", "images"].includes(lookChoice) &&
+      !["our", "none", "images", "ads"].includes(lookChoice) &&
       !(await getDesignLook(lookChoice, brand.id))
     ) {
       return NextResponse.json({ error: "That look doesn't exist." }, { status: 404 });
@@ -475,9 +535,18 @@ export async function POST(req: NextRequest) {
     const tickedIds = (competitorAdIds ?? []).filter(
       (id): id is string => typeof id === "string" && /^\d+$/.test(id),
     );
-    const savedAds = tickedIds.length ? await listCompetitorReferences(brand.id) : [];
+    // Saved ads picked in the look picker, by id: only this brand's count.
+    const refIds =
+      lookChoice === "ads"
+        ? (competitorRefIds ?? []).filter((id): id is string => typeof id === "string").slice(0, 10)
+        : [];
+    const savedAds =
+      tickedIds.length || refIds.length ? await listCompetitorReferences(brand.id) : [];
     const pickedAds = tickedIds
       .map((id) => savedAds.find((r) => r.source_url === adLibraryAdUrl(id)))
+      .filter((r): r is CompetitorReference => Boolean(r));
+    const pickerAds = refIds
+      .map((id) => savedAds.find((r) => r.id === id))
       .filter((r): r is CompetitorReference => Boolean(r));
 
     // Refreshed every turn (not merged) so the digest always reflects the whole
@@ -509,18 +578,29 @@ export async function POST(req: NextRequest) {
         "competitor",
       );
     }
+    turnInputs = withPickedAds(turnInputs, pickerAds);
     if (lookChoice) {
       turnInputs = { ...turnInputs, style: styleFromPicker(lookChoice, turnInputs) };
     }
-    const turnBrief = keepOwnImages(
-      withInputs(
-        {
-          ...(campaign.brief ?? {}),
-          ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
-        },
-        turnInputs,
+    const userMessages = [
+      ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
+      message.trim(),
+    ];
+    const turnBrief = inferSplit(
+      applyAnswers(
+        keepOwnImages(
+          withInputs(
+            {
+              ...(campaign.brief ?? {}),
+              ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
+            },
+            turnInputs,
+          ),
+          products,
+        ),
+        answers,
       ),
-      products,
+      userMessages.join("\n"),
     );
 
     const briefState = buildBriefStateBlock(turnBrief, campaign.topic_id);
@@ -538,11 +618,12 @@ export async function POST(req: NextRequest) {
         "piece's words, and their look becomes the style. Don't call " +
         "save_competitor_reference for it."
       : await withScrapedCompetitorUrl(message.trim(), attached.length > 0);
-    if (pickedAds.length) {
+    const chosenAds = pickedAds.length ? pickedAds : pickerAds;
+    if (chosenAds.length) {
       const followsTheirLook = followedStyleImages(inputsOf(turnBrief))?.from === "competitor";
       messageForModel +=
-        `\n\nSYSTEM NOTE: the ads they ticked are saved to Competitor Ads, and ` +
-        `"${pickedAds[0].name}" shapes this piece's words: say in one line you'll adapt ` +
+        `\n\nSYSTEM NOTE: ${pickedAds.length ? "the ads they ticked are saved to Competitor Ads" : "they picked saved ads as the style"}, and ` +
+        `"${chosenAds[0].name}" shapes this piece's words: say in one line you'll adapt ` +
         "its hook, structure, and some of its phrasing in the brand's own voice, never " +
         "copy it." +
         (followsTheirLook
@@ -574,7 +655,9 @@ export async function POST(req: NextRequest) {
       channel: null,
       series: null,
       campaign: null,
+      questions: null,
       showLookPicker: false,
+      productImport: null,
       adLibraryUrl,
       previewAction: null,
     };
@@ -585,23 +668,12 @@ export async function POST(req: NextRequest) {
       products,
       campaignId: campaign.id,
       onScreen,
-      userMessages: [
-        ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
-        message.trim(),
-      ],
+      userMessages,
     };
 
-    // Snapshot readiness BEFORE this turn: if the brief was already complete
-    // walking in and the whole turn produces zero tool calls, the model
-    // narrated ("let me put that together...") instead of acting, the same
-    // stall this loop otherwise has no way to recover from (it just breaks on
-    // the first text-only step and leaves the user to nudge with another
-    // message).
-    const briefWasReady = !!(
-      campaign.brief?.goal &&
-      campaign.brief?.key_message &&
-      campaign.topic_id
-    );
+    // A tap on the confirm's go chip: if the model then only talks, the
+    // turn is forced into the tool that makes the thing.
+    const tappedGo = action === "go" || action === "research_yes" || action === "research_no";
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -653,7 +725,6 @@ export async function POST(req: NextRequest) {
           // Collected, then joined (see joinReplySegments): raw concatenation ran them
           // together and printed a repeated question twice.
           const replyParts: string[] = [];
-          let calledAnyTool = false;
           for (let step = 0; step < MAX_STEPS; step++) {
             if (step > 0) send("status", { label: "Thinking" });
             let response;
@@ -681,7 +752,6 @@ export async function POST(req: NextRequest) {
             }
             if (segment) replyParts.push(segment);
             if (response.content.some((b) => b.type === "text" && b.text.trim())) needsGap = true;
-            if (response.content.some((b) => b.type === "server_tool_use")) calledAnyTool = true;
             messages.push({ role: "assistant", content: response.content });
 
             // The server's search loop paused mid-turn: resend as-is and it resumes.
@@ -693,7 +763,6 @@ export async function POST(req: NextRequest) {
             let topicLookupFailed = false;
             for (const block of response.content) {
               if (block.type !== "tool_use") continue;
-              calledAnyTool = true;
               const label = toolStatusLabel(block);
               if (label) send("status", { label });
               const content = await dispatchTool(block, state, dispatchCtx);
@@ -716,30 +785,30 @@ export async function POST(req: NextRequest) {
             // And for a change to the piece on screen, once it's been announced.
             if (state.previewAction && response.content.some((b) => b.type === "text" && b.text.trim())) break;
 
-            // The follow-up call after an interview step is nearly always an empty
-            // reply (the question was already asked alongside the tool call), yet it
-            // re-reads the whole ~18k-token prompt. Skip it when the turn is plainly
-            // waiting on the user. Not when the brief just became ready or a
-            // campaign is being planned: those turns chain on into generate_content
-            // or start_campaign.
+            // Once a step asked the user something and only saved or showed
+            // things, the turn is theirs: another call only produced filler
+            // ("tap one whenever you're ready").
+            const stepText = response.content
+              .map((b) => (b.type === "text" ? b.text : ""))
+              .join("");
+            const askedUser =
+              Boolean(state.questions?.length || state.options?.length) ||
+              state.showLookPicker ||
+              Boolean(state.productImport) ||
+              Boolean(state.adLibraryUrl) ||
+              /\?/.test(stepText);
             const waitingOnUser =
-              response.content.some((b) => b.type === "text" && b.text.trim()) &&
+              askedUser &&
               response.content.every(
                 (b) => b.type !== "tool_use" || INTERVIEW_ONLY_TOOLS.has(b.name),
               ) &&
-              !topicLookupFailed &&
-              !state.brief.campaign_kind &&
-              !(state.brief.goal && state.brief.key_message && state.topicId);
+              !topicLookupFailed;
             if (waitingOnUser) break;
           }
 
-          // Stall recovery: brief was already ready going into this turn but
-          // nothing happened. Force one more step; if that
-          // still doesn't produce a tool call, at least readyToGenerate (computed
-          // below from state.brief/topicId, unaffected by whether a tool fired)
-          // will be true so the client's manual Generate button is there instead of
-          // requiring another message.
-          if (briefWasReady && !calledAnyTool && !state.draftId) {
+          // Stall recovery, only right after a go tap: the model talked instead
+          // of making it, so force the tool that does.
+          if (tappedGo && !state.draftId && !state.campaign && !state.showLookPicker) {
             try {
               const forced = await getAnthropic().messages.create({
                 model: FAST_MODEL,
@@ -747,7 +816,13 @@ export async function POST(req: NextRequest) {
                 system,
                 messages,
                 tools: CREATE_TOOLS,
-                tool_choice: { type: "any" },
+                tool_choice: {
+                  type: "tool",
+                  name:
+                    makesCampaign(state.brief) || action !== "go"
+                      ? "start_campaign"
+                      : "generate_content",
+                },
               });
               logUsage("create-chat-forced", FAST_MODEL, forced.usage, {
                 brandId: brand.id,
@@ -774,7 +849,9 @@ export async function POST(req: NextRequest) {
           // choices, and asked nothing gets one more step to ask the next question.
           const askedSomething =
             /\?/.test(joinReplySegments(replyParts)) ||
+            Boolean(state.questions?.length) ||
             Boolean(state.options?.length) ||
+            Boolean(state.productImport) ||
             state.showLookPicker ||
             Boolean(state.adLibraryUrl);
           if (!state.draftId && !state.campaign && !state.previewAction && !askedSomething) {
@@ -782,8 +859,8 @@ export async function POST(req: NextRequest) {
               pushUserNote(
                 messages,
                 "SYSTEM NOTE: your reply didn't ask anything or move things forward, so the user " +
-                  "has nothing to answer. Continue now: ask the next question you need, with " +
-                  "tappable options when real choices exist. One short reply, no recap.",
+                  "has nothing to answer. Continue now: ask what's STILL OPEN with the ask tool, " +
+                  "or when nothing is open, confirm with suggest_options. One short reply, no recap.",
               );
               send("status", { label: "Thinking" });
               const nudged = await call();
@@ -805,7 +882,9 @@ export async function POST(req: NextRequest) {
                 ? "Planning it now."
                 : state.previewAction
                   ? "On it, updating the preview now."
-                  : "What's the one thing this email needs to land?";
+                  : state.questions?.length
+                    ? "A few quick things so it comes out right."
+                    : emptyReplyFallback(state.brief);
           }
           // Chat bubbles render as plain text, so any markdown the model slipped in
           // would reach the user as literal asterisks. The prompt forbids it; this
@@ -880,7 +959,9 @@ export async function POST(req: NextRequest) {
             channel: state.channel,
             series,
             campaign: state.campaign,
+            questions: state.questions,
             showLookPicker: state.showLookPicker,
+            productImport: state.productImport,
             adLibraryUrl: state.adLibraryUrl,
             style: pickerStyle(state.brief),
             preview: state.draftId && state.channel
@@ -982,11 +1063,12 @@ async function dispatchTool(
           `client_brand=${cb.name} (colors: ${cb.colors?.join(", ") || "none yet"}; logo: ${cb.logo_url ? "attached" : "none yet"})`,
         );
       }
-      if (input.campaign_kind === "single") {
-        saved.push("campaign_kind cleared, back to a single email");
-      } else if (input.campaign_kind && state.brief.campaign_kind === input.campaign_kind) {
-        saved.push(`campaign_kind=${input.campaign_kind}`);
-      }
+      state.brief = inferSplit(state.brief, ctx.userMessages.join("\n"));
+      if (input.making && state.brief.making) saved.push(`making=${state.brief.making}`);
+      if (input.channels && state.brief.channels) saved.push(`channels=${state.brief.channels.join(", ")}`);
+      if (input.size && state.brief.size) saved.push(`size=${state.brief.size} over ${state.brief.days} days`);
+      if (input.products) saved.push(`products=${state.brief.products?.join(", ") || "(none)"}`);
+      if ((input.split || input.products) && state.brief.split) saved.push(`split=${state.brief.split}`);
       return saved.length ? `Saved: ${saved.join("; ")}` : "No new fields to save.";
     }
     case "select_topic": {
@@ -1019,6 +1101,23 @@ async function dispatchTool(
       state.topicTitle = topic.title;
       state.funnelStage = topic.funnel_stage;
       return `Created topic "${topic.title}" (id=${topic.id}).`;
+    }
+    case "ask": {
+      const { questions, dropped, brief } = cleanAsk(
+        block.input,
+        state.brief,
+        ctx.products.map((p) => p.name),
+      );
+      state.brief = brief;
+      if (!questions.length) {
+        return "None of those are open (already answered or asked), so nothing was shown. Don't ask them again: go to the confirm.";
+      }
+      state.questions = [...(state.questions ?? []), ...questions].slice(0, 3);
+      return (
+        `Showing ${questions.map((q) => q.id).join(", ")} as one card under your reply.` +
+        (dropped.length ? ` Dropped (not open): ${dropped.join(", ")}.` : "") +
+        " Don't repeat the questions in your text."
+      );
     }
     case "suggest_options": {
       const input = block.input as SuggestOptionsInput;
@@ -1075,7 +1174,15 @@ async function dispatchTool(
       const input = block.input as StartCampaignInput;
       const summary = stripEmDashes(input.summary ?? "").trim().slice(0, 500);
       if (!summary) return "start_campaign needs a summary of the campaign.";
-      const kinds = FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
+      // The checklist's answers (the question card) win over the tool's own.
+      const brief = state.brief;
+      const perProductSet = isProductSet(brief);
+      const kinds =
+        perProductSet && brief.making && brief.making !== "campaign"
+          ? [SET_KIND[brief.making]]
+          : brief.channels?.length
+            ? brief.channels
+            : FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
       const hasImages = !kinds.length || kinds.includes("social") || kinds.includes("ad");
       const inputs = inputsOf(state.brief);
       if (hasImages && !(await canUseOurStyle(ctx.brand.id, inputs))) {
@@ -1085,13 +1192,20 @@ async function dispatchTool(
       state.campaign = {
         summary,
         kinds: kinds.length ? kinds : [...FACTORY_KINDS],
-        size: input.size === 6 || input.size === 20 ? input.size : 12,
-        days: input.days === 14 ? 14 : 30,
+        size: brief.size ?? (input.size === 6 || input.size === 20 ? input.size : 12),
+        days: brief.days ?? (input.days === 14 ? 14 : 30),
         // Research spends money: only with the owner's own yes in this chat.
         research: input.research === true && userAskedForResearch(ctx.userMessages),
         // The planner gives each piece its own photos; the style and the
         // competitor ads travel whole.
         ...(Object.keys(inputs).length ? { inputs } : {}),
+        ...(perProductSet
+          ? {
+              products: factoryProducts(brief.products ?? [], ctx.products),
+              split: "each" as const,
+              per_product: brief.per_product ?? (brief.making === "campaign" ? 3 : 1),
+            }
+          : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
     }
@@ -1139,6 +1253,18 @@ async function dispatchTool(
       return ours
         ? `The look picker is showing under your reply. Our style (the default pick) follows ${ours.name} (${ours.urls.length} reference images).`
         : `The look picker is showing under your reply. ${NO_OUR_STYLE}`;
+    }
+    case "show_product_import": {
+      const website = ctx.brand.visual_identity?.footer?.website?.trim();
+      if (!website) {
+        return "No website is saved for this brand, so nothing is showing. Ask them to name the products (typing works), and say they can add their site in Settings to pull them next time.";
+      }
+      state.productImport = {
+        brandId: ctx.brand.id,
+        website,
+        existing: ctx.products.map((p) => p.slug),
+      };
+      return `Their products from ${website} are loading under your reply to tick and save. Say so in one short line; once they add them, those are the products.`;
     }
     case "list_recent_content": {
       const input = block.input as ListRecentContentInput;
@@ -1279,6 +1405,23 @@ async function dispatchTool(
     }
     default:
       return "Unknown tool.";
+  }
+}
+
+/** The reply when the model said nothing at all, for the kind being made. */
+function emptyReplyFallback(brief: CampaignBrief): string {
+  switch (brief.making) {
+    case "flyer":
+    case "ad":
+      return "What should be biggest on it?";
+    case "blog":
+      return "Who's reading this one?";
+    case "campaign":
+      return "What should the campaign push first?";
+    case "email":
+      return "What's the one thing this email needs to land?";
+    default:
+      return "What are we making today?";
   }
 }
 

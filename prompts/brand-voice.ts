@@ -3,7 +3,9 @@ import type {
   BrandMemory,
   CampaignBrief,
   CompetitorReference,
+  FactoryKind,
   Icp,
+  MakingKind,
   PieceInputs,
   Product,
   ReferenceEmail,
@@ -13,6 +15,8 @@ import type {
   VoiceExampleChannel,
 } from "@/lib/db/types";
 import { effectiveStyle, inputsOf } from "@/lib/inputs";
+import { checklistLines, isProductSet } from "@/lib/create-questions";
+import { MAX_CAMPAIGN_SIZE } from "@/lib/factory/plan";
 
 // Builds the reusable brand-voice context block injected into every generation
 // prompt: voice, tone, example posts, banned terms, and the primary audience.
@@ -427,9 +431,55 @@ export function buildFunnelBlock(strategy: Strategy | null): string {
     : "  (default)";
 }
 
+const MAKING_LABELS: Record<MakingKind, string> = {
+  email: "an email",
+  flyer: "a flyer (a social post image)",
+  ad: "a paid ad",
+  blog: "a blog post",
+  campaign: "a campaign",
+};
+
+const CHANNEL_LABELS: Record<FactoryKind, string> = {
+  social: "posts",
+  ad: "ads",
+  email: "emails",
+  blog: "blog",
+};
+
+/** What's being made and for which products, as the turn state says it. */
+function makingLines(brief: CampaignBrief): string[] {
+  const making = brief.making
+    ? `${MAKING_LABELS[brief.making]}${
+        brief.channels?.length ? ` (${brief.channels.map((c) => CHANNEL_LABELS[c]).join(", ")})` : ""
+      }${isProductSet(brief) ? ", a set: one design per product, made through the planner" : ""}`
+    : "(not decided yet)";
+  const split =
+    brief.split === "each"
+      ? `; a separate design for each${brief.per_product ? `, ${brief.per_product} each` : ""}`
+      : brief.split === "together"
+        ? "; one piece with all of them"
+        : "";
+  const setSize =
+    isProductSet(brief) && brief.per_product ? (brief.products?.length ?? 0) * brief.per_product : 0;
+  return [
+    `  Making: ${making}`,
+    ...(brief.products?.length ? [`  Products: ${brief.products.join(", ")}${split}`] : []),
+    ...(setSize
+      ? [
+          setSize > MAX_CAMPAIGN_SIZE
+            ? `  Size: ${setSize} pieces asked for, over the ${MAX_CAMPAIGN_SIZE}-piece cap: say in the confirm that ${MAX_CAMPAIGN_SIZE} get planned, spread across the products, or offer fewer each.`
+            : `  Size: ${setSize} pieces`,
+        ]
+      : brief.size
+        ? [`  Size: ${brief.size} pieces over ${brief.days ?? 30} days`]
+        : []),
+  ];
+}
+
 /**
- * The mutating brief-so-far state for a chat turn. Injected at the top of the
- * LATEST user message, never the system prompt: the system prompt stays
+ * The mutating state for a chat turn: what's being made, what's saved, and
+ * the checklist (what's still open, what was asked). Injected at the top of
+ * the LATEST user message, never the system prompt: the system prompt stays
  * byte-stable across turns so the big brand prefix actually caches.
  */
 export function buildBriefStateBlock(
@@ -439,45 +489,47 @@ export function buildBriefStateBlock(
   const offerParts = [brief.offer_deal, brief.offer_deadline, brief.offer_price].filter(
     Boolean,
   );
-  const campaignParts = [
-    brief.campaign_kind ? `${brief.campaign_kind} campaign` : null,
-    brief.campaign_products ? `products: ${brief.campaign_products}` : null,
-    brief.email_count ? `emails: ${brief.email_count}` : null,
-  ].filter(Boolean);
+  const email = !brief.making || brief.making === "email";
   return [
-    "BRIEF SO FAR (current saved state, refreshed automatically each turn):",
-    // Campaign mode leads the block: it changes which flow applies and which
-    // generate tool is allowed, so it must never be scannable-past.
-    ...(campaignParts.length
-      ? [`  CAMPAIGN MODE: ${campaignParts.join("; ")} (must end in plan_series)`]
-      : []),
+    "WHERE WE ARE (saved state, refreshed automatically each turn):",
+    ...makingLines(brief),
     `  Goal: ${brief.goal ?? "(not set)"}`,
     `  Audience notes: ${brief.audience_notes ?? "(not set)"}`,
     `  Key message: ${brief.key_message ?? "(not set)"}`,
-    `  Name (subject line): ${brief.subject_line ?? "(not set)"}`,
-    `  Subheader: ${brief.preheader ?? "(not set)"}`,
+    ...(email
+      ? [
+          `  Name (subject line): ${brief.subject_line ?? "(not set)"}`,
+          `  Subheader: ${brief.preheader ?? "(not set)"}`,
+        ]
+      : []),
     `  Proof: ${brief.proof ?? "(not set)"}`,
     `  Hook: ${brief.hook ?? "(not set)"}`,
-    `  Reader belief: ${brief.reader_belief ?? "(not set)"}`,
+    ...(email ? [`  Reader belief: ${brief.reader_belief ?? "(not set)"}`] : []),
     `  Angle: ${brief.angle ?? "(not set)"}`,
     `  Offer: ${brief.offer_slug ?? "(not set)"}`,
     `  Offer terms: ${offerParts.length ? offerParts.join("; ") : "(not set)"}`,
     `  Constraints: ${brief.constraints ?? "(none)"}`,
     `  Tone: ${brief.tone ?? "(brand voice as-is)"}`,
-    // Presence only: re-injecting the full example every turn would bloat the
-    // message; generation reads the real text via buildCampaignBriefBlock.
-    `  Style example: ${brief.style_example ? "attached (an email to emulate)" : "(none)"}`,
-    `  Length: ${brief.length ?? "(brand default)"}`,
-    `  Image: ${
-      brief.include_image === undefined
-        ? "(brand default)"
-        : brief.include_image
-          ? "yes"
-          : "no"
-    }`,
+    ...(email
+      ? [
+          // Presence only: re-injecting the full example every turn would
+          // bloat the message; generation reads the real text via
+          // buildCampaignBriefBlock.
+          `  Style example: ${brief.style_example ? "attached (an email to emulate)" : "(none)"}`,
+          `  Length: ${brief.length ?? "(brand default)"}`,
+          `  Image: ${
+            brief.include_image === undefined
+              ? "(brand default)"
+              : brief.include_image
+                ? "yes"
+                : "no"
+          }`,
+        ]
+      : []),
     `  Vibe: ${brief.visual_vibe ?? "(not set)"}`,
     ...inputsStateLines(inputsOf(brief)),
     `  Topic attached: ${topicId ? "yes" : "no"}`,
+    ...checklistLines(brief),
   ].join("\n");
 }
 

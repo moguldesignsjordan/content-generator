@@ -47,6 +47,22 @@ git history (`git log -p PROJECT_STATE.md`).
   the chat become the flyer and ad style by default, in the brand's colors and
   logo; the look picker switches back to Our style. A campaign's planner
   marks about a third of the pieces to follow the ad.
+- Create chat questions (Jordan's call, 2026-10-16): follow-ups are one
+  question card (up to 3 questions, each with its own tap answers, one Send;
+  typing still works). A set of one kind for several products (flyers for
+  cards, door hangers, banners) goes through the plan screen first. Per
+  product size is asked: 1 each (a one-off) / 3 each / 6 each. Saved ads
+  picked in the style pop-up shape look and wording. Products come from both
+  a website scraper and the chat. Plan:
+  `~/.claude/plans/inherited-knitting-blossom.md`; Parts 1 (the checklist)
+  and 2 (one design per product: the planner tags each row with its product,
+  code enforces the count per product, max 20), and 3 (saved ads in the
+  chat's style pop-up, plus "+ From Ad Library" inside it; a pick replaces
+  earlier ads and style images), and 4 (products from the website: sitemaps,
+  shop subdomains, Shopify, JSON-LD then Open Graph, text extraction as the
+  fallback; photos copied into our storage on save; the chat shows the same
+  tick list for "all our products" and the plan offers to save typed ones)
+  are all built. None of it has run against a live chat yet (item 1 below).
 - Images and inputs (Jordan's call, 2026-10-16): every image attached in the
   chat is labeled by the owner, "In picture" (shown exactly as it looks) or
   "Style" (a design to follow). Photos, style, and competitor ads travel as
@@ -91,8 +107,11 @@ git history (`git log -p PROJECT_STATE.md`).
 ## Current state
 
 - **Create (`/`) is one chat.** Kind tiles (Flyer, Email, Campaign, Blog post, Ad)
-  then the owner describes it; Claude reflects the details back, asks at most
-  three missing items, and confirms. Streams over SSE. A made piece
+  then the owner describes it; Claude reflects the details back, asks what's
+  still open as one question card (up to 3, tap or type), and confirms. The
+  code owns the checklist (`lib/create-questions.ts`): what's open per kind,
+  what was asked (`brief.asked`, so a question never comes back), and the
+  defaults the confirm names. Stall recovery runs only after a go tap. Streams over SSE. A made piece
   generates as a live preview in the thread (no jump to the review page);
   the agent changes it with edit_flyer / revise_piece, which the card runs
   through the review page's own endpoints. Campaigns hand off to
@@ -120,7 +139,7 @@ git history (`git log -p PROJECT_STATE.md`).
   monthly allowance cron.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
 - **Migrations:** all through 031 are applied (checked live 2026-10-14).
-- **Checks:** `npm run typecheck`, `npm test` (810 tests), `npm run lint`
+- **Checks:** `npm run typecheck`, `npm test` (873 tests), `npm run lint`
   (0 errors, 14 warnings), `npm run build`. `next build` runs lint, so a lint
   error now fails the deploy.
 
@@ -168,7 +187,10 @@ git history (`git log -p PROJECT_STATE.md`).
 7. **Optional:** `OPENAI_API_KEY` (local + Vercel) to turn on GPT Image.
 8. **Setup for good flyers:** upload the transparent PNG logo in Settings
    (the one on file is a JPG with a black square); add the print products
-   with photos in Settings, Products & services; build a default look from
+   with photos in Settings, Products & services (Import from your website
+   reads them once `print.moguldesignagency.com` resolves: it has no A or
+   CNAME record in Vercel DNS, so the live Shop link is dead too; add the
+   domain to the mdawebsite project); build a default look from
    the best past designs (Flyers, New, Our style, Add examples) once the
    strict look read is deployed. Duplicate packages deleted 2026-10-15.
    (Gemini 402 resolved: renders worked at 17:40 UTC 2026-10-15.)

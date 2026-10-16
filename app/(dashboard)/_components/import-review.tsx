@@ -188,6 +188,7 @@ export function ImportReview({
               deliverables: prod.deliverables ?? [],
               price_point: prod.price_point,
               url: prod.url,
+              image_url: prod.image_url,
             },
           }),
         });
@@ -349,17 +350,28 @@ export function ImportReview({
                 className="space-y-3 rounded-[var(--radius-md)] border border-border p-4"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <SectionCheckbox
-                    checked={prod.include}
-                    onChange={(v) =>
-                      setProducts(
-                        products.map((x, xi) =>
-                          xi === i ? { ...x, include: v } : x,
-                        ),
-                      )
-                    }
-                    label={prod.name}
-                  />
+                  <div className="flex min-w-0 items-center gap-3">
+                    {prod.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={prod.image_url}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="h-12 w-12 shrink-0 rounded-[var(--radius-sm)] border border-border object-cover"
+                      />
+                    )}
+                    <SectionCheckbox
+                      checked={prod.include}
+                      onChange={(v) =>
+                        setProducts(
+                          products.map((x, xi) =>
+                            xi === i ? { ...x, include: v } : x,
+                          ),
+                        )
+                      }
+                      label={prod.name}
+                    />
+                  </div>
                   {exists && (
                     <span className="shrink-0 text-xs text-muted">
                       will update existing

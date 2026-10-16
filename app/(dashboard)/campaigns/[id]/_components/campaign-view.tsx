@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Input, Textarea, useToast } from "@/components/ui";
 import { ScreenHeader } from "../../../_components/screen-header";
@@ -18,6 +18,7 @@ import {
 import type { DraftStatusSummary } from "@/lib/db/queries";
 import { KIND_TONE } from "../../../_components/kind-tone";
 import { PiecesSection } from "./pieces-section";
+import { slugify } from "@/lib/text";
 
 // One factory campaign: the research it was built on, the plan table (edit,
 // fill in real details, remove rows), and the quote with "test 3 first" or
@@ -49,10 +50,15 @@ export function CampaignView({
   campaignId,
   initial,
   statuses,
+  brandId,
+  unsavedProducts,
 }: {
   campaignId: string;
   initial: FactoryState;
   statuses: Record<string, DraftStatusSummary>;
+  brandId: string;
+  /** Product names this plan covers that aren't saved yet, with the photo given. */
+  unsavedProducts: { name: string; photo?: string }[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -115,6 +121,10 @@ export function CampaignView({
           statuses={statuses}
           unitUsd={factory.quote.unit_usd}
         />
+      )}
+
+      {unsavedProducts.length > 0 && (
+        <SaveProductsOffer campaignId={campaignId} brandId={brandId} products={unsavedProducts} />
       )}
 
       {factory.research && <ResearchCard research={factory.research} />}
@@ -229,6 +239,86 @@ function Calendar({
   );
 }
 
+/** Offers once, in one tap, to save a per-product plan's typed products as
+ * the brand's products. Never saves on its own. */
+function SaveProductsOffer({
+  campaignId,
+  brandId,
+  products,
+}: {
+  campaignId: string;
+  brandId: string;
+  products: { name: string; photo?: string }[];
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const key = `save-products-offer:${campaignId}`;
+  const [hidden, setHidden] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(key)) setHidden(true);
+    } catch {
+      // Storage blocked: the offer just shows again next visit.
+    }
+  }, [key]);
+
+  function dismiss() {
+    setHidden(true);
+    try {
+      localStorage.setItem(key, "1");
+    } catch {
+      // Same as above.
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    let saved = 0;
+    for (const p of products) {
+      const res = await fetch("/api/settings/products", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandId,
+          product: { slug: slugify(p.name), name: p.name, ...(p.photo ? { image_url: p.photo } : {}) },
+        }),
+      }).catch(() => null);
+      if (res?.ok) saved++;
+    }
+    setSaving(false);
+    if (saved < products.length) {
+      toast.error(`Saved ${saved} of ${products.length}. Try again.`);
+      return;
+    }
+    toast.success("Saved to your products.");
+    dismiss();
+    router.refresh();
+  }
+
+  if (hidden) return null;
+  const names = products.map((p) => p.name);
+  const list =
+    names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  return (
+    <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+      <p className="flex-1 text-[14px] text-foreground">
+        Save {list} as your products? Next time they&apos;re one tap away
+        {products.some((p) => p.photo) ? ", with the photos you gave" : ""}.
+      </p>
+      <div className="flex gap-2">
+        <Button variant="gradient" size="sm" loading={saving} onClick={() => void save()}>
+          Save them
+        </Button>
+        <Button variant="ghost" size="sm" onClick={dismiss}>
+          Not now
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function SourceLinks({ sources }: { sources: string[] }) {
   if (!sources.length) return null;
   return (
@@ -324,6 +414,7 @@ function PlanRow({
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={KIND_TONE[item.kind]}>{format?.label ?? item.kind}</Badge>
+          {item.product && <Badge>{item.product}</Badge>}
           <span className="text-[13px] text-muted">{dayLabel(date)}</span>
           {item.needs_detail && !detail && <Badge tone="warning">Needs a real detail</Badge>}
           <span className="flex-1" />

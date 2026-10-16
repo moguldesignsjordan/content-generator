@@ -4,7 +4,10 @@ import {
   assignDates,
   cleanPlanItems,
   pickTestItems,
+  planProductSlots,
+  slotCounts,
   sumPlanUsd,
+  unsavedPlanProducts,
   type RawPlanItem,
 } from "./plan";
 import { splitEvenly } from "@/prompts/campaign-formats";
@@ -180,5 +183,114 @@ describe("pickTestItems and sumPlanUsd", () => {
     expect(
       sumPlanUsd(pickTestItems(plan), { social: 0.1, ad: 0.1, email: 0.25, blog: 0.25 }),
     ).toBe(0.45);
+  });
+});
+
+describe("planProductSlots", () => {
+  it("gives every product its count, with kinds rotating across the plan", () => {
+    const slots = planProductSlots(["Cards", "Hangers", "Banners"], 3, ["social", "ad", "email"]);
+    expect(slots.map((s) => s.total)).toEqual([3, 3, 3]);
+    for (const slot of slots) expect(slot.kinds).toEqual({ social: 1, ad: 1, email: 1, blog: 0 });
+    expect(slotCounts(slots)).toEqual({ social: 3, ad: 3, email: 3, blog: 0 });
+  });
+
+  it("makes a one-kind set: one flyer each", () => {
+    const slots = planProductSlots(["Cards", "Hangers", "Banners"], 1, ["social"]);
+    expect(slotCounts(slots)).toEqual({ social: 3, ad: 0, email: 0, blog: 0 });
+  });
+
+  it("caps the plan at 20, spread evenly across the products", () => {
+    const slots = planProductSlots(["A", "B", "C", "D"], 6, ["social", "ad"]);
+    expect(slots.map((s) => s.total)).toEqual([5, 5, 5, 5]);
+    const uneven = planProductSlots(["A", "B", "C"], 10, ["social"]);
+    expect(uneven.map((s) => s.total)).toEqual([7, 7, 6]);
+  });
+
+  it("is empty without products or kinds", () => {
+    expect(planProductSlots([], 3, ["social"])).toEqual([]);
+    expect(planProductSlots(["A"], 3, [])).toEqual([]);
+  });
+});
+
+describe("cleanPlanItems one product per piece", () => {
+  const products = [
+    { name: "Business cards", slug: "cards", max: 2 },
+    { name: "Door hangers", max: 1 },
+  ];
+  const opts = {
+    counts: { social: 3, ad: 0, email: 0, blog: 0 },
+    productSlugs: new Set(["cards", "other"]),
+    newId,
+    products,
+  };
+
+  it("requires a listed product, caps each product, and maps a saved one to its slug", () => {
+    const rows = cleanPlanItems(
+      [
+        raw({ product: "business cards", offer_slug: "other" }),
+        raw({ product: "Yard signs" }),
+        raw({}),
+        raw({ product: "Door hangers" }),
+        raw({ product: "Door hangers" }),
+        raw({ product: "Business cards" }),
+      ],
+      opts,
+    );
+    expect(rows.map((r) => r.product)).toEqual(["Business cards", "Door hangers", "Business cards"]);
+    expect(rows[0].offer_slug).toBe("cards");
+    expect(rows[1].offer_slug).toBeUndefined();
+  });
+
+  it("leaves rows unchanged without products", () => {
+    const rows = cleanPlanItems([raw({ product: "Business cards" })], { ...opts, products: undefined });
+    expect(rows[0].product).toBeUndefined();
+  });
+});
+
+describe("assignDates and pickTestItems with products", () => {
+  const item = (id: string, kind: FactoryPlanItem["kind"], product: string) =>
+    ({ id, kind, product }) as Omit<FactoryPlanItem, "date">;
+
+  it("interleaves products day to day", () => {
+    const dated = assignDates(
+      [item("a1", "social", "A"), item("a2", "ad", "A"), item("b1", "social", "B"), item("c1", "ad", "C")],
+      "2026-11-01",
+      4,
+    );
+    expect(dated.map((i) => i.id)).toEqual(["a1", "b1", "c1", "a2"]);
+  });
+
+  it("tests three different products, different kinds where possible", () => {
+    const plan = [
+      item("a1", "social", "A"),
+      item("a2", "ad", "A"),
+      item("b1", "social", "B"),
+      item("b2", "email", "B"),
+      item("c1", "ad", "C"),
+    ] as FactoryPlanItem[];
+    expect(pickTestItems(plan).map((i) => i.id)).toEqual(["a1", "b2", "c1"]);
+  });
+
+  it("fills up to three when there are only two products", () => {
+    const plan = [item("a1", "social", "A"), item("a2", "ad", "A"), item("b1", "social", "B")] as FactoryPlanItem[];
+    expect(pickTestItems(plan).map((i) => i.id)).toEqual(["a1", "b1", "a2"]);
+  });
+});
+
+describe("unsavedPlanProducts", () => {
+  it("offers only typed products not saved yet, with the owner's photo on their pieces", () => {
+    const own = "https://x.supabase.co/storage/v1/object/public/content-images/hanger.jpg";
+    const factory = {
+      products: [{ name: "Business cards", slug: "cards" }, { name: "Door hangers" }, { name: "Yard Signs" }, { name: "Banners" }],
+      inputs: { photos: [own] },
+      plan: [
+        { id: "1", kind: "social", product: "Door hangers", photos: ["https://cdn.example.com/other.jpg", own] },
+        { id: "2", kind: "ad", product: "Banners" },
+      ] as FactoryPlanItem[],
+    };
+    expect(unsavedPlanProducts(factory, [{ name: "yard signs", slug: "yard-signs" }])).toEqual([
+      { name: "Door hangers", photo: own },
+      { name: "Banners" },
+    ]);
   });
 });

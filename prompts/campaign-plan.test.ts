@@ -52,3 +52,35 @@ describe("buildPlanMessages", () => {
     expect(user).toContain("Set uses_reference true on exactly those");
   });
 });
+
+describe("buildPlanMessages one product per piece", () => {
+  const productPlan = [
+    {
+      name: "Business cards",
+      total: 2,
+      kinds: { social: 1, ad: 1, email: 0, blog: 0 },
+      description: "Thick matte cards",
+      price: "$60 for 500",
+      photo: 2,
+    },
+    { name: "Door hangers", total: 1, kinds: { social: 1, ad: 0, email: 0, blog: 0 } },
+  ];
+
+  it("lists each product's exact count, details, and photo, and bans lineups", () => {
+    const { user } = buildPlanMessages({ ...base, productPlan, photoCount: 2 });
+    expect(user).toContain("ONE PRODUCT PER PIECE");
+    expect(user).toContain(
+      "  - Business cards: 2 pieces (1 social, 1 ad). About it: Thick matte cards. Price: $60 for 500. Its photo: number 2.",
+    );
+    expect(user).toContain("  - Door hangers: 1 piece (1 social).");
+    expect(user).toContain("Never show, list, or mention the other products");
+    expect(user).toContain("only to photos of ITS product");
+    expect(user).not.toContain("several together when the piece is about more than one product");
+  });
+
+  it("keeps the mixed-idea rules without products", () => {
+    const { user } = buildPlanMessages({ ...base, photoCount: 1 });
+    expect(user).not.toContain("ONE PRODUCT PER PIECE");
+    expect(user).toContain("several together when the piece is about more than one product");
+  });
+});

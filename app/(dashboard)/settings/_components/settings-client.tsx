@@ -324,7 +324,11 @@ export function SettingsClient({
         description="What generation pitches when a topic maps to an offer. Real scope and pricing make the copy concrete."
         size="xl"
       >
-        <ProductsForm brandId={brand.id} products={products} />
+        <ProductsForm
+          brandId={brand.id}
+          products={products}
+          website={brand.visual_identity?.footer?.website ?? ""}
+        />
       </Sheet>
 
       <Sheet

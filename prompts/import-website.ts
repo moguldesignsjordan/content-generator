@@ -1,5 +1,7 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { ScrapeResult } from "@/lib/scrape/types";
+import type { ProposedProduct } from "@/lib/db/types";
+import { slugify, stripEmDashes } from "@/lib/text";
 
 // Brand extraction from a scraped website: one forced tool call turns page
 // text + deterministic signals into a flat proposal the route maps onto the
@@ -51,6 +53,31 @@ export interface ImportToolInput {
   social_twitter?: string;
   social_instagram?: string;
   social_youtube?: string;
+}
+
+/** The extraction's products as proposals: deduped by slug, a name required,
+ * em dashes stripped, empty fields dropped. */
+export function cleanImportedProducts(raw: ImportProductInput[] | undefined): ProposedProduct[] {
+  const clean = (s?: string) => (s ? stripEmDashes(s.trim()) : "") || undefined;
+  const seen = new Set<string>();
+  const out: ProposedProduct[] = [];
+  for (const p of raw ?? []) {
+    const name = clean(p.name);
+    if (!name) continue;
+    const slug = slugify(clean(p.slug) ?? name);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const deliverables = p.deliverables?.map((d) => stripEmDashes(d.trim())).filter(Boolean);
+    out.push({
+      slug,
+      name,
+      description: clean(p.description),
+      deliverables: deliverables?.length ? deliverables : undefined,
+      price_point: clean(p.price_point),
+      url: clean(p.url),
+    });
+  }
+  return out;
 }
 
 const OMIT = "Omit this field entirely if the site doesn't evidence it. Never invent.";

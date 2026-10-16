@@ -296,6 +296,8 @@ export interface ProposedProduct {
   deliverables?: string[];
   price_point?: string;
   url?: string;
+  /** The product's photo on their site; mirrored into our storage on save. */
+  image_url?: string;
 }
 
 export interface BrandImportProposal {
@@ -438,17 +440,22 @@ export interface CampaignBrief {
   /** The user-approved subheader (inbox preview text under the subject).
    * Generation uses it near-verbatim as the preheader. */
   preheader?: string;
-  /** Interview state, not content guidance: set the moment the chat knows
-   * it's building a multi-email campaign. While set, generate_content is
-   * refused (a campaign must end in one plan_series call); cleared after
-   * plan_series succeeds or when the user drops back to a single email. */
-  campaign_kind?: CampaignKind;
-  /** Interview state: which products a product campaign covers, as the
-   * user's own words/slugs (e.g. "business cards, door hangers"). */
-  campaign_products?: string;
-  /** Interview state: how many emails the campaign should have, in the
-   * user's words (e.g. "2 per product, 6 total" or "5"). */
-  email_count?: string;
+  /** Chat checklist (lib/create-questions.ts): what's being made. */
+  making?: MakingKind;
+  /** Chat checklist: what a campaign includes. */
+  channels?: FactoryKind[];
+  /** Chat checklist: a campaign's piece count and the days it spans. */
+  size?: CampaignSize;
+  days?: CampaignDays;
+  /** Chat checklist: the products this is about, by name (saved or typed). */
+  products?: string[];
+  /** Chat checklist: a design per product, or one with all of them. */
+  split?: ProductSplit;
+  /** Chat checklist: pieces per product when split is "each". */
+  per_product?: PerProduct;
+  /** Chat checklist: question ids already asked. Written by the route,
+   * never by a model, so a question can't come back. */
+  asked?: string[];
   /** Legacy (read through inputsOf, never written): one competitor ad id. */
   competitor_reference_id?: string;
   /** Legacy (read through inputsOf, never written): designs to match. */
@@ -494,9 +501,12 @@ export interface ClientBrand {
   logo_url?: string;
 }
 
-/** The kinds of multi-email campaign the create-agent interview can run;
- * each gets its own tailored question stages (see prompts/create-agent.ts). */
-export type CampaignKind = "product" | "promotion" | "newsletter" | "launch";
+/** What the Create chat is making; a set of 2+ pieces goes to the planner. */
+export type MakingKind = "email" | "flyer" | "ad" | "blog" | "campaign";
+export type CampaignSize = 6 | 12 | 20;
+export type CampaignDays = 14 | 30;
+export type ProductSplit = "each" | "together";
+export type PerProduct = 1 | 3 | 6;
 
 /** Every string-valued CampaignBrief field that a UI or chat surface can save
  * directly (excludes non-string fields like length/include_image/visual_vibe/
@@ -521,8 +531,6 @@ export const CAMPAIGN_BRIEF_TEXT_FIELDS = [
   "reader_belief",
   "subject_line",
   "preheader",
-  "campaign_products",
-  "email_count",
 ] as const satisfies readonly (keyof CampaignBrief)[];
 
 /** One draft created as part of a multi-email series (plan_series), kept in
@@ -606,8 +614,16 @@ export interface FactoryPlanItem {
   uses_reference?: boolean;
   /** The owner's photos the planner matched to this piece, one or several. */
   photos?: string[];
+  /** The one product this piece is about, in a one-design-per-product plan. */
+  product?: string;
   /** Set once launched. */
   draft_id?: string;
+}
+
+/** A product a campaign covers: a saved one carries its slug. */
+export interface FactoryProduct {
+  name: string;
+  slug?: string;
 }
 
 export interface FactoryQuote {
@@ -630,6 +646,10 @@ export interface FactoryState {
   inputs?: PieceInputs;
   /** Matched saved product, when the sentence is about one. */
   offer_slug?: string;
+  /** The products a one-design-per-product plan covers (split "each"). */
+  products?: FactoryProduct[];
+  split?: ProductSplit;
+  per_product?: PerProduct;
   /** The style images' design, read once at planning and shared. */
   reference_profile?: DesignLookProfile;
   /** The business the campaign's posts and ads are for, when not this brand. */

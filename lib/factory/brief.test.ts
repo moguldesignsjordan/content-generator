@@ -106,3 +106,29 @@ describe("the plan's picture idea", () => {
     expect(buildPieceBrief(base, { sentence: "x" }).image_subject).toBeUndefined();
   });
 });
+
+describe("one product per piece", () => {
+  const product = { name: "Door hangers", description: "Die-cut, full color", price_point: "$45" };
+
+  it("leads the flyer brief with its product and keeps the campaign as background", () => {
+    const text = buildFlyerBriefText({ ...base, kind: "social", product: "Door hangers" }, "Our print lineup", undefined, product);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe(
+      "Product (this piece is only about this one; the others get their own pieces): Door hangers. About it: Die-cut, full color. Price: $45",
+    );
+    expect(lines[1]).toBe("Campaign (background only): Our print lineup");
+  });
+
+  it("keeps an email or blog on its product", () => {
+    const brief = buildPieceBrief(base, { sentence: "Our print lineup" }, { name: "Door hangers" });
+    expect(brief.goal).toBe(
+      "Product (this piece is only about this one; the others get their own pieces): Door hangers. Campaign background: Our print lineup",
+    );
+    expect(brief.constraints).toBe("Only about Door hangers. Never show or mention the campaign's other products.");
+  });
+
+  it("is unchanged without a product", () => {
+    expect(buildFlyerBriefText(base, "Care plan").split("\n")[0]).toBe("Campaign: Care plan");
+    expect(buildPieceBrief(base, { sentence: "Care plan" }).constraints).toBeUndefined();
+  });
+});

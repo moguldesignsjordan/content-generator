@@ -1,4 +1,5 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
+import { MAX_QUESTIONS, QUESTION_IDS } from "@/lib/create-questions";
 
 // Tools exclusive to the dashboard create agent (app/api/create/chat/route.ts):
 // auto-generate, recall of past content, competitor-ad capture, and durable
@@ -133,14 +134,67 @@ export const START_CAMPAIGN_TOOL: Anthropic.Tool = {
   },
 };
 
+/** The follow-up questions, shown as one card with its own tap answers. */
+export const ASK_TOOL: Anthropic.Tool = {
+  name: "ask",
+  description:
+    "Ask the questions listed under STILL OPEN, all at once, as one card the " +
+    "user answers with taps or typing. Only ids from STILL OPEN are shown; " +
+    "anything else is dropped, and once asked a question never comes back. " +
+    "Pair it with one short line of your own; don't repeat the questions in " +
+    "your text.",
+  input_schema: {
+    type: "object",
+    properties: {
+      questions: {
+        type: "array",
+        maxItems: MAX_QUESTIONS,
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", enum: [...QUESTION_IDS], description: "The id from STILL OPEN." },
+            question: {
+              type: "string",
+              description: "The question in plain words, short, written for what they told you.",
+            },
+            choices: {
+              type: "array",
+              maxItems: 4,
+              items: { type: "string" },
+              description:
+                "2 to 4 tappable answers written for this exact situation. Leave " +
+                "out for channels, size, split, per_product, products, making, " +
+                "where, post_type, and style: those choices are filled in for you.",
+            },
+            multi: { type: "boolean", description: "True when more than one answer can be picked." },
+          },
+          required: ["id", "question"],
+        },
+      },
+    },
+    required: ["questions"],
+  },
+};
+
 /** Shows the design-look picker under the reply, so the user can pick one of
  * their saved looks (example ads) for a flyer to follow. */
 export const SHOW_LOOK_PICKER_TOOL: Anthropic.Tool = {
   name: "show_look_picker",
   description:
-    "For a flyer only: shows their saved looks (example ads to follow) under " +
-    "your reply so they can tap one. Call it in the same turn you ask about " +
-    "the feel. Their pick arrives as their next message.",
+    "Shows the look picker on its own under your reply, e.g. when they want " +
+    "to change the style later. The ask card's style question already shows " +
+    "it, so don't call both. Their pick arrives as their next message.",
+  input_schema: { type: "object", properties: {} },
+};
+
+/** Shows the website product import inline, to tick and save their products. */
+export const SHOW_PRODUCT_IMPORT_TOOL: Anthropic.Tool = {
+  name: "show_product_import",
+  description:
+    "When they mean all their products (\"all our products\", \"everything we " +
+    "sell\") and PRODUCTS doesn't list them: shows their products from their " +
+    "website under your reply, to tick and save. The result says whether a " +
+    "website is saved; without one, ask them to name the products instead.",
   input_schema: { type: "object", properties: {} },
 };
 
@@ -421,7 +475,9 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   EDIT_FLYER_TOOL,
   REVISE_PIECE_TOOL,
   START_CAMPAIGN_TOOL,
+  ASK_TOOL,
   SHOW_LOOK_PICKER_TOOL,
+  SHOW_PRODUCT_IMPORT_TOOL,
   SAVE_LOOK_TOOL,
   LIST_RECENT_CONTENT_TOOL,
   GET_CONTENT_TOOL,

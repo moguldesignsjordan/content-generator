@@ -2,7 +2,8 @@ import {
   CAMPAIGN_BRIEF_TEXT_FIELDS,
   MAX_CONVERSATION_NOTES_CHARS,
   type CampaignBrief,
-  type CampaignKind,
+  type FactoryKind,
+  type MakingKind,
   type VisualVibe,
 } from "@/lib/db/types";
 import type { UpdateBriefInput } from "@/prompts/create-agent";
@@ -11,6 +12,7 @@ import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 import { inputsOf, withInputs } from "@/lib/inputs";
 import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
+import { cleanProductNames } from "@/lib/create-questions";
 
 // Pulled out of route.ts (which Next.js only allows GET/POST/config exports
 // from) so mergeBrief's field-by-field merge rules can be unit tested
@@ -18,7 +20,8 @@ import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
 
 const VISUAL_VIBES: VisualVibe[] = ["punchy", "sleek", "playful", "premium"];
 
-const CAMPAIGN_KINDS: CampaignKind[] = ["product", "promotion", "newsletter", "launch"];
+const MAKING_KINDS: MakingKind[] = ["email", "flyer", "ad", "blog", "campaign"];
+const CHANNELS: FactoryKind[] = ["social", "ad", "email", "blog"];
 
 /** True for a well-formed http(s) URL; guards against the model inventing one. */
 export function isHttpUrl(value: string): boolean {
@@ -104,16 +107,21 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
   }
   const client = input.client_brand ? cleanClientBrand(input.client_brand, isHttpUrl) : null;
   if (client) next.client_brand = client;
-  // Campaign mode is an explicit enum, entered and left deliberately:
-  // "single" drops the whole campaign interview state (kind, products,
-  // count) so the generate_content guard stops refusing.
-  if (input.campaign_kind === "single") {
-    delete next.campaign_kind;
-    delete next.campaign_products;
-    delete next.email_count;
-  } else if (input.campaign_kind && CAMPAIGN_KINDS.includes(input.campaign_kind)) {
-    next.campaign_kind = input.campaign_kind;
+  if (input.making && MAKING_KINDS.includes(input.making)) next.making = input.making;
+  if (Array.isArray(input.channels)) {
+    const channels = CHANNELS.filter((c) => input.channels!.includes(c));
+    if (channels.length) next.channels = channels;
   }
+  if (input.size === 6 || input.size === 12 || input.size === 20) {
+    next.size = input.size;
+    next.days = input.size === 6 ? 14 : 30;
+  }
+  if (Array.isArray(input.products)) {
+    const names = cleanProductNames(input.products);
+    if (names.length) next.products = names;
+    else delete next.products;
+  }
+  if (input.split === "each" || input.split === "together") next.split = input.split;
   return withInputs(next, inputs);
 }
 

@@ -26,6 +26,42 @@ describe("mergeBrief competitor ads", () => {
   });
 });
 
+describe("mergeBrief checklist fields", () => {
+  it("saves what's being made, channels, size with its days, products, and split", () => {
+    const next = mergeBrief({} as CampaignBrief, {
+      making: "campaign",
+      channels: ["social", "fax" as never, "email"],
+      size: 6,
+      products: [" Business cards ", "business cards", "Banners"],
+      split: "each",
+    });
+    expect(next).toMatchObject({
+      making: "campaign",
+      channels: ["social", "email"],
+      size: 6,
+      days: 14,
+      products: ["Business cards", "Banners"],
+      split: "each",
+    });
+  });
+
+  it("ignores invalid values, and [] clears the products", () => {
+    const current = { making: "flyer", products: ["Cards"], split: "together" } as CampaignBrief;
+    const next = mergeBrief(current, {
+      making: "poster" as never,
+      size: 7,
+      split: "sideways" as never,
+    });
+    expect(next).toEqual(current);
+    expect(mergeBrief(current, { products: [] }).products).toBeUndefined();
+  });
+
+  it("no longer carries the retired campaign interview fields", () => {
+    const next = mergeBrief({} as CampaignBrief, { campaign_kind: "product" } as UpdateBriefInput);
+    expect(next).not.toHaveProperty("campaign_kind");
+  });
+});
+
 describe("mergeBrief photos and style images", () => {
   const url = (n: number) => `https://x.supabase.co/storage/v1/object/public/content-images/${n}.jpg`;
 

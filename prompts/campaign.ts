@@ -5,7 +5,10 @@ import type {
   ContentImageStyle,
   EmailLengthPreference,
   EmailStyleId,
+  FactoryKind,
   Icp,
+  MakingKind,
+  ProductSplit,
   Product,
   Strategy,
   VisualVibe,
@@ -55,10 +58,11 @@ export interface UpdateBriefInput {
   reader_belief?: string;
   subject_line?: string;
   preheader?: string;
-  /** "single" clears campaign mode (and the other campaign_* fields). */
-  campaign_kind?: "product" | "promotion" | "newsletter" | "launch" | "single";
-  campaign_products?: string;
-  email_count?: string;
+  making?: MakingKind;
+  channels?: FactoryKind[];
+  size?: number;
+  products?: string[];
+  split?: ProductSplit;
   /** Id of a saved competitor ad (from save_competitor_reference's result) to
    * adapt this email's strategy from. NEVER invent an id; only echo one just
    * returned by save_competitor_reference. */
@@ -247,26 +251,37 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "The subheader (inbox preview text under the subject) once the " +
           "user picks or approves one. Generation uses it near-verbatim.",
       },
-      campaign_kind: {
+      making: {
         type: "string",
-        enum: ["product", "promotion", "newsletter", "launch", "single"],
+        enum: ["email", "flyer", "ad", "blog", "campaign"],
         description:
-          "Set the MOMENT you know the user is building a multi-email " +
-          "campaign, to its kind. While set, generate_content is refused: a " +
-          "campaign always ends in one plan_series call. Pass \"single\" when " +
-          "the user switches back to wanting just one email.",
+          "What they're making, the moment it's clear: an ad is a paid " +
+          "Facebook or Instagram ad, a campaign is many pieces across channels.",
       },
-      campaign_products: {
-        type: "string",
+      channels: {
+        type: "array",
+        items: { type: "string", enum: ["social", "ad", "email", "blog"] },
         description:
-          "Which products a product campaign covers, in the user's words " +
-          "(e.g. 'business cards, door hangers, retractable banners').",
+          "Campaigns: what it includes, when they said (posts are social).",
       },
-      email_count: {
-        type: "string",
+      size: {
+        type: "integer",
+        enum: [6, 12, 20],
+        description: "Campaigns: how many pieces, when they said.",
+      },
+      products: {
+        type: "array",
+        items: { type: "string" },
         description:
-          "How many emails the campaign should have, exactly as the user " +
-          "chose (e.g. '2 per product, 6 total' or '5').",
+          "The products this is about, by name, as the COMPLETE list (saved " +
+          "names from PRODUCTS when they match, else their words).",
+      },
+      split: {
+        type: "string",
+        enum: ["each", "together"],
+        description:
+          "With 2 or more products: each when every product gets its own " +
+          "design, together when one piece shows them all. Only when they said.",
       },
       competitor_reference_id: {
         type: "string",

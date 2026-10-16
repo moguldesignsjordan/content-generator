@@ -12,7 +12,7 @@ import {
 import type { FactoryPlanItem, FactoryState, PieceInputs } from "@/lib/db/types";
 import { inputsOf } from "@/lib/inputs";
 import { loadOwnFactoryCampaign } from "@/lib/factory/access";
-import { buildFlyerBriefText, buildPieceBrief } from "@/lib/factory/brief";
+import { buildFlyerBriefText, buildPieceBrief, type PieceProduct } from "@/lib/factory/brief";
 import { pickTestItems } from "@/lib/factory/plan";
 import { CAMPAIGN_FLYER_OPTIONS, loadUnitCosts, quotePlan } from "@/lib/pipeline/campaign-factory";
 import { getCampaignFormat } from "@/prompts/campaign-formats";
@@ -59,9 +59,12 @@ export async function POST(
     const campaignInputs = inputsOf(factory);
     const launched = new Map<string, string>();
     for (const item of chosen) {
+      // A product saved after planning (by name) still brings its details.
       const product = item.offer_slug
         ? products.find((p) => p.slug === item.offer_slug)
-        : undefined;
+        : item.product
+          ? products.find((p) => p.name.trim().toLowerCase() === item.product!.trim().toLowerCase())
+          : undefined;
       const topic = await createTopic(clusterId, {
         title: item.title,
         target_keyword: "",
@@ -77,6 +80,7 @@ export async function POST(
         inputs: pieceInputs(item, campaignInputs, product?.image_url ?? undefined),
         plan,
         factory,
+        ...(item.product ? { product: product ?? { name: item.product } } : {}),
       });
       launched.set(item.id, draftId);
     }
@@ -98,14 +102,15 @@ export async function POST(
 
 /**
  * One piece's inputs: the photos the planner matched to it (else the
- * campaign's first photo, else the promoted product's own), the campaign's
- * style, and its competitor ads only when the planner chose this piece to
- * follow them.
+ * campaign's first photo, else the promoted product's own; a one-per-product
+ * piece skips the campaign's photo, which may show another product), the
+ * campaign's style, and its competitor ads only when the planner chose this
+ * piece to follow them.
  */
 function pieceInputs(item: FactoryPlanItem, campaign: PieceInputs, productPhoto?: string): PieceInputs {
   const photos = item.photos?.length
     ? item.photos
-    : campaign.photos?.length
+    : campaign.photos?.length && !item.product
       ? [campaign.photos[0]]
       : productPhoto
         ? [productPhoto]
@@ -128,6 +133,8 @@ function createShell(
     inputs: PieceInputs;
     plan: FactoryPlanItem[];
     factory: FactoryState;
+    /** The one product a one-per-product piece is about. */
+    product?: PieceProduct;
   },
 ): Promise<string> {
   const format = getCampaignFormat(item.format);
@@ -138,7 +145,7 @@ function createShell(
       type: item.kind,
       ...(format?.emailType ? { emailType: format.emailType } : {}),
       ...(format?.blogType ? { blogType: format.blogType } : {}),
-      seriesBrief: buildPieceBrief(item, args.factory),
+      seriesBrief: buildPieceBrief(item, args.factory, args.product),
       // Distinct email styles across the batch, by position in the plan.
       seriesSeedIndex: args.plan.findIndex((p) => p.id === item.id),
     });
@@ -149,7 +156,7 @@ function createShell(
     flyerFormat: item.kind === "ad" ? "ad" : "post",
     // 4:5 is the tallest size both feeds take; ads run square.
     flyerAspect: item.kind === "ad" ? "1:1" : "4:5",
-    flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research),
+    flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research, args.product),
     ...(args.factory.flyer_style ? { flyerStyle: args.factory.flyer_style } : {}),
     flyerVariantCount: CAMPAIGN_FLYER_OPTIONS,
     ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),

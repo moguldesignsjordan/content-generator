@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { getBrandWithIcps, getCampaign, getDraftStatuses } from "@/lib/db/queries";
+import { getBrandWithIcps, getCampaign, getDraftStatuses, listProducts } from "@/lib/db/queries";
+import { unsavedPlanProducts } from "@/lib/factory/plan";
 import { getSessionUser } from "@/lib/supabase/server";
 import { CampaignView } from "./_components/campaign-view";
 
@@ -26,7 +27,18 @@ export default async function CampaignPage({
   const draftIds = (factory.plan ?? [])
     .map((i) => i.draft_id)
     .filter((d): d is string => Boolean(d));
-  const statuses = await getDraftStatuses(data.brand.id, draftIds).catch(() => ({}));
+  const [statuses, products] = await Promise.all([
+    getDraftStatuses(data.brand.id, draftIds).catch(() => ({})),
+    factory.products?.length ? listProducts(data.brand.id).catch(() => []) : Promise.resolve([]),
+  ]);
 
-  return <CampaignView campaignId={campaign.id} initial={factory} statuses={statuses} />;
+  return (
+    <CampaignView
+      campaignId={campaign.id}
+      initial={factory}
+      statuses={statuses}
+      brandId={data.brand.id}
+      unsavedProducts={factory.products?.length ? unsavedPlanProducts(factory, products) : []}
+    />
+  );
 }

@@ -4,10 +4,13 @@ import { useRef, useState } from "react";
 import { Button, Card, Field, Input, Textarea, useToast } from "@/components/ui";
 import type { Product } from "@/lib/db/types";
 import { ListInput } from "./list-input";
+import { ProductImport } from "../../_components/product-import";
 
 interface ProductsFormProps {
   brandId: string;
   products: Product[];
+  /** The brand's saved website, prefilled for the import. */
+  website: string;
 }
 
 interface EditableProduct {
@@ -49,8 +52,9 @@ const EMPTY: EditableProduct = {
  * The offers behind topics.maps_to_product. What's written here is exactly
  * what generation pitches, so real scope and pricing beats placeholder copy.
  */
-export function ProductsForm({ brandId, products }: ProductsFormProps) {
+export function ProductsForm({ brandId, products, website }: ProductsFormProps) {
   const [items, setItems] = useState<EditableProduct[]>(products.map(toEditable));
+  const [importing, setImporting] = useState(false);
 
   function patch(index: number, changes: Partial<EditableProduct>) {
     setItems((cur) =>
@@ -60,6 +64,37 @@ export function ProductsForm({ brandId, products }: ProductsFormProps) {
 
   return (
     <div className="space-y-4">
+      {importing ? (
+        <Card className="space-y-3 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-display text-[15px] font-semibold text-foreground">
+              Import from your website
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setImporting(false)}>
+              Close
+            </Button>
+          </div>
+          <ProductImport
+            brandId={brandId}
+            website={website}
+            existing={items.filter((i) => i.id)}
+            onSaved={(saved) =>
+              setItems((cur) => [
+                ...cur.map((item) => {
+                  const match = saved.find((p) => p.slug === item.slug);
+                  return match ? toEditable(match) : item;
+                }),
+                ...saved.filter((p) => !cur.some((item) => item.slug === p.slug)).map(toEditable),
+              ])
+            }
+          />
+        </Card>
+      ) : (
+        <Button variant="subtle" onClick={() => setImporting(true)}>
+          Import from your website
+        </Button>
+      )}
+
       {items.map((item, i) => (
         <ProductCard
           key={item.id ?? `new-${i}`}

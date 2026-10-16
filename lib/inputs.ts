@@ -162,10 +162,35 @@ export function lookPickerValue(inputs: PieceInputs): string | null {
 }
 
 /** The style a look picker tap means. A look id must already be checked as
- * this brand's; "images" with no style images is Our style. */
+ * this brand's; "images" (or "ads", once withPickedAds set their images)
+ * with no style images is Our style. */
 export function styleFromPicker(value: string, inputs: PieceInputs): StyleChoice {
   if (value === "our") return { kind: "our" };
   if (value === "none") return { kind: "none" };
-  if (value === "images") return inputs.style_images?.urls.length ? { kind: "images" } : { kind: "our" };
+  if (value === "images" || value === "ads") {
+    return inputs.style_images?.urls.length ? { kind: "images" } : { kind: "our" };
+  }
   return { kind: "look", look_id: value };
+}
+
+/**
+ * Saved competitor ads picked in the look picker, in pick order: they become
+ * the competitor ads (the first shapes the wording) and their images the
+ * style. An explicit pick replaces earlier ads and style images, unlike ads
+ * ticked passively in the chat (withStyleImages keeps the owner's uploads).
+ */
+export function withPickedAds(
+  inputs: PieceInputs,
+  ads: { id: string; image_url: string | null }[],
+): PieceInputs {
+  if (!ads.length) return inputs;
+  const urls = ads
+    .map((a) => a.image_url)
+    .filter((u): u is string => Boolean(u))
+    .slice(0, MAX_FLYER_REFERENCES);
+  return compactInputs({
+    ...inputs,
+    competitor_reference_ids: ads.map((a) => a.id),
+    ...(urls.length ? { style_images: { urls, from: "competitor" as const }, style: { kind: "images" as const } } : {}),
+  });
 }

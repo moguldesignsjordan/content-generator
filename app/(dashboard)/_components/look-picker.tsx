@@ -3,32 +3,84 @@
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import type { DesignLook } from "@/lib/db/types";
+import type { CompetitorReference, DesignLook } from "@/lib/db/types";
+import { AdLibraryPicker } from "./ad-library-picker";
 import { LookBuilder } from "./look-builder";
 
 // Picks the design look flyers follow. null = Our style (the default look,
 // else the flyers the brand approved or liked); "none" = No reference
 // (the AI picks a fresh style per option); "images" = the chat's style
 // images (the owner's own designs or the competitor ads they ticked);
-// otherwise a saved look's id.
+// "ads" = saved competitor ads picked here (chat only); otherwise a saved
+// look's id.
+
+const AD_LIBRARY_RE = /facebook\.com\/ads\/library/i;
+
+/** The brand's saved competitor ads that have a picture to follow. */
+async function fetchSavedAds(): Promise<CompetitorReference[]> {
+  const d = (await fetch("/api/competitor-references").then((r) => r.json())) as {
+    references?: CompetitorReference[];
+  };
+  return (d.references ?? []).filter((r) => r.image_url);
+}
 
 export function LookPicker({
   value,
   onChange,
   disabled,
   styleImages,
+  adPicks,
+  onAdPicks,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
   /** Offered as their own tile when the chat has any. */
   styleImages?: { urls: string[]; from: "upload" | "competitor" } | null;
+  /** Chat only: saved competitor ads picked as the style (ids, in pick order).
+   * Passing onAdPicks shows the "Ads you saved" row. */
+  adPicks?: string[];
+  onAdPicks?: (ids: string[]) => void;
 }) {
   const toast = useToast();
   const [looks, setLooks] = useState<DesignLook[] | null>(null);
   const [house, setHouse] = useState<string[]>([]);
   // "default": opened to add examples to Our style, so saving makes it the default.
   const [building, setBuilding] = useState<"new" | "default" | null>(null);
+  const [savedAds, setSavedAds] = useState<CompetitorReference[] | null>(null);
+  const [adLink, setAdLink] = useState<string | null>(null);
+  const [adLinkUrl, setAdLinkUrl] = useState<string | null>(null);
+  const showAds = Boolean(onAdPicks);
+  const picks = adPicks ?? [];
+
+  async function loadAds(): Promise<CompetitorReference[]> {
+    const ads = await fetchSavedAds();
+    setSavedAds(ads);
+    return ads;
+  }
+
+  useEffect(() => {
+    if (!showAds) return;
+    fetchSavedAds()
+      .then(setSavedAds)
+      .catch(() => setSavedAds([]));
+  }, [showAds]);
+
+  /** Any other tile clears the ad picks. */
+  function choose(next: string | null) {
+    if (picks.length) onAdPicks?.([]);
+    onChange(next);
+  }
+
+  function setPicks(ids: string[]) {
+    onAdPicks?.(ids);
+    if (ids.length) onChange("ads");
+    else if (value === "ads") onChange(null);
+  }
+
+  function toggleAd(id: string) {
+    setPicks(picks.includes(id) ? picks.filter((p) => p !== id) : [...picks, id]);
+  }
 
   useEffect(() => {
     fetch("/api/looks")
@@ -52,7 +104,9 @@ export function LookPicker({
       ? "Follows their ads' layout and type, in your brand colors with your logo. Never their words, products, or photos."
       : "Follows your designs, in your brand colors.";
   const hint =
-    activeId === "none"
+    activeId === "ads"
+      ? "Follows the ads you picked: their layout and type, in your brand colors with your logo. The first one also shapes the wording, never copied."
+      : activeId === "none"
       ? "No reference: the AI picks a fresh style for each option, in your brand colors."
       : activeId === "images"
         ? imagesHint
@@ -99,7 +153,7 @@ export function LookPicker({
             type="button"
             aria-pressed={activeId === "images"}
             disabled={disabled}
-            onClick={() => onChange("images")}
+            onClick={() => choose("images")}
             className={cn(
               "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
               activeId === "images" ? "border-accent" : "border-border hover:border-border-strong",
@@ -120,7 +174,7 @@ export function LookPicker({
           type="button"
           aria-pressed={activeId === null}
           disabled={disabled}
-          onClick={() => onChange(null)}
+          onClick={() => choose(null)}
           className={cn(
             "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
             activeId === null ? "border-accent" : "border-border hover:border-border-strong",
@@ -144,7 +198,7 @@ export function LookPicker({
           type="button"
           aria-pressed={activeId === "none"}
           disabled={disabled}
-          onClick={() => onChange("none")}
+          onClick={() => choose("none")}
           className={cn(
             "flex h-[72px] w-28 items-center justify-center rounded-[var(--radius-md)] border px-2 text-center text-[12px] font-medium transition-colors",
             activeId === "none" ? "border-accent bg-accent/[0.08] text-foreground" : "border-border text-muted hover:text-foreground",
@@ -158,7 +212,7 @@ export function LookPicker({
             type="button"
             aria-pressed={activeId === look.id}
             disabled={disabled}
-            onClick={() => onChange(look.id)}
+            onClick={() => choose(look.id)}
             className={cn(
               "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
               activeId === look.id ? "border-accent" : "border-border hover:border-border-strong",
@@ -182,6 +236,84 @@ export function LookPicker({
           + New look
         </button>
       </div>
+
+      {showAds && (
+        <div className="space-y-2">
+          <span className="block text-[12px] font-medium text-foreground">Ads you saved</span>
+          <div className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1">
+            {(savedAds ?? []).map((ad) => {
+              const order = picks.indexOf(ad.id);
+              return (
+                <button
+                  key={ad.id}
+                  type="button"
+                  aria-pressed={order >= 0}
+                  aria-label={ad.name}
+                  disabled={disabled}
+                  onClick={() => toggleAd(ad.id)}
+                  className={cn(
+                    "relative h-[72px] w-[72px] shrink-0 snap-start overflow-hidden rounded-[var(--radius-md)] border transition-colors",
+                    order >= 0 ? "border-accent ring-1 ring-accent" : "border-border hover:border-border-strong",
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={ad.image_url!} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  {order >= 0 && (
+                    <span className="absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold text-white">
+                      {order + 1}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => setAdLink((cur) => (cur === null ? "" : null))}
+              className="flex h-[72px] w-28 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border-strong px-2 text-center text-[12px] font-medium text-accent transition-colors hover:bg-accent/[0.06]"
+            >
+              + From Ad Library
+            </button>
+          </div>
+          {savedAds?.length === 0 && adLink === null && (
+            <p className="text-[12px] text-muted">No saved ads with a picture yet. Add some from the Ad Library.</p>
+          )}
+          {adLink !== null && (
+            <div className="space-y-2">
+              <input
+                autoFocus
+                value={adLink}
+                onChange={(e) => {
+                  setAdLink(e.target.value);
+                  setAdLinkUrl(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && AD_LIBRARY_RE.test(adLink)) setAdLinkUrl(adLink.trim());
+                }}
+                onBlur={() => AD_LIBRARY_RE.test(adLink) && setAdLinkUrl(adLink.trim())}
+                placeholder="Paste an advertiser's Ad Library link"
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-2 focus:border-accent/50 focus:outline-none"
+              />
+              {adLinkUrl && (
+                <AdLibraryPicker
+                  key={adLinkUrl}
+                  url={adLinkUrl}
+                  onDone={async (adIds) => {
+                    // Saved by now: find their rows and add them to the picks.
+                    const ads = await loadAds().catch(() => []);
+                    const added = adIds
+                      .map((adId) => ads.find((r) => r.source_url?.endsWith(`?id=${adId}`))?.id)
+                      .filter((id): id is string => Boolean(id) && !picks.includes(id!));
+                    setPicks([...picks, ...added]);
+                    setAdLink(null);
+                    setAdLinkUrl(null);
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <p className="text-[12px] text-muted">{hint}</p>
       {!disabled && (
@@ -213,7 +345,7 @@ export function LookPicker({
             look,
             ...(cur ?? []).map((l) => (look.is_default ? { ...l, is_default: false } : l)),
           ]);
-          onChange(look.is_default ? null : look.id);
+          choose(look.is_default ? null : look.id);
         }}
       />
     </div>

@@ -210,3 +210,12 @@ export function emailHtmlToText(input: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+/** A kebab-case slug, e.g. for a product: "Door Hangers!" is "door-hangers". */
+export function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}

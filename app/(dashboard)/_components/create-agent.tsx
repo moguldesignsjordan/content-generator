@@ -34,12 +34,16 @@ import type {
   ClientBrand,
   EmailType,
   FactoryKind,
+  FactoryProduct,
   FunnelStage,
   MediaAsset,
   PieceInputs,
   SeriesDraftRef,
 } from "@/lib/db/types";
 import { LookPicker } from "./look-picker";
+import { CHIP_CLASS, QuestionCard, StepChip } from "./question-card";
+import { ProductImport } from "./product-import";
+import type { ChatQuestion, QuestionAnswer } from "@/lib/create-questions";
 import { AdLibraryPicker } from "./ad-library-picker";
 import { ChatPreviewCard, type ChatPreview, type QueuedPreviewAction } from "./chat-preview-card";
 import type { PreviewAction } from "@/lib/chat-preview";
@@ -127,6 +131,24 @@ const STARTERS: Record<StarterKind, { text: string; hint: string }> = {
   },
 };
 
+/** The chat's inline website product import. */
+interface ProductImportOffer {
+  brandId: string;
+  website: string;
+  existing: string[];
+}
+
+/** What a send carries besides the text. */
+interface SendExtra {
+  competitorAdIds?: string[];
+  lookChoice?: string;
+  /** With lookChoice "ads": the saved ads picked in the look picker. */
+  competitorRefIds?: string[];
+  answers?: QuestionAnswer[];
+  /** A tapped chip's id, e.g. "go" on the confirm. */
+  action?: string;
+}
+
 /** A campaign the agent handed to the planner, with its settings. */
 interface CampaignHandoff {
   summary: string;
@@ -137,6 +159,10 @@ interface CampaignHandoff {
   /** The chat's photos, style, and competitor ads, passed through whole. */
   inputs?: PieceInputs;
   client_brand?: ClientBrand;
+  /** One design per product. */
+  products?: FactoryProduct[];
+  split?: "each";
+  per_product?: number;
 }
 
 interface CampaignRun {
@@ -199,8 +225,12 @@ interface CreateResponse {
   series?: SeriesDraftRef[] | null;
   /** Set when the agent hands a campaign to the planner. */
   campaign?: CampaignHandoff | null;
+  /** The agent's follow-up questions, shown as one card. */
+  questions?: ChatQuestion[] | null;
   /** The agent asked the user to pick a design look. */
   showLookPicker?: boolean;
+  /** Their products from their website, to tick and save inline. */
+  productImport?: ProductImportOffer | null;
   /** The user shared an Ad Library page: its ads show under the reply. */
   adLibraryUrl?: string | null;
   /** The style the brief follows, as the look picker shows it. */
@@ -267,6 +297,8 @@ export function CreateAgent({
   const [topicId, setTopicId] = useState<string | null>(initial?.topicId ?? null);
   const [campaignId, setCampaignId] = useState<string | null>(initial?.campaignId ?? null);
   const [options, setOptions] = useState<Option[] | null>(null);
+  const [questions, setQuestions] = useState<ChatQuestion[] | null>(null);
+  const [productImport, setProductImport] = useState<ProductImportOffer | null>(null);
   const [series, setSeries] = useState<SeriesDraftRef[] | null>(initial?.series ?? null);
   const [preview, setPreview] = useState<ChatPreview | null>(initial?.preview ?? null);
   const [queued, setQueued] = useState<QueuedPreviewAction | null>(null);
@@ -304,6 +336,10 @@ export function CreateAgent({
   const [lookId, setLookId] = useState<string | null>(null);
   // What the brief follows on the server, so an unconfirmed tap still counts.
   const [savedLook, setSavedLook] = useState<string | null>(null);
+  // A look tapped in the question card's style question.
+  const [lookTouched, setLookTouched] = useState(false);
+  // Saved competitor ads picked in the look picker, in pick order.
+  const [adPicks, setAdPicks] = useState<string[]>([]);
   // The user's style images or ticked ads, offered as their own picker tile.
   const [styleImages, setStyleImages] = useState<StyleImages | null>(null);
   const [adLibraryUrl, setAdLibraryUrl] = useState<string | null>(null);
@@ -454,16 +490,18 @@ export function CreateAgent({
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
 
-  /** extra: the ads ticked in the Ad Library picker (in tick order), or a
-   * look picker tap. */
-  function send(text: string, extra: { competitorAdIds?: string[]; lookChoice?: string } = {}) {
+  /** extra: the ads ticked in the Ad Library picker (in tick order), a look
+   * picker tap, the question card's answers, or a tapped chip's id. */
+  function send(text: string, extra: SendExtra = {}) {
     const t = text.trim();
     const imageUrls = pendingImages.map((p) => p.url);
     const styleUrls = pendingImages.filter((p) => p.role === "style").map((p) => p.url);
     if ((!t && imageUrls.length === 0) || loading || generating) return;
     // A look tapped in the open picker counts even when they reply by typing.
+    const pickerShown = lookPickerOpen || Boolean(questions?.some((q) => q.id === "style"));
     const lookChoice =
-      extra.lookChoice ?? (lookPickerOpen && lookId !== savedLook ? (lookId ?? "our") : undefined);
+      extra.lookChoice ?? (pickerShown && lookId !== savedLook ? (lookId ?? "our") : undefined);
+    const competitorRefIds = lookChoice === "ads" ? (extra.competitorRefIds ?? adPicks) : undefined;
     const displayText =
       t || (imageUrls.length === 1 ? "(attached a photo)" : "(attached photos)");
     setInput("");
@@ -471,6 +509,10 @@ export function CreateAgent({
     setError(null);
     setHint(false);
     setOptions(null);
+    setQuestions(null);
+    setProductImport(null);
+    setLookTouched(false);
+    setAdPicks([]);
     setLookPickerOpen(false);
     setAdLibraryUrl(null);
     setMessages((m) => [
@@ -482,7 +524,7 @@ export function CreateAgent({
         ...(styleUrls.length ? { styleImages: styleUrls } : {}),
       },
     ]);
-    void postToAgent(displayText, imageUrls, styleUrls, { ...extra, lookChoice });
+    void postToAgent(displayText, imageUrls, styleUrls, { ...extra, lookChoice, competitorRefIds });
   }
 
   function sendFromLanding() {
@@ -501,7 +543,7 @@ export function CreateAgent({
     text: string,
     imageUrls: string[],
     styleUrls: string[],
-    extra: { competitorAdIds?: string[]; lookChoice?: string },
+    extra: SendExtra,
   ) {
     setLoading(true);
     setLiveText("");
@@ -527,6 +569,9 @@ export function CreateAgent({
           auto: mode === "auto",
           ...(extra.lookChoice ? { lookChoice: extra.lookChoice } : {}),
           ...(extra.competitorAdIds?.length ? { competitorAdIds: extra.competitorAdIds } : {}),
+          ...(extra.competitorRefIds?.length ? { competitorRefIds: extra.competitorRefIds } : {}),
+          ...(extra.answers?.length ? { answers: extra.answers } : {}),
+          ...(extra.action ? { action: extra.action } : {}),
         }),
         signal: controller.signal,
       });
@@ -560,6 +605,8 @@ export function CreateAgent({
       setTopicId(data.topicId ?? null);
       setCard(data.card ?? null);
       setOptions(data.options ?? null);
+      setQuestions(data.questions?.length ? data.questions : null);
+      setProductImport(data.productImport ?? null);
       setLookPickerOpen(Boolean(data.showLookPicker));
       setAdLibraryUrl(data.adLibraryUrl ?? null);
       // The server owns the style: the picker shows what the brief follows.
@@ -622,6 +669,8 @@ export function CreateAgent({
     setTopicId(null);
     setCampaignId(null);
     setOptions(null);
+    setQuestions(null);
+    setProductImport(null);
     setSeries(null);
     setReady(false);
     setGenerating(false);
@@ -629,6 +678,7 @@ export function CreateAgent({
     setPendingImages([]);
     setLookPickerOpen(false);
     setLookId(null);
+    setAdPicks([]);
     setSavedLook(null);
     setStyleImages(null);
     setBriefOpen(false);
@@ -659,6 +709,9 @@ export function CreateAgent({
           // The chat's photos, style, and competitor ads, whole.
           ...(handoff.inputs ? { inputs: handoff.inputs } : {}),
           ...(handoff.client_brand ? { client_brand: handoff.client_brand } : {}),
+          ...(handoff.products?.length
+            ? { products: handoff.products, split: handoff.split, per_product: handoff.per_product }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -927,7 +980,7 @@ export function CreateAgent({
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => send(opt.label)}
+                        onClick={() => send(opt.label, { action: opt.id })}
                         disabled={loading || generating}
                         className={cn("bubble-in", CHIP_CLASS)}
                         style={{ animationDelay: `${i * 45}ms`, animationFillMode: "backwards" }}
@@ -938,27 +991,76 @@ export function CreateAgent({
                   </div>
                 )}
 
-                {lookPickerOpen && !loading && (
+                {questions && !loading && (
+                  <QuestionCard
+                    key={questions.map((q) => q.id).join()}
+                    questions={questions}
+                    disabled={loading || generating}
+                    lookId={lookId}
+                    onLookChange={(v) => {
+                      setLookId(v);
+                      setLookTouched(true);
+                    }}
+                    lookTouched={lookTouched}
+                    styleImages={styleImages}
+                    adPicks={adPicks}
+                    onAdPicks={setAdPicks}
+                    onSend={(text, answers, lookChoice) =>
+                      send(text, { answers, ...(lookChoice ? { lookChoice } : {}) })
+                    }
+                  />
+                )}
+
+                {productImport && !loading && (
+                  <div className="bubble-in space-y-3 rounded-[22px] border border-border bg-surface-2 p-3.5 sm:ml-9">
+                    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+                      <span className="bar-spectrum h-1 w-4 rounded-full" />
+                      Your products
+                    </span>
+                    <ProductImport
+                      brandId={productImport.brandId}
+                      website={productImport.website}
+                      existing={productImport.existing.map((slug) => ({ slug }))}
+                      autoStart
+                      onSaved={(saved) => {
+                        const names = saved.map((p) => p.name);
+                        send(`I added ${names.length === 1 ? "this product" : "these products"}: ${names.join(", ")}.`, {
+                          answers: [{ id: "products", values: names }],
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+
+                {lookPickerOpen && !loading && !questions?.some((q) => q.id === "style") && (
                   <div className="bubble-in space-y-3 rounded-[22px] border border-border bg-surface-2 p-3.5 sm:ml-9">
                     <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
                       <span className="bar-spectrum h-1 w-4 rounded-full" />
                       Pick a style
                     </span>
-                    <LookPicker value={lookId} onChange={setLookId} styleImages={styleImages} />
+                    <LookPicker
+                      value={lookId}
+                      onChange={setLookId}
+                      styleImages={styleImages}
+                      adPicks={adPicks}
+                      onAdPicks={setAdPicks}
+                    />
                     <StepChip
                       primary
                       label="Use this"
                       onClick={() =>
                         send(
-                          lookId === "none"
-                            ? "No reference, you pick the style."
-                            : lookId === "images"
-                              ? styleImages?.from === "competitor"
-                                ? "Follow their ads' look, in our colors."
-                                : "Follow my designs."
-                              : lookId
-                                ? "I picked a saved look to follow."
-                                : "Use our style.",
+                          lookId === "ads"
+                            ? "Follow the ads I picked, in our colors."
+                            : lookId === "none"
+                              ? "No reference, you pick the style."
+                              : lookId === "images"
+                                ? styleImages?.from === "competitor"
+                                  ? "Follow their ads' look, in our colors."
+                                  : "Follow my designs."
+                                : lookId
+                                  ? "I picked a saved look to follow."
+                                  : "Use our style.",
                           { lookChoice: lookId ?? "our" },
                         )
                       }
@@ -1334,45 +1436,6 @@ function ComposerBar({
     </div>
   );
 }
-
-/** One tappable answer in the built-in opening, styled like the agent's chips. */
-function StepChip({
-  label,
-  onClick,
-  disabled,
-  primary,
-  pressed,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-  /** Set for multi-select chips. */
-  pressed?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={pressed}
-      className={cn(
-        "rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors disabled:opacity-50",
-        primary
-          ? "border-accent bg-accent text-white hover:bg-accent-press"
-          : pressed
-            ? "border-accent/40 bg-accent/[0.12] text-foreground"
-            : CHIP_CLASS,
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-/** An answer chip in the thread: lifts toward the brand light on hover. */
-const CHIP_CLASS =
-  "rounded-full border border-border bg-surface-2 px-3.5 py-2 text-[13px] font-medium text-foreground transition-[border-color,box-shadow,transform] duration-200 hover:border-accent/45 hover:shadow-[0_0_24px_-12px_rgba(255,61,140,0.5)] active:scale-[0.97] disabled:opacity-50";
 
 /** The planner's progress after the agent hands off a campaign, or its error. */
 function CampaignRunView({

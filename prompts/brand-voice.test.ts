@@ -180,21 +180,52 @@ describe("buildBriefStateBlock", () => {
     expect(unset).toContain("Subheader: (not set)");
   });
 
-  it("leads with campaign mode when a campaign is being built, and omits it otherwise", () => {
+  it("says what's being made, for which products, and how they're split", () => {
     const block = buildBriefStateBlock(
       {
-        campaign_kind: "product",
-        campaign_products: "business cards, door hangers",
-        email_count: "2 per product, 4 total",
+        making: "flyer",
+        products: ["Business cards", "Door hangers"],
+        split: "each",
+        per_product: 3,
       } as CampaignBrief,
       null,
     );
     expect(block).toContain(
-      "CAMPAIGN MODE: product campaign; products: business cards, door hangers; emails: 2 per product, 4 total (must end in plan_series)",
+      "Making: a flyer (a social post image), a set: one design per product, made through the planner",
     );
-    // Campaign mode must sit above the field rows so it can't be missed.
-    expect(block.indexOf("CAMPAIGN MODE")).toBeLessThan(block.indexOf("Goal:"));
-    expect(buildBriefStateBlock({} as CampaignBrief, null)).not.toContain("CAMPAIGN MODE");
+    expect(block).toContain("Products: Business cards, Door hangers; a separate design for each, 3 each");
+    // What's being made leads, so it can't be scanned past.
+    expect(block.indexOf("Making:")).toBeLessThan(block.indexOf("Goal:"));
+    expect(buildBriefStateBlock({} as CampaignBrief, null)).toContain("Making: (not decided yet)");
+  });
+
+  it("counts a per-product set, and flags one over the 20-piece cap", () => {
+    const set = { making: "flyer", products: ["A", "B", "C"], split: "each" } as CampaignBrief;
+    expect(buildBriefStateBlock({ ...set, per_product: 3 }, null)).toContain("  Size: 9 pieces");
+    expect(buildBriefStateBlock({ ...set, products: ["A", "B", "C", "D"], per_product: 6 }, null)).toContain(
+      "24 pieces asked for, over the 20-piece cap",
+    );
+  });
+
+  it("shows email-only lines only for an email or an undecided kind", () => {
+    expect(buildBriefStateBlock({ making: "email" } as CampaignBrief, null)).toContain("Subheader:");
+    const flyer = buildBriefStateBlock({ making: "flyer" } as CampaignBrief, null);
+    expect(flyer).not.toContain("Subheader:");
+    expect(flyer).not.toContain("Length:");
+    expect(flyer).not.toContain("Reader belief:");
+  });
+
+  it("ends with the checklist: what's open and what was asked", () => {
+    const open = buildBriefStateBlock({ making: "campaign", key_message: "x" } as CampaignBrief, null);
+    expect(open).toContain("STILL OPEN (ask only these");
+    expect(open).toContain("channels (");
+    const asked = buildBriefStateBlock(
+      { making: "campaign", key_message: "x", asked: ["channels", "products", "size"] } as CampaignBrief,
+      null,
+    );
+    expect(asked).toContain("ASKED ALREADY OR SKIPPED");
+    expect(asked).toContain("channels: posts, ads, emails, and a blog post");
+    expect(asked).not.toContain("plan_series");
   });
 });
 

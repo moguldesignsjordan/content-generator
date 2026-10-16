@@ -3,6 +3,7 @@ import type {
   FactoryPlanItem,
   FactoryResearch,
   FactoryState,
+  Product,
 } from "@/lib/db/types";
 import { getCampaignFormat } from "@/prompts/campaign-formats";
 
@@ -38,6 +39,20 @@ export function buildResearchNotes(
   return lines.join("\n").slice(0, MAX_RESEARCH_NOTES);
 }
 
+/** What a piece knows about its one product: the saved row when there is one. */
+export type PieceProduct = Pick<Product, "name"> & Partial<Pick<Product, "description" | "price_point">>;
+
+/** The line that keeps a one-per-product piece on its product. */
+export function productFocusLine(product: PieceProduct): string {
+  return [
+    `Product (this piece is only about this one; the others get their own pieces): ${product.name}`,
+    product.description ? `About it: ${product.description}` : "",
+    product.price_point ? `Price: ${product.price_point}` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+}
+
 /**
  * The per-piece brief for an email or blog. The row's own hook and core idea
  * become the piece's hook and angle, so each piece keeps the distinct idea it
@@ -48,11 +63,16 @@ export function buildResearchNotes(
 export function buildPieceBrief(
   item: FactoryPlanItem,
   factory: Pick<FactoryState, "sentence" | "research">,
+  product?: PieceProduct,
 ): CampaignBrief {
   const format = getCampaignFormat(item.format);
   const research = buildResearchNotes(factory.research, item);
   return {
-    goal: factory.sentence,
+    // The campaign sentence names every product; this piece sells one.
+    goal: product ? `${productFocusLine(product)}. Campaign background: ${factory.sentence}` : factory.sentence,
+    ...(product
+      ? { constraints: `Only about ${product.name}. Never show or mention the campaign's other products.` }
+      : {}),
     conversation_notes: factory.sentence,
     hook: item.hook,
     angle: [item.core_idea, format ? `Format: ${format.label}. ${format.feel}` : ""]
@@ -76,11 +96,14 @@ export function buildFlyerBriefText(
   item: FactoryPlanItem,
   sentence: string,
   research?: FactoryResearch,
+  product?: PieceProduct,
 ): string {
   const format = getCampaignFormat(item.format);
   const notes = buildResearchNotes(research, item);
   return [
-    `Campaign: ${sentence}`,
+    ...(product
+      ? [productFocusLine(product), `Campaign (background only): ${sentence}`]
+      : [`Campaign: ${sentence}`]),
     format ? `Format: ${format.label}. ${format.feel}` : "",
     `Hook (open with this idea): ${item.hook}`,
     item.core_idea ? `Core idea: ${item.core_idea}` : "",

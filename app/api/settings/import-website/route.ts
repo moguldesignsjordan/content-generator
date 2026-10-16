@@ -14,8 +14,10 @@ import { generateBrandIdentity } from "@/lib/pipeline/brand-identity";
 import {
   IMPORT_TOOL,
   buildImportMessages,
+  cleanImportedProducts,
   type ImportToolInput,
 } from "@/prompts/import-website";
+import { scrapeProducts } from "@/lib/scrape/products";
 import { stripEmDashes } from "@/lib/text";
 import { logError, logWarn } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -33,14 +35,6 @@ const cleanList = (l?: string[]) => {
   const out = l?.map((s) => stripEmDashes(s.trim())).filter(Boolean);
   return out?.length ? out : undefined;
 };
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
 
 /**
  * POST { url }: scrape the site, extract a brand PROPOSAL with Claude, and
@@ -69,6 +63,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
 
+    // Runs alongside the page scan and the extraction; never fails the import.
+    const structuredProducts = scrapeProducts(parsed.data.url)
+      .then((r) => r.products)
+      .catch(() => [] as ProposedProduct[]);
     const scrape = await scrapeSite(parsed.data.url);
     const { system, user } = buildImportMessages(scrape);
 
@@ -124,24 +122,12 @@ export async function POST(req: NextRequest) {
         : logoCandidates,
     );
 
-    // Products: dedupe by slug, require a name, keep site-evidenced fields.
-    const seenSlugs = new Set<string>();
-    const products: ProposedProduct[] = [];
-    for (const p of raw.products ?? []) {
-      const name = clean(p.name);
-      if (!name) continue;
-      const slug = slugify(clean(p.slug) ?? name);
-      if (!slug || seenSlugs.has(slug)) continue;
-      seenSlugs.add(slug);
-      products.push({
-        slug,
-        name,
-        description: clean(p.description),
-        deliverables: cleanList(p.deliverables),
-        price_point: clean(p.price_point),
-        url: clean(p.url),
-      });
-    }
+    // Products with photos from the site's structured data win; the text
+    // extraction covers service sites that have none.
+    const structured = await structuredProducts;
+    const products: ProposedProduct[] = structured.length
+      ? structured
+      : cleanImportedProducts(raw.products);
 
     const email = clean(raw.contact_email);
     let colors = {

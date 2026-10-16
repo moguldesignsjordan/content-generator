@@ -8,6 +8,7 @@ import {
   lookPickerValue,
   splitPhotos,
   styleFromPicker,
+  withPickedAds,
   withInputs,
   withStyleImages,
 } from "./inputs";
@@ -156,5 +157,47 @@ describe("look picker values", () => {
     expect(styleFromPicker("images", {})).toEqual({ kind: "our" });
     expect(styleFromPicker("none", {})).toEqual({ kind: "none" });
     expect(styleFromPicker("l1", {})).toEqual({ kind: "look", look_id: "l1" });
+  });
+});
+
+describe("withPickedAds", () => {
+  const ad = (n: number, image = true) => ({
+    id: `ref-${n}`,
+    image_url: image ? `https://x.supabase.co/storage/v1/object/public/content-images/ad-${n}.jpg` : null,
+  });
+
+  it("makes the picked ads the competitor ads and their images the style, in pick order", () => {
+    const next = withPickedAds({}, [ad(2), ad(1)]);
+    expect(next).toEqual({
+      competitor_reference_ids: ["ref-2", "ref-1"],
+      style_images: { urls: [ad(2).image_url, ad(1).image_url], from: "competitor" },
+      style: { kind: "images" },
+    });
+    expect(styleFromPicker("ads", next)).toEqual({ kind: "images" });
+  });
+
+  it("replaces earlier ads and the owner's uploads, since the pick is explicit", () => {
+    const before = {
+      competitor_reference_ids: ["ref-old"],
+      style_images: { urls: ["https://x.supabase.co/own.jpg"], from: "upload" as const },
+      style: { kind: "none" as const },
+      photos: ["https://x.supabase.co/photo.jpg"],
+    };
+    const next = withPickedAds(before, [ad(1)]);
+    expect(next.competitor_reference_ids).toEqual(["ref-1"]);
+    expect(next.style_images).toEqual({ urls: [ad(1).image_url], from: "competitor" });
+    expect(next.style).toEqual({ kind: "images" });
+    expect(next.photos).toEqual(before.photos);
+  });
+
+  it("keeps at most 3 style images, and an ad without one still shapes the words", () => {
+    expect(withPickedAds({}, [ad(1), ad(2), ad(3), ad(4)]).style_images?.urls).toHaveLength(3);
+    expect(withPickedAds({}, [ad(1, false)])).toEqual({ competitor_reference_ids: ["ref-1"] });
+    expect(styleFromPicker("ads", {})).toEqual({ kind: "our" });
+  });
+
+  it("changes nothing without a pick", () => {
+    const inputs = { style: { kind: "none" as const } };
+    expect(withPickedAds(inputs, [])).toBe(inputs);
   });
 });
