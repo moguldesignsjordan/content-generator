@@ -99,10 +99,9 @@ const PROMPT_IDEAS = [
   "Turn our best email into a flyer",
 ];
 
-/** The landing's kind tiles: with text typed, tapping one sends it with the
- * kind's text in front. With nothing typed, the tile (like a preset
- * startKind) only picks the kind and shows its describe-it hint, so the first
- * message carries a real description. */
+/** The landing's kind tiles: tapping one starts the conversation with its
+ * text (plus anything already typed). A preset startKind instead shows the
+ * describe-it hint and rides at the front of their description on send. */
 export type StarterKind = "flyer" | "email" | "campaign" | "blog" | "ad";
 
 const STARTERS: Record<StarterKind, { text: string; hint: string }> = {
@@ -494,12 +493,7 @@ export function CreateAgent({
 
   function pickKind(kind: StarterKind) {
     const typed = input.trim();
-    if (!typed) {
-      setPicked((p) => (p === kind ? null : kind));
-      inputRef.current?.focus();
-      return;
-    }
-    send(`${STARTERS[kind].text}. ${typed}`);
+    send(typed ? `${STARTERS[kind].text}. ${typed}` : STARTERS[kind].text);
     setPicked(null);
   }
 
