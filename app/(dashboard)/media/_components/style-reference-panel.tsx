@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Button, Card, ConfirmDialog, Field, Input, useToast } from "@/components/ui";
+import { Button, Card, Checkbox, ConfirmDialog, Field, Input, useToast } from "@/components/ui";
 import type { StyleReference, StyleReferenceKind } from "@/lib/db/types";
+import { BulkDeleteBar, SelectToggle, useBulkSelect } from "./bulk-delete";
 
 const COPY: Record<
   StyleReferenceKind,
@@ -47,6 +48,8 @@ export function StyleReferencePanel({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bulk = useBulkSelect();
+  const RowTag = bulk.selecting ? "label" : "div";
 
   function handlePick(picked: File) {
     if (!picked.type.startsWith("image/")) {
@@ -156,9 +159,21 @@ export function StyleReferencePanel({
         <p className="px-1 text-sm text-muted">{copy.emptyHint}</p>
       ) : (
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 px-1">
+            <p className="text-[13px] text-muted">{items.length} saved</p>
+            <SelectToggle bulk={bulk} />
+          </div>
           {items.map((item, i) => (
             <Card key={item.id} className="space-y-3 p-4">
-              <div className="flex items-start gap-3">
+              {/* In select mode the whole row ticks its checkbox. */}
+              <RowTag className={`flex items-start gap-3 ${bulk.selecting ? "cursor-pointer" : ""}`}>
+                {bulk.selecting && (
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={bulk.selected.has(item.id)}
+                    onChange={() => bulk.toggle(item.id)}
+                  />
+                )}
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-surface">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -176,14 +191,16 @@ export function StyleReferencePanel({
                     {new Date(item.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmDeleteId(item.id)}
-                >
-                  Remove
-                </Button>
-              </div>
+                {!bulk.selecting && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmDeleteId(item.id)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </RowTag>
               {item.design_profile?.summary && (
                 <p className="text-sm leading-relaxed text-muted">
                   {item.design_profile.summary}
@@ -193,6 +210,13 @@ export function StyleReferencePanel({
           ))}
         </div>
       )}
+
+      <BulkDeleteBar
+        bulk={bulk}
+        endpoint="/api/style-references"
+        description="Content already generated with them keeps its look; you just can't pick them again."
+        onDeleted={(ids) => setItems((prev) => prev.filter((r) => !ids.includes(r.id)))}
+      />
 
       <ConfirmDialog
         open={confirmDeleteId !== null}

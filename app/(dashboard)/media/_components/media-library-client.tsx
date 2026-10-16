@@ -10,6 +10,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { PlusIcon } from "@/components/ui/icons";
+import { cn } from "@/lib/cn";
 import type {
   CompetitorReference,
   MediaAsset,
@@ -18,6 +19,7 @@ import type {
 } from "@/lib/db/types";
 import { StyleReferencePanel } from "./style-reference-panel";
 import { CompetitorReferencePanel } from "./competitor-reference-panel";
+import { BulkDeleteBar, SelectToggle, useBulkSelect } from "./bulk-delete";
 
 const KIND_LABELS: Record<MediaAssetKind, string> = {
   hero: "Hero",
@@ -29,9 +31,15 @@ const KIND_LABELS: Record<MediaAssetKind, string> = {
 function MediaAssetCard({
   asset,
   onDelete,
+  selecting,
+  selected,
+  onToggle,
 }: {
   asset: MediaAsset;
   onDelete: () => void;
+  selecting: boolean;
+  selected: boolean;
+  onToggle: () => void;
 }) {
   const toast = useToast();
 
@@ -45,7 +53,7 @@ function MediaAssetCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-surface">
       <div className="aspect-[4/3] w-full bg-surface-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -73,6 +81,33 @@ function MediaAssetCard({
           </Button>
         </div>
       </div>
+      {/* Covers the card's buttons so a tap ticks instead. */}
+      {selecting && (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? "Unselect image" : "Select image"}
+          onClick={onToggle}
+          className={cn(
+            "absolute inset-0 z-10 rounded-xl border-2 transition-colors",
+            selected ? "border-accent bg-accent/10" : "border-transparent",
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2",
+              selected ? "border-accent bg-accent" : "border-white/80 bg-black/40",
+            )}
+          >
+            {selected && (
+              <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 stroke-white stroke-[2.5]">
+                <path d="M4 8.3l2.6 2.6L12 5.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </span>
+        </button>
+      )}
     </div>
   );
 }
@@ -87,6 +122,7 @@ function MyMediaTab({ initialMedia }: { initialMedia: MediaAsset[] }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bulk = useBulkSelect();
 
   function handlePick(picked: File) {
     if (!picked.type.startsWith("image/")) {
@@ -146,13 +182,16 @@ function MyMediaTab({ initialMedia }: { initialMedia: MediaAsset[] }) {
 
   return (
     <div className="space-y-4">
-      <button
-        type="button"
-        onClick={() => setAddOpen(true)}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm font-medium text-muted transition-colors hover:border-foreground/40 hover:text-foreground"
-      >
-        <PlusIcon size={16} /> Upload an image to your library
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm font-medium text-muted transition-colors hover:border-foreground/40 hover:text-foreground"
+        >
+          <PlusIcon size={16} /> Upload an image to your library
+        </button>
+        {items.length > 0 && <SelectToggle bulk={bulk} />}
+      </div>
 
       {items.length === 0 ? (
         <p className="px-1 text-sm text-muted">
@@ -166,10 +205,20 @@ function MyMediaTab({ initialMedia }: { initialMedia: MediaAsset[] }) {
               key={asset.id}
               asset={asset}
               onDelete={() => setConfirmDeleteId(asset.id)}
+              selecting={bulk.selecting}
+              selected={bulk.selected.has(asset.id)}
+              onToggle={() => bulk.toggle(asset.id)}
             />
           ))}
         </div>
       )}
+
+      <BulkDeleteBar
+        bulk={bulk}
+        endpoint="/api/media"
+        description="Drafts that already used them keep rendering; you just can't reuse them again."
+        onDeleted={(ids) => setItems((prev) => prev.filter((a) => !ids.includes(a.id)))}
+      />
 
       <Sheet
         open={addOpen}

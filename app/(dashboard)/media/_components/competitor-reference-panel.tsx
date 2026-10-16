@@ -15,6 +15,7 @@ import {
 } from "@/components/ui";
 import type { CompetitorReference } from "@/lib/db/types";
 import type { AdLibraryAd } from "@/lib/clients/scrapecreators";
+import { BulkDeleteBar, SelectToggle, useBulkSelect } from "./bulk-delete";
 
 type InputMode = "text" | "image" | "url" | "library";
 type PreviewAd = AdLibraryAd & { saved: boolean };
@@ -52,6 +53,8 @@ export function CompetitorReferencePanel({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loadingAds, setLoadingAds] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bulk = useBulkSelect();
+  const RowTag = bulk.selecting ? "label" : "div";
 
   function handlePick(picked: File) {
     if (!picked.type.startsWith("image/")) {
@@ -324,9 +327,21 @@ export function CompetitorReferencePanel({
         </p>
       ) : (
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 px-1">
+            <p className="text-[13px] text-muted">{items.length} saved</p>
+            <SelectToggle bulk={bulk} />
+          </div>
           {items.map((item) => (
             <Card key={item.id} className="space-y-3 p-4">
-              <div className="flex items-start gap-3">
+              {/* In select mode the whole row ticks its checkbox. */}
+              <RowTag className={`flex items-start gap-3 ${bulk.selecting ? "cursor-pointer" : ""}`}>
+                {bulk.selecting && (
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={bulk.selected.has(item.id)}
+                    onChange={() => bulk.toggle(item.id)}
+                  />
+                )}
                 {item.input_kind === "image" && item.image_url && (
                   <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-surface">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -346,14 +361,16 @@ export function CompetitorReferencePanel({
                     {item.source_url ? ` · ${item.source_url}` : ""}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmDeleteId(item.id)}
-                >
-                  Remove
-                </Button>
-              </div>
+                {!bulk.selecting && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmDeleteId(item.id)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </RowTag>
               {item.competitor_profile ? (
                 <p className="text-sm leading-relaxed text-muted">
                   {item.competitor_profile.summary}
@@ -367,6 +384,13 @@ export function CompetitorReferencePanel({
           ))}
         </div>
       )}
+
+      <BulkDeleteBar
+        bulk={bulk}
+        endpoint="/api/competitor-references"
+        description="Emails already generated with them keep their content; you just can't pick them again."
+        onDeleted={(ids) => setItems((prev) => prev.filter((r) => !ids.includes(r.id)))}
+      />
 
       <ConfirmDialog
         open={confirmDeleteId !== null}
