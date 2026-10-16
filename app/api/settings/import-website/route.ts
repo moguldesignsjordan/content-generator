@@ -17,7 +17,7 @@ import {
   cleanImportedProducts,
   type ImportToolInput,
 } from "@/prompts/import-website";
-import { scrapeProducts } from "@/lib/scrape/products";
+import { addShareImages, mergeProducts, scrapeProducts } from "@/lib/scrape/products";
 import { stripEmDashes } from "@/lib/text";
 import { logError, logWarn } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -122,12 +122,12 @@ export async function POST(req: NextRequest) {
         : logoCandidates,
     );
 
-    // Products with photos from the site's structured data win; the text
-    // extraction covers service sites that have none.
-    const structured = await structuredProducts;
-    const products: ProposedProduct[] = structured.length
-      ? structured
-      : cleanImportedProducts(raw.products);
+    // The extraction's words, with photos and prices from the site's
+    // structured data; an offer still without a photo takes its page's.
+    const products: ProposedProduct[] = await addShareImages(
+      mergeProducts(cleanImportedProducts(raw.products), await structuredProducts),
+      scrape.origin,
+    );
 
     const email = clean(raw.contact_email);
     let colors = {

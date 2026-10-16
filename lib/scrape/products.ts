@@ -7,12 +7,14 @@ import { uploadContentImage } from "@/lib/pipeline/generate-image";
 import { emailHtmlToText, slugify, stripEmDashes } from "@/lib/text";
 import type { ProposedProduct } from "@/lib/db/types";
 
-// Finds a site's products with their photos, from structured data only: the
-// sitemaps (robots.txt, sitemap.xml, one level of sitemap index), product-like
-// links on the homepage, the site's own shop subdomains (print., shop., ...),
-// and Shopify's /products.json. Each page is read for JSON-LD Product first,
-// then Open Graph. Service sites with none of that fall back to the website
-// import's text extraction in the route. Nothing here writes to the DB.
+// Finds a site's products and services with their photos, from structured
+// data only: the sitemaps (robots.txt, sitemap.xml, one level of sitemap
+// index), offer-like links on the homepage (a product, a service, a menu
+// item, a class), the site's own shop subdomains (print., shop., ...), and
+// Shopify's /products.json. Each page is read for JSON-LD (Product, Service,
+// Course, MenuItem) first, then Open Graph. Sites with none of that fall back
+// to the website import's text extraction in the route, and addShareImages
+// gives those offers their page's photo. Nothing here writes to the DB.
 
 const MAX_PAGES = 30;
 const MAX_SUBDOMAINS = 3;
@@ -21,7 +23,8 @@ const CONCURRENCY = 3;
 const TOTAL_BUDGET_MS = 45_000;
 const SITEMAP_BYTES = 2_000_000;
 
-const PRODUCT_PATH = /\/(products?|shop|store|items?|p|catalog|collections\/[^/]+\/products)\/[^/?#]+/i;
+const PRODUCT_PATH =
+  /\/(products?|shop|store|items?|p|catalog|collections\/[^/]+\/products|services?|what-we-do|solutions|packages?|offerings?|treatments?|menu|classes|courses?|programs?|listings?)\/[^/?#]+/i;
 const SHOP_SUBDOMAIN = /^(print|shop|store|buy|products?)\./i;
 const NOT_A_PRODUCT =
   /\/(about|contact|cart|checkout|account|login|blog|news|faq|privacy|terms|policies|search|tag|category|collections?)\/?$/i;
@@ -126,9 +129,11 @@ interface JsonLdNode {
   url?: unknown;
 }
 
+const OFFER_TYPES = new Set(["Product", "ProductGroup", "IndividualProduct", "Service", "Course", "MenuItem"]);
+
 function isProductType(type: unknown): boolean {
   const types = Array.isArray(type) ? type : [type];
-  return types.some((t) => t === "Product" || t === "ProductGroup" || t === "IndividualProduct");
+  return types.some((t) => typeof t === "string" && OFFER_TYPES.has(t));
 }
 
 function findProductNode(value: unknown): JsonLdNode | null {
@@ -236,6 +241,62 @@ export function parseShopifyProducts(json: string, origin: URL): ProposedProduct
   });
 }
 
+/** "web-design" in the page address is "Web Design". */
+export function nameFromUrl(url: string | undefined): string {
+  try {
+    const segment = decodeURIComponent(new URL(url ?? "").pathname.split("/").filter(Boolean).pop() ?? "");
+    return segment
+      .replace(/\.[a-z0-9]+$/i, "")
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((w) => w[0].toUpperCase() + w.slice(1))
+      .join(" ");
+  } catch {
+    return "";
+  }
+}
+
+function homeTitle(html: string): string | undefined {
+  const $ = cheerio.load(html);
+  const title = $('meta[property="og:title"]').attr("content") ?? $("title").first().text();
+  return stripSiteSuffix(clean(title, 160)) || undefined;
+}
+
+/**
+ * Many service sites reuse one site-wide title, description, and share image
+ * on every page. A value on 2+ pages (or a name matching the homepage's
+ * title) is that default, not the offer's own: the name comes from the page
+ * address instead, and a shared description or photo is dropped.
+ */
+export function dropSiteDefaults(pages: ProposedProduct[], siteTitle?: string): ProposedProduct[] {
+  const shared = (pick: (p: ProposedProduct) => string | undefined) => {
+    const pagesBy = new Map<string, Set<string | undefined>>();
+    for (const p of pages) {
+      const value = pick(p);
+      if (value) pagesBy.set(value, (pagesBy.get(value) ?? new Set()).add(p.url));
+    }
+    return new Set([...pagesBy].filter(([, urls]) => urls.size > 1).map(([value]) => value));
+  };
+  const names = shared((p) => p.name.toLowerCase());
+  const descriptions = shared((p) => p.description);
+  const images = shared((p) => p.image_url);
+  return pages.flatMap((p) => {
+    const generic = names.has(p.name.toLowerCase()) || p.name.toLowerCase() === siteTitle?.toLowerCase();
+    const name = generic ? nameFromUrl(p.url) : p.name;
+    if (!name) return [];
+    const { description, image_url, ...rest } = p;
+    return [
+      {
+        ...rest,
+        name,
+        slug: generic ? slugify(name) : p.slug,
+        ...(description && !descriptions.has(description) ? { description } : {}),
+        ...(image_url && !images.has(image_url) ? { image_url } : {}),
+      },
+    ];
+  });
+}
+
 /** Product pages one host's sitemaps list. */
 async function sitemapProductUrls(host: URL): Promise<string[]> {
   const robots = await fetchText(new URL("/robots.txt", host), { maxBytes: 100_000 });
@@ -289,6 +350,7 @@ export async function scrapeProducts(inputUrl: string): Promise<ScrapedProducts>
   }
 
   const queue = [...candidates].slice(0, MAX_PAGES);
+  const scanned: ProposedProduct[] = [];
   let cursor = 0;
   async function worker() {
     for (;;) {
@@ -296,11 +358,12 @@ export async function scrapeProducts(inputUrl: string): Promise<ScrapedProducts>
       if (i >= queue.length || Date.now() - started > TOTAL_BUDGET_MS) return;
       const page = await fetchHtml(new URL(queue[i]));
       const product = page ? parseProductPage(page.html, page.finalUrl.toString()) : null;
-      if (product) add(product);
+      if (product) scanned.push(product);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 
+  dropSiteDefaults(scanned, home ? homeTitle(home.html) : undefined).forEach(add);
   return { origin: origin.origin, products: [...products.values()] };
 }
 
@@ -321,4 +384,63 @@ export async function mirrorProductPhoto(sourceUrl: string): Promise<string | nu
   const optimized = await optimizeEmailImage(img.bytes);
   const { url } = await uploadContentImage(optimized.data, optimized.format);
   return url;
+}
+
+const MAX_SHARE_IMAGES = 12;
+
+/** The page's share image (og:image), absolute. */
+export function shareImage(html: string, pageUrl: string): string | undefined {
+  const $ = cheerio.load(html);
+  const content =
+    $('meta[property="og:image"]').attr("content") ?? $('meta[name="twitter:image"]').attr("content");
+  return absolute(content, new URL(pageUrl));
+}
+
+/** Text-extracted offers get their own page's share image as a photo, when
+ * the page is on the site being imported. */
+export async function addShareImages(products: ProposedProduct[], origin: string): Promise<ProposedProduct[]> {
+  const domain = baseDomain(new URL(origin).hostname);
+  const onSite = (url?: string) => {
+    try {
+      const host = new URL(url ?? "").hostname.toLowerCase();
+      return host === domain || host.endsWith(`.${domain}`);
+    } catch {
+      return false;
+    }
+  };
+  const todo = products.filter((p) => !p.image_url && onSite(p.url)).slice(0, MAX_SHARE_IMAGES);
+  const images = new Map<string, string>();
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const product = todo[cursor++];
+      if (!product) return;
+      const page = await fetchHtml(new URL(product.url!)).catch(() => null);
+      const image = page ? shareImage(page.html, page.finalUrl.toString()) : undefined;
+      if (image) images.set(product.slug, image);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
+  return products.map((p) => (images.has(p.slug) ? { ...p, image_url: images.get(p.slug) } : p));
+}
+
+/**
+ * The text extraction's offers (richer words: deliverables, stated prices)
+ * with the structured scan's photos and prices filled in where they match
+ * by slug or link, plus any offer only the scan found.
+ */
+export function mergeProducts(extracted: ProposedProduct[], structured: ProposedProduct[]): ProposedProduct[] {
+  const used = new Set<ProposedProduct>();
+  const merged = extracted.map((p) => {
+    const match = structured.find((s) => !used.has(s) && (s.slug === p.slug || (p.url && s.url === p.url)));
+    if (!match) return p;
+    used.add(match);
+    return {
+      ...p,
+      ...(!p.image_url && match.image_url ? { image_url: match.image_url } : {}),
+      ...(!p.price_point && match.price_point ? { price_point: match.price_point } : {}),
+      ...(!p.url && match.url ? { url: match.url } : {}),
+    };
+  });
+  return [...merged, ...structured.filter((s) => !used.has(s))];
 }

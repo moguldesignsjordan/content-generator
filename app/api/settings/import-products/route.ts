@@ -4,7 +4,7 @@ import { DRAFT_MODEL, getAnthropic, isAnthropicConfigured, logUsage } from "@/li
 import { getBrandWithIcps } from "@/lib/db/queries";
 import type { ProposedProduct } from "@/lib/db/types";
 import { ScrapeError, scrapeSite } from "@/lib/scrape";
-import { scrapeProducts } from "@/lib/scrape/products";
+import { addShareImages, scrapeProducts } from "@/lib/scrape/products";
 import {
   IMPORT_TOOL,
   buildImportMessages,
@@ -58,7 +58,10 @@ export async function POST(req: NextRequest) {
       });
       logUsage("import-products", DRAFT_MODEL, response.usage, { brandId: data.brand.id });
       const tu = response.content.find((b) => b.type === "tool_use");
-      products = cleanImportedProducts(tu?.type === "tool_use" ? (tu.input as ImportToolInput).products : []);
+      products = await addShareImages(
+        cleanImportedProducts(tu?.type === "tool_use" ? (tu.input as ImportToolInput).products : []),
+        scrape.origin,
+      );
     }
 
     return NextResponse.json({ products, source_url: found.origin });

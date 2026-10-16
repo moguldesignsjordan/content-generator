@@ -16,7 +16,12 @@ vi.mock("@/lib/images/optimize", () => ({ optimizeEmailImage: vi.fn() }));
 vi.mock("@/lib/pipeline/generate-image", () => ({ uploadContentImage: vi.fn() }));
 
 import {
+  addShareImages,
+  dropSiteDefaults,
   isProductPath,
+  mergeProducts,
+  nameFromUrl,
+  shareImage,
   linksFromHome,
   parseProductPage,
   parseShopifyProducts,
@@ -195,5 +200,114 @@ describe("scrapeProducts", () => {
     fetchHtmlMock.mockResolvedValue({ finalUrl: new URL("https://agency.example.com/"), html: "<a href='/about'>About</a>" });
     fetchTextMock.mockResolvedValue(null);
     expect((await scrapeProducts("agency.example.com")).products).toEqual([]);
+  });
+});
+
+describe("services and other offers", () => {
+  it("treats service, menu, class, and listing pages as offers, never their index pages", () => {
+    expect(isProductPath("https://a.com/services/web-design")).toBe(true);
+    expect(isProductPath("https://a.com/menu/brisket-plate")).toBe(true);
+    expect(isProductPath("https://a.com/treatments/hydrafacial")).toBe(true);
+    expect(isProductPath("https://a.com/classes/beginner-yoga")).toBe(true);
+    expect(isProductPath("https://a.com/listings/12-oak-st")).toBe(true);
+    expect(isProductPath("https://a.com/services")).toBe(false);
+    expect(isProductPath("https://a.com/services/")).toBe(false);
+  });
+
+  it("reads JSON-LD Service, and a service page's Open Graph tags", () => {
+    const service = `<script type="application/ld+json">{"@type":"Service","name":"Drain Cleaning","description":"Same-day drain clearing.","image":"/img/drain.jpg","offers":{"price":"149","priceCurrency":"USD"}}</script>`;
+    expect(parseProductPage(service, "https://plumb.example.com/services/drains")).toMatchObject({
+      name: "Drain Cleaning",
+      price_point: "$149",
+      image_url: "https://plumb.example.com/img/drain.jpg",
+    });
+    const og = `<meta property="og:title" content="Web Design | Mogul Design Agency"><meta property="og:image" content="/og/web.png">`;
+    expect(parseProductPage(og, "https://moguldesignagency.com/services/web-design")).toMatchObject({
+      name: "Web Design",
+      image_url: "https://moguldesignagency.com/og/web.png",
+    });
+  });
+
+  it("reads a page's share image, falling back to the Twitter one", () => {
+    expect(shareImage(`<meta name="twitter:image" content="/t.png">`, "https://a.com/x")).toBe("https://a.com/t.png");
+    expect(shareImage("<title>none</title>", "https://a.com/x")).toBeUndefined();
+  });
+});
+
+describe("addShareImages", () => {
+  beforeEach(() => {
+    fetchHtmlMock.mockReset();
+  });
+
+  it("gives on-site offers without a photo their page's share image, and leaves the rest", async () => {
+    fetchHtmlMock.mockImplementation(async (url: URL) => ({
+      finalUrl: url,
+      html: `<meta property="og:image" content="/og${url.pathname}.png">`,
+    }));
+    const out = await addShareImages(
+      [
+        { slug: "seo", name: "SEO", url: "https://www.agency.com/services/seo" },
+        { slug: "ads", name: "Ads", url: "https://other.com/ads" },
+        { slug: "web", name: "Web", url: "https://agency.com/services/web", image_url: "https://x/kept.png" },
+        { slug: "brand", name: "Brand" },
+      ],
+      "https://agency.com",
+    );
+    expect(out.map((p) => p.image_url)).toEqual([
+      "https://www.agency.com/og/services/seo.png",
+      undefined,
+      "https://x/kept.png",
+      undefined,
+    ]);
+    expect(fetchHtmlMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("mergeProducts", () => {
+  it("keeps the extraction's words, adds the scan's photo and price, and appends what only the scan found", () => {
+    const extracted = [
+      { slug: "web-design", name: "Web Design", description: "Custom sites, 6 pages.", deliverables: ["Design", "Build"] },
+      { slug: "branding", name: "Branding", url: "https://a.com/services/brand", price_point: "$2,500" },
+    ];
+    const structured = [
+      { slug: "web-design", name: "Web Design", description: "Short meta text", image_url: "https://a.com/web.png" },
+      { slug: "brand-identity", name: "Brand Identity", url: "https://a.com/services/brand", image_url: "https://a.com/b.png", price_point: "$9" },
+      { slug: "stickers", name: "Stickers", image_url: "https://a.com/s.png" },
+    ];
+    expect(mergeProducts(extracted, structured)).toEqual([
+      { ...extracted[0], image_url: "https://a.com/web.png" },
+      { ...extracted[1], image_url: "https://a.com/b.png" },
+      structured[2],
+    ]);
+  });
+});
+
+describe("dropSiteDefaults", () => {
+  it("names pages that share the site-wide title from their address, and drops shared text and photos", () => {
+    const shared = { name: "Mogul Design Agency", description: "We design brands.", image_url: "https://a.com/og.png" };
+    const out = dropSiteDefaults(
+      [
+        { slug: "x", url: "https://a.com/services/web-design", ...shared },
+        { slug: "x", url: "https://a.com/services/automations", ...shared },
+        { slug: "cards", name: "Business Cards", description: "Thick cards.", image_url: "https://a.com/cards.png", url: "https://a.com/products/cards" },
+      ],
+      "Mogul Design Agency",
+    );
+    expect(out).toEqual([
+      { slug: "web-design", name: "Web Design", url: "https://a.com/services/web-design" },
+      { slug: "automations", name: "Automations", url: "https://a.com/services/automations" },
+      { slug: "cards", name: "Business Cards", description: "Thick cards.", image_url: "https://a.com/cards.png", url: "https://a.com/products/cards" },
+    ]);
+  });
+
+  it("renames a single page whose name is just the site's title", () => {
+    expect(
+      dropSiteDefaults([{ slug: "acme", name: "Acme Co", url: "https://acme.com/services/roof-repair" }], "acme co")[0].name,
+    ).toBe("Roof Repair");
+  });
+
+  it("reads a name from an address", () => {
+    expect(nameFromUrl("https://a.com/menu/brisket_plate.html")).toBe("Brisket Plate");
+    expect(nameFromUrl("https://a.com/")).toBe("");
   });
 });
