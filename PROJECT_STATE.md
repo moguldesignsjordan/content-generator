@@ -8,9 +8,9 @@ blow) belongs in git history and the code itself, not here. `git log
 what's genuinely still open. When a session ends, edit the sections below
 rather than appending a new session log.
 
-Last updated: 2026-10-15. Everything is committed and pushed to `main`
-(latest `0406130`). Trimmed from a 1,700-line session log; the old entries
-are in git history (`git log -p PROJECT_STATE.md`).
+Last updated: 2026-10-16. `git status` and `git log` show what's committed
+and pushed. Trimmed from a 1,700-line session log; the old entries are in
+git history (`git log -p PROJECT_STATE.md`).
 
 ## Locked decisions
 
@@ -41,9 +41,21 @@ are in git history (`git log -p PROJECT_STATE.md`).
   code, not just the prompt). The Create chat is different: it searches and
   fetches on its own whenever context helps, capped at 3 searches and 2
   fetches per model call (Jordan's call, 2026-10-15).
-- Competitor ads: only distilled strategy reaches copy prompts; competitor
-  images reach the image model only inside a look the owner built, with a
-  no-copying instruction.
+- Competitor ads (Jordan's call, 2026-10-16): the writers get the ad's
+  distilled strategy plus its saved wording as a suggestion (borrow phrasing,
+  never their brand, prices, claims, numbers, or whole lines). Ads ticked in
+  the chat become the flyer and ad style by default, in the brand's colors and
+  logo; the look picker switches back to Our style. A campaign's planner
+  marks about a third of the pieces to follow the ad.
+- Images and inputs (Jordan's call, 2026-10-16): every image attached in the
+  chat is labeled by the owner, "In picture" (shown exactly as it looks) or
+  "Style" (a design to follow). Photos, style, and competitor ads travel as
+  one `inputs` object through every handoff (`lib/inputs.ts`), snapshotted on
+  each draft. The first photo leads (an email's or blog's top image, as-is;
+  the rest go in the email body). A flyer option or campaign piece shows one
+  or several photos, picked by the copy writer or planner, which see them.
+  Every writer gets the same brand context (guidelines, voice, positioning,
+  learned memory) and the same brief block.
 - Flyers (Jordan's call, 2026-10-15, replaces "code sets the text"): every
   option is designed by the image model, following a look or attached design,
   or with No reference a preset direction per option. Haiku reads the text
@@ -108,7 +120,7 @@ are in git history (`git log -p PROJECT_STATE.md`).
   monthly allowance cron.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
 - **Migrations:** all through 031 are applied (checked live 2026-10-14).
-- **Checks:** `npm run typecheck`, `npm test` (770 tests), `npm run lint`
+- **Checks:** `npm run typecheck`, `npm test` (810 tests), `npm run lint`
   (0 errors, 14 warnings), `npm run build`. `next build` runs lint, so a lint
   error now fails the deploy.
 
@@ -134,7 +146,11 @@ are in git history (`git log -p PROJECT_STATE.md`).
    And the Oct 15 UI upgrade, which passed typecheck, lint, tests and build
    but hasn't been seen rendered: the home Launchpad (tiles, rows, tile tap
    starting the chat), Review, Library, Campaigns, empty states, and the mobile
-   tab bar, at phone and desktop widths in light and dark.
+   tab bar, at phone and desktop widths in light and dark. And the Oct 16
+   inputs work: label attached images In picture or Style, tick competitor ads
+   (the look picker should show Their ads selected), then make a flyer, an
+   email, a blog, and a campaign test launch, and check each used the right
+   photos and style (drafts' `meta.inputs`, the saved image prompts).
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

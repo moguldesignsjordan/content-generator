@@ -123,7 +123,20 @@ export function resolveVariantStyles(
 export interface FlyerCopyOutput extends FlyerCopy {
   /** Visual concept for the background/imagery; never contains the text. */
   scene: string;
+  /** The owner's photos this option shows, by number (1-based). */
+  photos?: number[];
 }
+
+/** Only offered when the owner's photos are attached to the copy call. */
+const PHOTOS_PROPERTY = {
+  photos: {
+    type: "array",
+    items: { type: "integer" },
+    description:
+      "The numbers of the PRODUCT PHOTOS this variant shows (1, 2, ...): one, " +
+      "or several together when it's about more than one product.",
+  },
+};
 
 // One flyer's fields: each item of save_flyer_variants.
 const FLYER_COPY_PROPERTIES = {
@@ -241,12 +254,18 @@ const EXTRAS_PROPERTY = {
 const MAX_EXTRA_CHARS = 90;
 
 /** Forced tool: several complete alternative flyers in one cheap call. */
-export function flyerVariantsTool(format: FlyerFormat = "post", withExtras = false): Anthropic.Tool {
+export function flyerVariantsTool(
+  format: FlyerFormat = "post",
+  withExtras = false,
+  withPhotos = false,
+): Anthropic.Tool {
   const ad = format === "ad";
   const properties = {
     ...(ad ? AD_PROPERTIES : FLYER_COPY_PROPERTIES),
     ...(withExtras ? EXTRAS_PROPERTY : {}),
+    ...(withPhotos ? PHOTOS_PROPERTY : {}),
   };
+  const required = [...(ad ? AD_REQUIRED : FLYER_COPY_REQUIRED), ...(withPhotos ? ["photos"] : [])];
   return {
     name: "save_flyer_variants",
     description:
@@ -262,7 +281,7 @@ export function flyerVariantsTool(format: FlyerFormat = "post", withExtras = fal
           items: {
             type: "object",
             properties,
-            required: ad ? AD_REQUIRED : FLYER_COPY_REQUIRED,
+            required,
           },
         },
       },
@@ -279,14 +298,17 @@ export function displayDomain(url: string): string {
 /** Builds the (system, user) pair for the flyer variants call. */
 export function buildFlyerCopyMessages(args: {
   brandName: string;
-  voiceBlock: string;
-  guidelinesBlock?: string;
+  /** The shared brand context (buildBrandContext), the same every writer gets. */
+  brandContext: string;
   topicTitle: string;
   aspect: FlyerAspect;
   /** The brand's real site, so a website spot never gets a guessed domain. */
   website?: string;
   /** Freeform creative brief typed at creation time, if any. */
   brief?: string;
+  /** The chat's structured brief (buildCampaignBriefBlock for social), the
+   * same block the email and blog writers read. */
+  briefBlock?: string;
   /** The design-direction preset, so the scene the model writes fits it
    * (e.g. minimal wants one element, photo_backdrop wants a real setting). */
   style?: FlyerStyleId;
@@ -308,6 +330,8 @@ export function buildFlyerCopyMessages(args: {
   variants: { count: number; styles?: (FlyerStyleId | undefined)[] };
   /** The look's extra text spots (DesignLookProfile.text_slots). */
   textSlots?: string[];
+  /** How many of the owner's photos ride ahead of the user text as images. */
+  photoCount?: number;
 }): { system: string; user: string } {
   const variants = args.variants;
   const perVariantStyles =
@@ -399,6 +423,19 @@ export function buildFlyerCopyMessages(args: {
       ]
     : [];
 
+  const photoCount = args.photoCount ?? 0;
+  const photoLines = photoCount
+    ? [
+        "",
+        `PRODUCT PHOTOS: the ${photoCount === 1 ? "image above is a real photo" : `${photoCount} images above are real photos`} of the owner's products, numbered 1 to ${photoCount} in order. Look at each one.`,
+        "For each variant, set photos to the ones it shows (one, or several together",
+        "when it's about more than one product), and write its scene around exactly",
+        "those products as they look. Never invent a product or show one that isn't",
+        "in the photos, and give a photographed product no mockup text: it keeps its",
+        "own printed design.",
+      ]
+    : [];
+
   const rejectionLines = args.rejection
     ? [
         "",
@@ -415,8 +452,7 @@ export function buildFlyerCopyMessages(args: {
     : [];
 
   const user = [
-    args.guidelinesBlock ?? "",
-    args.voiceBlock,
+    args.brandContext,
     "",
     `FLYER TOPIC: ${args.topicTitle}`,
     `FLYER SHAPE: ${FLYER_ASPECTS[args.aspect].label}`,
@@ -435,9 +471,11 @@ export function buildFlyerCopyMessages(args: {
         ? `DESIGN DIRECTION (the scene you write must fit it): ${FLYER_STYLE_DIRECTIONS[args.style]}`
         : "",
     args.brief ? `CREATIVE BRIEF FROM THE USER (follow it): ${args.brief}` : "",
+    args.briefBlock ? `\n${args.briefBlock}` : "",
     ...emailLines,
     ...competitorLines,
     ...slotLines,
+    ...photoLines,
     ...rejectionLines,
     "",
     `Call save_flyer_variants with ${variants.count} complete variants.`,
@@ -485,7 +523,17 @@ export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
     scene: plain(out.scene.trim()),
     ...cleanExtras(out.extras),
     ...cleanMockup(out.mockup),
+    ...cleanPhotoNumbers(out.photos),
   };
+}
+
+/** Whole, positive, unique photo numbers; the pipeline maps them to photos. */
+function cleanPhotoNumbers(raw: unknown): { photos?: number[] } {
+  if (!Array.isArray(raw)) return {};
+  const numbers = Array.from(
+    new Set(raw.filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n >= 1)),
+  );
+  return numbers.length ? { photos: numbers } : {};
 }
 
 /** Cap per mockup line: a name, a tagline, or a phone number. */
@@ -545,6 +593,7 @@ export function parseFlyerVariants(
           scene: c.scene,
           extras: c.extras,
           mockup: c.mockup,
+          photos: c.photos,
         });
         return { ...copy, ad };
       })
@@ -569,8 +618,8 @@ export type FlyerQuietZone = "top" | "bottom" | "none";
  * supporting line, CTA, and logo are set on top afterwards in code with the
  * brand's real fonts and colors (lib/flyer/compose.tsx), so the model is told
  * to draw no text at all: image models misspell and off-brand type, code
- * doesn't. Reference images, when attached, come in this order: the product
- * photo (kept exactly as it is), then a style reference.
+ * doesn't. Reference images, when attached, come in this order: the owner's
+ * product photos (kept exactly as they are), then a style reference.
  */
 export function buildFlyerImagePrompt(
   copy: FlyerCopyOutput,
@@ -578,8 +627,9 @@ export function buildFlyerImagePrompt(
   aspect: FlyerAspect,
   hasReference: boolean,
   style?: FlyerStyleId,
-  opts: { hasProduct?: boolean; quietZone?: FlyerQuietZone } = {},
+  opts: { photoCount?: number; quietZone?: FlyerQuietZone } = {},
 ): string {
+  const photos = opts.photoCount ?? 0;
   const c = tokens.colors;
   const palette = [c.primary, c.accent, c.secondary, c.background]
     .filter(Boolean)
@@ -597,14 +647,18 @@ export function buildFlyerImagePrompt(
     // The uploaded reference IS the style; a preset direction would fight it.
     ...(style && !hasReference ? [FLYER_STYLE_DIRECTIONS[style]] : []),
     `Build the color mood around the brand palette: ${palette}.`,
-    ...(opts.hasProduct
+    ...(photos === 1
       ? [
-          "The first attached image is the real product: show this exact product, unchanged (same shape, colors, label, and proportions), as the clear hero of the scene. Do not redesign it or add other products.",
+          "The first attached image is the real product: show this exact product, unchanged (same shape, colors, label, printed design, and proportions), as the clear hero of the scene. Do not redesign it or add other products.",
         ]
-      : []),
+      : photos > 1
+        ? [
+            `The first ${photos} attached images are the real products: show each one exactly as photographed, unchanged (same shape, colors, label, printed design, and proportions), arranged together as the heroes of the scene. Do not redesign them or add other products.`,
+          ]
+        : []),
     ...(hasReference
       ? [
-          `${opts.hasProduct ? "The last" : "An"} attached image is a style reference: match its visual style, color treatment, and mood, not its content.`,
+          `${photos ? "The last" : "An"} attached image is a style reference: match its visual style, color treatment, and mood, not its content.`,
         ]
       : []),
     quiet,
@@ -630,7 +684,7 @@ export const DESIGN_RIFFS = [
  * model designs the WHOLE flyer, text included, matching the attached
  * examples. The text it sets is read back and checked (lib/flyer/text-check.ts)
  * before anyone sees it. References arrive in this order, and the prompt
- * numbers each one by its job: the product photo (when hasProduct), the
+ * numbers each one by its job: the owner's product photos (photoCount), the
  * look's examples, then the client's logo (when client.hasLogo).
  */
 export function buildFlyerDesignPrompt(
@@ -645,7 +699,8 @@ export function buildFlyerDesignPrompt(
     style?: FlyerStyleId;
   },
   opts: {
-    hasProduct?: boolean;
+    /** The owner's product photos sent first, shown exactly as they look. */
+    photoCount?: number;
     misspelled?: string[];
     /** Where the logo goes. Stamped afterwards for the brand (the corner is
      * kept clear); drawn from its reference image for a client. */
@@ -663,8 +718,9 @@ export function buildFlyerDesignPrompt(
     : "";
 
   // Number the references in send order so each one has a clear job.
-  let n = 0;
-  const productImage = opts.hasProduct ? ++n : null;
+  const photos = opts.photoCount ?? 0;
+  let n = photos;
+  const photoRange = photos === 1 ? "Image 1" : `Images 1 to ${photos}`;
   const firstExample = n + 1;
   n += look.exampleCount;
   const hasExamples = look.exampleCount > 0;
@@ -672,7 +728,8 @@ export function buildFlyerDesignPrompt(
     look.exampleCount === 1 ? `Image ${firstExample} is` : `Images ${firstExample} to ${n} are`;
   const logoImage = opts.client?.hasLogo ? ++n : null;
   const roles = [
-    productImage ? `Image ${productImage} is the real product photo.` : "",
+    photos === 1 ? "Image 1 is a real photo of the owner's product." : "",
+    photos > 1 ? `${photoRange} are real photos of the owner's products.` : "",
     hasExamples ? `${exampleRange} the design ${look.exampleCount === 1 ? "example" : "examples"} to match.` : "",
     logoImage ? `Image ${logoImage} shows ${owner} logo.` : "",
   ].filter(Boolean);
@@ -734,11 +791,15 @@ export function buildFlyerDesignPrompt(
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
       : []),
     colors,
-    ...(productImage
+    ...(photos === 1
       ? [
-          `Show the product from Image ${productImage} exactly as photographed (same shape, colors, label, and proportions).`,
+          "Show the product from Image 1 exactly as photographed (same shape, colors, label, printed design, and proportions).",
         ]
-      : []),
+      : photos > 1
+        ? [
+            `Show every product from ${photoRange} exactly as photographed (same shape, colors, label, printed design, and proportions), arranged together as the heroes of the scene.`,
+          ]
+        : []),
     logo,
     hasExamples
       ? "The examples are style references only. Never copy their words, logos, brand names, products, or people, and never reuse their photos, backgrounds, or decorative objects: draw all imagery new."

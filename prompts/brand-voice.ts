@@ -4,6 +4,7 @@ import type {
   CampaignBrief,
   CompetitorReference,
   Icp,
+  PieceInputs,
   Product,
   ReferenceEmail,
   Strategy,
@@ -11,6 +12,7 @@ import type {
   TopicContext,
   VoiceExampleChannel,
 } from "@/lib/db/types";
+import { effectiveStyle, inputsOf } from "@/lib/inputs";
 
 // Builds the reusable brand-voice context block injected into every generation
 // prompt: voice, tone, example posts, banned terms, and the primary audience.
@@ -311,6 +313,32 @@ export function buildMemoryBlock(memories: BrandMemory[]): string {
   ].join("\n");
 }
 
+/**
+ * The brand context every writer starts from, in one fixed order: the hard
+ * guidelines, the voice for this channel, the positioning, and what the chat
+ * learned about the account. One builder, so no writer drifts from the rest
+ * or quietly goes without one of them.
+ */
+export function buildBrandContext(
+  ctx: { brand: Brand; primaryIcp: Icp | null; memories?: BrandMemory[] },
+  channel?: VoiceExampleChannel,
+): string {
+  const learned = ctx.memories?.length
+    ? [
+        "THINGS LEARNED ABOUT THIS ACCOUNT (from past chats; follow them):",
+        ...ctx.memories.map((m) => `  - ${m.content}`),
+      ].join("\n")
+    : "";
+  return [
+    buildGuidelinesBlock(ctx.brand),
+    buildBrandVoiceBlock(ctx.brand, ctx.primaryIcp, channel),
+    buildPositioningBlock(ctx.brand),
+    learned,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 // ── Shared catalog/state blocks ─────────────────────────────────────────────
 // One implementation for the product/topic/funnel/brief formatting that the
 // campaign interview, the create agent, and topic suggestions all inject.
@@ -448,33 +476,62 @@ export function buildBriefStateBlock(
           : "no"
     }`,
     `  Vibe: ${brief.visual_vibe ?? "(not set)"}`,
-    `  Product photo: ${brief.product_photo_url ? "attached, will be the hero as-is" : "(none)"}`,
-    `  Photos in the email: ${
-      brief.photo_urls?.length
-        ? `${brief.photo_urls.length} attached, each will be placed in the email`
-        : "(none)"
-    }`,
-    `  Competitor reference: ${
-      brief.competitor_reference_id ? "attached, its strategy will be adapted" : "(none)"
-    }`,
+    ...inputsStateLines(inputsOf(brief)),
     `  Topic attached: ${topicId ? "yes" : "no"}`,
   ].join("\n");
 }
 
+/** The brief's photos, style, and competitor ads, as the chat sees them. */
+function inputsStateLines(inputs: PieceInputs): string[] {
+  const photos = inputs.photos ?? [];
+  const images = inputs.style_images;
+  const imagesLabel = images
+    ? `${images.from === "competitor" ? "their ads" : "their own designs"} (${images.urls.length})`
+    : "";
+  const style = effectiveStyle(inputs);
+  const styleLine =
+    style.kind === "images"
+      ? `follows ${imagesLabel}, in the brand's colors and logo`
+      : `${style.kind === "none" ? "No reference" : style.kind === "look" ? "a saved look" : "Our style"}${
+          imagesLabel ? `; ${imagesLabel} kept as an option in the look picker` : ""
+        }`;
+  const ads = inputs.competitor_reference_ids?.length ?? 0;
+  return [
+    `  Photos to use in the picture: ${photos.length ? `${photos.length}, the first one leads: ${photos.join(", ")}` : "(none)"}`,
+    `  Style: ${styleLine}`,
+    `  Competitor ads: ${ads ? `${ads} (the first shapes the words, adapted, never copied)` : "(none)"}`,
+  ];
+}
+
 // Builds the campaign brief block from the strategic interview. This is what
 // the human said they want THIS piece to achieve; it steers the draft without
-// overriding brand voice.
-export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
+// overriding brand voice. Every writer reads the same block; a social post
+// drops the email-only lines and carries the offer terms itself, since it has
+// no separate offer block.
+export function buildCampaignBriefBlock(
+  brief: CampaignBrief | null,
+  channel: VoiceExampleChannel = "email",
+): string {
   if (!brief) return "";
+  const social = channel === "social";
   const lines: string[] = [];
   if (brief.goal) lines.push(`  Goal: ${brief.goal}`);
   if (brief.key_message) lines.push(`  Key message: ${brief.key_message}`);
-  if (brief.subject_line) {
+  const offerTerms = [
+    brief.offer_deal,
+    brief.offer_price ? `price ${brief.offer_price}` : "",
+    brief.offer_deadline ? `deadline ${brief.offer_deadline}` : "",
+    brief.offer_exclusions ? `not for ${brief.offer_exclusions}` : "",
+  ].filter(Boolean);
+  if (social && offerTerms.length) {
+    lines.push(`  OFFER (real, from the user; use exactly these terms): ${offerTerms.join("; ")}`);
+  }
+  if (brief.subject_line && !social) {
     lines.push(
       `  SUBJECT LINE (user-approved; use it VERBATIM as the subject, do not rewrite it): ${brief.subject_line}`,
     );
   }
-  if (brief.preheader) {
+  if (brief.preheader && !social) {
     lines.push(
       `  PREHEADER (user-approved; use it near-verbatim as the preview text): ${brief.preheader}`,
     );
@@ -510,7 +567,7 @@ export function buildCampaignBriefBlock(brief: CampaignBrief | null): string {
     );
   if (brief.visual_vibe)
     lines.push(`  Visual/verbal vibe: ${brief.visual_vibe}`);
-  if (brief.style_example) {
+  if (brief.style_example && !social) {
     const body =
       brief.style_example.length > 3000
         ? brief.style_example.slice(0, 3000) + "\n  [truncated]"

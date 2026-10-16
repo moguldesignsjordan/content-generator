@@ -19,6 +19,7 @@ import {
   isFlyerAspect,
 } from "@/prompts/generate-flyer";
 import { stripEmDashes } from "@/lib/text";
+import { inputsOf } from "@/lib/inputs";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
@@ -318,6 +319,8 @@ export async function POST(
     const rawModel = form.get("model");
     const renderTier = finalizeTier ?? (isImageModelTier(rawModel) ? rawModel : null);
     const variantIndex = meta.flyer_variant_index;
+    const pickedPhotos =
+      variantIndex !== undefined ? meta.flyer_variants?.[variantIndex]?.photos : undefined;
 
     const copyForRender = {
       headline,
@@ -359,10 +362,11 @@ export async function POST(
       exactPrompt,
       ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
       ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
-      ...(meta.product_photo_url ? { productPhotoUrl: meta.product_photo_url } : {}),
-      ...(meta.look_id ? { lookId: meta.look_id } : {}),
-      ...(meta.reference_urls?.length ? { referenceUrls: meta.reference_urls } : {}),
+      inputs: inputsOf(meta),
+      ...(meta.look_id ? { cachedLookId: meta.look_id } : {}),
       ...(meta.reference_profile ? { referenceProfile: meta.reference_profile } : {}),
+      // The picked option keeps the photos it was made with.
+      ...(pickedPhotos ? { photoUrls: pickedPhotos } : {}),
       ...(meta.client_brand ? { clientBrand: meta.client_brand } : {}),
       ...(meta.flyer_variant_index !== undefined ? { variantIndex: meta.flyer_variant_index } : {}),
       draftId: id,

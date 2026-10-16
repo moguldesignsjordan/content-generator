@@ -12,7 +12,16 @@ import {
   listProducts,
   updateCampaign,
 } from "@/lib/db/queries";
-import type { FactoryKind, FactoryState } from "@/lib/db/types";
+import type {
+  CompetitorReference,
+  FactoryKind,
+  FactoryState,
+  PieceInputs,
+  Product,
+  StyleChoice,
+} from "@/lib/db/types";
+import { MAX_PIECE_PHOTOS } from "@/lib/db/types";
+import { compactInputs, followedStyleImages } from "@/lib/inputs";
 import {
   factoryStartDate,
   loadUnitCosts,
@@ -50,9 +59,66 @@ function isOwnStorageUrl(value: string): boolean {
   }
 }
 
+function stringList(value: unknown): string[] {
+  return (Array.isArray(value) ? value : [])
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
 /**
- * POST { sentence, kinds, size, days, photo_url?, look_id?, reference_urls?,
- * client_brand?, competitor_reference_id?, research?, campaign_id? }: starts a factory campaign and streams its phases
+ * The chat's inputs, from untrusted input. Photos and style images must be
+ * our own uploads (or a product's stored photo), since the pipeline fetches
+ * them server-side; the look and the competitor ads must be this brand's.
+ * Also returns the first competitor ad, which the planner reads.
+ */
+async function cleanInputs(
+  raw: unknown,
+  brandId: string,
+  products: Product[],
+): Promise<{ inputs: PieceInputs; competitorRef: CompetitorReference | null }> {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const productPhotos = new Set(products.map((p) => p.image_url).filter(Boolean));
+  const photos = stringList(value.photos)
+    .filter((url) => isOwnStorageUrl(url) || productPhotos.has(url))
+    .slice(0, MAX_PIECE_PHOTOS);
+
+  const rawImages = (value.style_images ?? {}) as Record<string, unknown>;
+  const styleUrls = cleanReferenceUrls(rawImages.urls, isOwnStorageUrl);
+  const rawStyle = (value.style ?? {}) as Record<string, unknown>;
+  let style: StyleChoice | undefined;
+  if (rawStyle.kind === "our" || rawStyle.kind === "none" || rawStyle.kind === "images") {
+    style = { kind: rawStyle.kind };
+  } else if (
+    rawStyle.kind === "look" &&
+    typeof rawStyle.look_id === "string" &&
+    (await getDesignLook(rawStyle.look_id, brandId))
+  ) {
+    style = { kind: "look", look_id: rawStyle.look_id };
+  }
+
+  const refs: CompetitorReference[] = [];
+  for (const id of stringList(value.competitor_reference_ids).slice(0, 10)) {
+    const ref = await getCompetitorReference(id).catch(() => null);
+    if (ref?.brand_id === brandId) refs.push(ref);
+  }
+
+  return {
+    inputs: compactInputs({
+      photos,
+      ...(styleUrls.length
+        ? { style_images: { urls: styleUrls, from: rawImages.from === "competitor" ? "competitor" : "upload" } }
+        : {}),
+      style,
+      competitor_reference_ids: refs.map((r) => r.id),
+    }),
+    competitorRef: refs[0] ?? null,
+  };
+}
+
+/**
+ * POST { sentence, kinds, size, days, inputs?, client_brand?, research?,
+ * campaign_id? }: starts a factory campaign and streams its phases
  * (researching only when the owner said yes, planning, pricing), ending in
  * `done` with the campaign id. Nothing is generated here; the plan table is
  * the checkpoint before any spend on content.
@@ -74,12 +140,6 @@ export async function POST(req: NextRequest) {
   );
   const size = typeof body.size === "number" && SIZES.has(body.size) ? body.size : 12;
   const days = typeof body.days === "number" && DAY_RANGES.has(body.days) ? body.days : 30;
-  const photoUrl =
-    typeof body.photo_url === "string" && isOwnStorageUrl(body.photo_url)
-      ? body.photo_url
-      : undefined;
-  // Same own-storage rule as the photo: the image model fetches these.
-  const referenceUrls = cleanReferenceUrls(body.reference_urls, isOwnStorageUrl);
   const clientBrand = cleanClientBrand(body.client_brand, isOwnStorageUrl);
   // Web research costs real money and time, so it only runs when asked.
   const doResearch = body.research === true;
@@ -95,14 +155,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No brand found" }, { status: 404 });
   }
   const { brand, icps } = data;
-  // "none" opts out of the brand default; any other id must be this brand's look.
-  const rawLook = typeof body.look_id === "string" ? body.look_id : "";
-  const lookId =
-    rawLook === "none" || (rawLook && (await getDesignLook(rawLook, brand.id))) ? rawLook : undefined;
-  // The competitor ad picked in chat must be one of this brand's saved ads.
-  const rawRef = typeof body.competitor_reference_id === "string" ? body.competitor_reference_id : "";
-  const foundRef = rawRef ? await getCompetitorReference(rawRef).catch(() => null) : null;
-  const competitorRef = foundRef?.brand_id === brand.id ? foundRef : null;
   const guard = await guardAiRoute("factory", { brandId: brand.id, limit: 3 });
   if (!guard.ok) {
     return NextResponse.json(
@@ -115,6 +167,7 @@ export async function POST(req: NextRequest) {
     listProducts(brand.id).catch(() => []),
     listBrandMemory(brand.id).catch(() => []),
   ]);
+  const { inputs, competitorRef } = await cleanInputs(body.inputs, brand.id, products);
   const ctx = {
     brand,
     primaryIcp: icps.find((i) => i.is_primary) ?? icps[0] ?? null,
@@ -136,15 +189,15 @@ export async function POST(req: NextRequest) {
     kinds: FACTORY_KINDS.filter((k) => kinds.includes(k)),
     size,
     days,
-    ...(photoUrl ? { photo_url: photoUrl } : {}),
-    ...(lookId ? { look_id: lookId } : {}),
-    ...(referenceUrls.length ? { reference_urls: referenceUrls } : {}),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),
-    ...(competitorRef ? { competitor_reference_id: competitorRef.id } : {}),
   };
+  // The chat's transcript stays on its row, so what was said (and attached)
+  // can still be looked at after the campaign takes it over.
+  const messages = reused?.chat_state?.messages;
   await updateCampaign(campaign.id, {
     brief: { goal: sentence, conversation_notes: sentence },
-    chat_state: { factory },
+    chat_state: { ...(messages ? { messages } : {}), factory },
   });
 
   const encoder = new TextEncoder();
@@ -158,12 +211,13 @@ export async function POST(req: NextRequest) {
         }
       };
       let saved = false;
-      // The attached designs are read once here, alongside planning, so every
+      // The style images are read once here, alongside planning, so every
       // post and ad the launch makes shares the profile. Never throws: null
       // just means the images alone steer the renders.
-      const profileRead = referenceUrls.length
+      const styleImages = followedStyleImages(inputs);
+      const profileRead = styleImages
         ? extractLookProfile(
-            referenceUrls.map((url) => ({ url, source: "upload" as const })),
+            styleImages.urls.map((url) => ({ url, source: "upload" as const })),
             brand.id,
           )
         : Promise.resolve(null);
@@ -187,6 +241,7 @@ export async function POST(req: NextRequest) {
           days,
           startDate: factoryStartDate(),
           competitorRef,
+          photoUrls: inputs.photos ?? [],
         });
 
         send("phase", { phase: "pricing", label: "Pricing the batch" });
@@ -197,6 +252,7 @@ export async function POST(req: NextRequest) {
 
         await updateCampaign(campaign.id, {
           chat_state: {
+            ...(messages ? { messages } : {}),
             factory: {
               ...factory,
               ...(offerSlug ? { offer_slug: offerSlug } : {}),

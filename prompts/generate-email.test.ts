@@ -473,16 +473,13 @@ describe("buildOfferBlock", () => {
 });
 
 describe("buildBriefPhotosBlock", () => {
-  it("is empty when the brief has no photos", () => {
-    expect(buildBriefPhotosBlock(null)).toBe("");
-    expect(buildBriefPhotosBlock({})).toBe("");
-    expect(buildBriefPhotosBlock({ photo_urls: [] })).toBe("");
+  it("is empty when there are no body photos", () => {
+    expect(buildBriefPhotosBlock(undefined)).toBe("");
+    expect(buildBriefPhotosBlock([])).toBe("");
   });
 
   it("lists every photo URL, numbered in order, with the placement rule", () => {
-    const block = buildBriefPhotosBlock({
-      photo_urls: ["https://example.com/a.jpg", "https://example.com/b.jpg"],
-    });
+    const block = buildBriefPhotosBlock(["https://example.com/a.jpg", "https://example.com/b.jpg"]);
     expect(block).toContain("PHOTOS TO PLACE (2 real photos");
     expect(block).toContain("1. https://example.com/a.jpg");
     expect(block).toContain("2. https://example.com/b.jpg");
@@ -490,10 +487,7 @@ describe("buildBriefPhotosBlock", () => {
   });
 
   it("uses the singular for one photo", () => {
-    const block = buildBriefPhotosBlock({
-      photo_urls: ["https://example.com/a.jpg"],
-    });
-    expect(block).toContain("1 real photo the user attached");
+    expect(buildBriefPhotosBlock(["https://example.com/a.jpg"])).toContain("1 real photo the user attached");
   });
 });
 

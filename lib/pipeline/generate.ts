@@ -9,7 +9,6 @@ import {
 } from "@/lib/clients/anthropic";
 import {
   getCampaign,
-  getCompetitorReference,
   getDraftWithJobContext,
   getLatestDraftVersion,
   getRecentEmailStyleVariants,
@@ -49,7 +48,9 @@ import { ensureBrandLogo } from "@/lib/email/footer-logo";
 import { ensureBriefPhotos } from "@/lib/email/brief-photos";
 import { ensureUnsubscribeTag, validateModelEmailHtml } from "@/lib/email/validate";
 import { ensureEditableRegions } from "@/lib/email/inline-style";
+import { inputsOf, splitPhotos } from "@/lib/inputs";
 import type {
+  PieceInputs,
   CampaignBrief,
   ContentImage,
   ContentImageStyle,
@@ -58,6 +59,7 @@ import type {
   EmailStyleId,
   EmailTemplateId,
   EmailType,
+  DraftJobContext,
   DraftMeta,
   DraftSeoData,
   DraftUsage,
@@ -81,6 +83,7 @@ import {
   resolveBrandPalette,
 } from "@/prompts/generate-image";
 import { chosenAngle, pickAngle } from "./pick-angle";
+import { loadCompetitorRef } from "./competitor-ref";
 import { switchAngle } from "@/prompts/pick-angle";
 import { critiqueDesign } from "./critique-design";
 import { accumulateUsage, type UsageDelta } from "./cost";
@@ -117,6 +120,8 @@ export async function generateEmailForTopicStreamed(
      * the series' per-draft generation calls run in parallel and can't
      * safely race a "recent variants" DB read against each other. */
     seedIndex?: number;
+    /** The draft's photos, style, and competitor ads (meta.inputs). */
+    inputs?: PieceInputs;
   },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
@@ -126,7 +131,9 @@ export async function generateEmailForTopicStreamed(
     onEvent({ type: "phase", ...writing });
 
     const brief = opts.briefOverride ?? (await loadCampaignBrief(opts.campaignId));
-    ctx.competitorRef = await resolveCompetitorRef(brief);
+    const inputs = inputsOf(opts.inputs ? { inputs: opts.inputs } : null, brief);
+    ctx.competitorRef = await loadCompetitorRef(inputs.competitor_reference_ids?.[0], ctx.brand.id);
+    const { heroPhoto, bodyPhotos } = splitPhotos(inputs, brief);
     const tokens = resolveBrandTokens(ctx.brand);
     // A campaign series assigns style/layout deterministically by index
     // instead of reading recent history (see seedIndex above); a single
@@ -172,6 +179,7 @@ export async function generateEmailForTopicStreamed(
         recentEdits,
         topPerformers,
         angle,
+        bodyPhotos,
       });
     const designReference = await loadEmailDesignReference(ctx, draftId);
     const { parsed, usageDeltas } = await generateEmailCopy(system, user, {
@@ -185,12 +193,13 @@ export async function generateEmailForTopicStreamed(
     // the fixed draft identically, hero image and all, instead of reimplementing
     // this sequence and drifting from it.
     let heroImage: ContentImage | undefined;
+    let placedPhotos = bodyPhotos;
     const renderWithHero = (output: EmailDraftOutput) => {
       // The showcase template has its own designed image slot.
       if (templateId === "product_showcase") {
-        return renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId);
+        return renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId, placedPhotos);
       }
-      const rendered = renderEmailForContext(ctx, output, templateId, undefined, brief);
+      const rendered = renderEmailForContext(ctx, output, templateId, undefined, brief, undefined, placedPhotos);
       if (heroImage) {
         rendered.content.html =
           spliceHeroImage(rendered.content.html, heroImage) ?? rendered.content.html;
@@ -214,38 +223,37 @@ export async function generateEmailForTopicStreamed(
     // be lifted here when the user opted in).
     const isSeriesEmail = Boolean(opts.briefOverride);
     const wantsImage = brief?.include_image === true;
-    // Attached photos (brief.photo_urls) ARE this email's imagery: they're
-    // placed by the prompt + ensureBriefPhotos, so no AI hero is conjured on
-    // top of them. A product_photo_url still takes the hero slot as before
-    // (photos then land inline alongside it). An AI image is always a tap
-    // away on the review screen if the user wants one anyway.
-    const hasAttachedPhotos = Boolean(brief?.photo_urls?.length);
-    const skipImage =
+    // The owner's photos ARE this email's imagery (splitPhotos): the
+    // first is the top image as-is and the rest are placed in the body, so no
+    // AI picture is conjured on top of them. An AI image is always a tap away
+    // on the review screen if the user wants one anyway.
+    const skipAiImage =
       brief?.include_image === false ||
       (isSeriesEmail && !wantsImage) ||
-      (hasAttachedPhotos && !brief?.product_photo_url);
+      Boolean(inputs.photos?.length);
 
-    // A real product photo (the mapped product's own image, or one the user
-    // uploaded in the interview) wins over AI generation: it's the actual
-    // thing being sold, and it's free. Falls through to the normal AI path
-    // on any fetch/optimize failure (heroFromProductPhoto is non-fatal).
-    if (!skipImage && brief?.product_photo_url) {
-      const imaging = { phase: "imaging", label: "Adding your product photo" };
+    // A real photo (the owner's, or the mapped product's own image) wins over
+    // AI generation: it's the actual thing being sold, and it's free.
+    if (heroPhoto) {
+      const imaging = { phase: "imaging", label: "Adding your photo" };
       await patchDraftGeneration(draftId, imaging).catch(() => {});
       onEvent({ type: "phase", ...imaging });
       heroImage = await heroFromProductPhoto(
-        brief.product_photo_url,
+        heroPhoto,
         copy.headline ?? ctx.topic.title,
         ctx.brand.id,
         draftId,
       );
+      // An unreadable first photo still belongs in the email: the body
+      // backstop places it with the rest.
+      if (!heroImage) placedPhotos = [heroPhoto, ...bodyPhotos];
     }
     if (!heroImage) {
       heroImage = await maybeAutoHeroImage(
         ctx,
         copy.headline,
         usageDeltas,
-        { draftId, onEvent, skip: skipImage, force: wantsImage },
+        { draftId, onEvent, skip: skipAiImage, force: wantsImage },
         {
           emailType,
           tone: brief?.tone,
@@ -257,7 +265,7 @@ export async function generateEmailForTopicStreamed(
         },
       );
     }
-    if (heroImage) {
+    if (heroImage || placedPhotos !== bodyPhotos) {
       content = renderWithHero(parsed).content;
     }
 
@@ -514,25 +522,12 @@ export async function loadCampaignBrief(
   return campaign?.brief ?? null;
 }
 
-/**
- * Resolves a brief's competitor_reference_id (migration 025) to the actual
- * saved ad, right before prompt assembly (buildEmailMessages reads
- * ctx.competitorRef the same way it reads ctx.emailDesignRefs). Non-fatal: a
- * stale id, a pre-025 DB, or a read failure all just mean no reference for
- * this draft, never a broken generation.
- */
-async function resolveCompetitorRef(
-  brief: CampaignBrief | null,
-): Promise<TopicContext["competitorRef"]> {
-  if (!brief?.competitor_reference_id) return null;
-  try {
-    return await getCompetitorReference(brief.competitor_reference_id);
-  } catch (err) {
-    logWarn("pipeline:generate:competitor-ref", String(err), {
-      id: brief.competitor_reference_id,
-    });
-    return null;
-  }
+/** A draft's inputs, for a piece spun off it (a flyer or blog from an email)
+ * to carry the same photos, style, and competitor ads. */
+export async function inputsOfDraft(draft: Pick<DraftJobContext, "meta" | "campaignId">): Promise<PieceInputs> {
+  if (draft.meta.inputs) return draft.meta.inputs;
+  const brief = draft.meta.series_brief ?? (await loadCampaignBrief(draft.campaignId));
+  return inputsOf(draft.meta, brief);
 }
 
 /**
@@ -701,6 +696,8 @@ function renderEmailForContext(
   heroImage?: ContentImage,
   brief?: CampaignBrief | null,
   styleId?: EmailStyleId,
+  /** The owner's photos for the body (splitPhotos). */
+  bodyPhotos?: string[],
 ): {
   content: EmailDraftContent;
   copy: EmailCopy;
@@ -778,10 +775,10 @@ function renderEmailForContext(
   // Region tagging runs BEFORE the unsubscribe guarantee so the fallback
   // unsubscribe <p> (appended bare, structural) never gets tagged editable.
   html = ensureUnsubscribeTag(ensureEditableRegions(stripEmDashes(html)));
-  // The user's attached photos: the prompt asked the model to place every
-  // one; this splices any it skipped (and covers the template fallback,
-  // which knows nothing about them).
-  html = ensureBriefPhotos(html, brief?.photo_urls);
+  // The owner's body photos: the prompt asked the model to place every one;
+  // this splices any it skipped (and covers the template fallback, which
+  // knows nothing about them).
+  html = ensureBriefPhotos(html, bodyPhotos);
 
   // A regeneration keeps the prior hero image: the prompt asks the model to
   // place it, but the code path guarantees it regardless of compliance (and
@@ -1152,7 +1149,9 @@ export async function regenerateEmailDraft(
 
   const brief =
     draftCtx.meta.series_brief ?? (await loadCampaignBrief(draftCtx.campaignId));
-  ctx.competitorRef = await resolveCompetitorRef(brief);
+  const inputs = inputsOf(draftCtx.meta, brief);
+  ctx.competitorRef = await loadCompetitorRef(inputs.competitor_reference_ids?.[0], ctx.brand.id);
+  const { bodyPhotos } = splitPhotos(inputs, brief);
   const tokens = resolveBrandTokens(ctx.brand);
   const heroImage = draftCtx.meta.hero_image;
   // Reject & regenerate keeps this draft's look: reuse its stored layout and
@@ -1189,6 +1188,7 @@ export async function regenerateEmailDraft(
         previousSubject: draftCtx.content.subject,
         previousPreheader: draftCtx.content.preheader,
       },
+      bodyPhotos,
     });
 
   // The rejected draft's own QA findings ride along with the human feedback.
@@ -1210,7 +1210,7 @@ export async function regenerateEmailDraft(
   });
 
   const render = (output: EmailDraftOutput) =>
-    renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId);
+    renderEmailForContext(ctx, output, templateId, heroImage, brief, styleId, bodyPhotos);
 
   let { content, copy, designSource } = render(parsed);
 
@@ -1252,6 +1252,9 @@ export async function regenerateEmailDraft(
     // against, the same way it carries its layout and style.
     ...(angles ? { angles } : {}),
     ...(heroImage ? { hero_image: heroImage } : {}),
+    // A campaign piece keeps its own brief and inputs on the new version.
+    ...(draftCtx.meta.series_brief ? { series_brief: draftCtx.meta.series_brief } : {}),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
     usage,
   };
   const seoData = qa.seoData;

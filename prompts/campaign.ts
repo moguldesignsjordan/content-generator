@@ -41,8 +41,10 @@ export interface UpdateBriefInput {
   visual_vibe?: VisualVibe;
   image_style?: ContentImageStyle;
   email_style?: EmailStyleId;
-  product_photo_url?: string;
-  photo_urls?: string[];
+  /** Replaces the photos to use in the picture (to remove or reorder). */
+  photos?: string[];
+  /** Replaces the style images (to fix an image the user labeled wrong). */
+  style_images?: string[];
   use_ai_image_instead?: boolean;
   proof?: string;
   hook?: string;
@@ -61,7 +63,6 @@ export interface UpdateBriefInput {
    * adapt this email's strategy from. NEVER invent an id; only echo one just
    * returned by save_competitor_reference. */
   competitor_reference_id?: string;
-  style_reference_urls?: string[];
   client_brand?: { name?: string; colors?: string[]; logo_url?: string };
 }
 
@@ -176,30 +177,30 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
           "(a bold color band, magazine serif, minimal, rounded pill style, " +
           "and so on). Leave unset to let the design vary.",
       },
-      product_photo_url: {
-        type: "string",
-        description:
-          "An EXACT URL to use as the hero image, verbatim, as it appeared " +
-          "in a system note or tool result you just received (e.g. an " +
-          "'uploaded a product photo' notice). NEVER invent or guess a URL.",
-      },
-      photo_urls: {
+      photos: {
         type: "array",
         items: { type: "string" },
         description:
-          "EXACT URLs of photos the user wants placed INSIDE the email, " +
-          "verbatim from the attached-image list on their message. Pass the " +
-          "COMPLETE list each time (it replaces the saved one); order is the " +
-          "order they'll appear. Use product_photo_url for THE product hero; " +
-          "use this for everything else, or for several photos at once. " +
-          "NEVER invent or guess a URL.",
+          "ONLY to remove or reorder photos: photos the user attaches are " +
+          "saved automatically by their label. The COMPLETE list of photos " +
+          "to use in the picture, in order (the first one leads), as EXACT " +
+          "URLs from the PHOTOS line or the attached-image list. [] clears " +
+          "it. NEVER invent or guess a URL.",
+      },
+      style_images: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "ONLY when the user says an attached image is a design to follow, " +
+          "not a photo to use (they labeled it wrong): the complete list of " +
+          "style images as EXACT URLs from the attached-image list, at most " +
+          "3. Move it out of photos in the same call. [] clears it.",
       },
       use_ai_image_instead: {
         type: "boolean",
         description:
-          "Set true when the user rejects the auto-attached product photo " +
-          "and wants an AI-generated image instead. Clears product_photo_url " +
-          "and photo_urls.",
+          "Set true when the user rejects the photos and wants an " +
+          "AI-generated image instead. Clears the photos.",
       },
       proof: {
         type: "string",
@@ -270,19 +271,9 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
       competitor_reference_id: {
         type: "string",
         description:
-          "The id of a saved competitor ad to adapt this email's strategy " +
+          "The id of a saved competitor ad to adapt this piece's strategy " +
           "from, from save_competitor_reference's result. NEVER invent or " +
           "guess an id.",
-      },
-      style_reference_urls: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Flyers and ads: EXACT URLs of attached designs the user wants the " +
-          "flyer to look like (a flyer, poster, or ad to match), verbatim from " +
-          "the attached-image list, at most 3. The image model sees these " +
-          "images, so never just describe them in constraints instead. Pass " +
-          "the complete list (it replaces the saved one); [] clears it.",
       },
     },
   },

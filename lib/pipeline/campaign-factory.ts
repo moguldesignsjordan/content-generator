@@ -183,15 +183,19 @@ export async function planCampaign(
     startDate: string;
     /** A competitor ad picked in chat for some pieces to adapt. */
     competitorRef?: CompetitorReference | null;
+    /** The owner's product photos, shown to the planner to match to pieces. */
+    photoUrls?: string[];
   },
 ): Promise<{ plan: FactoryPlanItem[]; flyerStyle?: FlyerStyleId; usd: number }> {
   const counts = splitEvenly(args.size, args.kinds);
+  const photoUrls = args.photoUrls ?? [];
   const { system, user } = buildPlanMessages({
     ...ctx,
     sentence: args.sentence,
     research: args.research,
     counts,
     competitorRef: args.competitorRef,
+    photoCount: photoUrls.length,
   });
 
   const resp = await getAnthropic()
@@ -201,7 +205,15 @@ export async function planCampaign(
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
       system: cacheableSystem(system),
-      messages: [{ role: "user", content: user }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            ...photoUrls.map((url) => ({ type: "image" as const, source: { type: "url" as const, url } })),
+            { type: "text" as const, text: user },
+          ],
+        },
+      ],
       tools: [SAVE_PLAN_TOOL],
       tool_choice: { type: "tool", name: SAVE_PLAN_TOOL.name },
     })
@@ -223,6 +235,7 @@ export async function planCampaign(
     counts,
     productSlugs: new Set(ctx.products.map((p) => p.slug)),
     newId: () => crypto.randomUUID(),
+    photoUrls,
   });
   if (!cleaned.length) throw new Error("The plan came back empty. Try again.");
   if (cleaned.length < args.size) {

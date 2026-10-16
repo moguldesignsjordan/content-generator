@@ -9,7 +9,8 @@ import {
   listProducts,
   updateCampaign,
 } from "@/lib/db/queries";
-import type { FactoryPlanItem, FactoryState } from "@/lib/db/types";
+import type { FactoryPlanItem, FactoryState, PieceInputs } from "@/lib/db/types";
+import { inputsOf } from "@/lib/inputs";
 import { loadOwnFactoryCampaign } from "@/lib/factory/access";
 import { buildFlyerBriefText, buildPieceBrief } from "@/lib/factory/brief";
 import { pickTestItems } from "@/lib/factory/plan";
@@ -55,13 +56,12 @@ export async function POST(
     const clusterId = await ensureDefaultCluster(strategy.id);
     const products = await listProducts(brandId).catch(() => []);
 
+    const campaignInputs = inputsOf(factory);
     const launched = new Map<string, string>();
     for (const item of chosen) {
       const product = item.offer_slug
         ? products.find((p) => p.slug === item.offer_slug)
         : undefined;
-      // The photo the owner attached wins; otherwise the promoted product's own.
-      const photoUrl = factory.photo_url ?? product?.image_url ?? undefined;
       const topic = await createTopic(clusterId, {
         title: item.title,
         target_keyword: "",
@@ -74,7 +74,7 @@ export async function POST(
       const draftId = await createShell(item, {
         ctx,
         campaignId: campaign.id,
-        photoUrl,
+        inputs: pieceInputs(item, campaignInputs, product?.image_url ?? undefined),
         plan,
         factory,
       });
@@ -96,30 +96,49 @@ export async function POST(
   }
 }
 
+/**
+ * One piece's inputs: the photos the planner matched to it (else the
+ * campaign's first photo, else the promoted product's own), the campaign's
+ * style, and its competitor ads only when the planner chose this piece to
+ * follow them.
+ */
+function pieceInputs(item: FactoryPlanItem, campaign: PieceInputs, productPhoto?: string): PieceInputs {
+  const photos = item.photos?.length
+    ? item.photos
+    : campaign.photos?.length
+      ? [campaign.photos[0]]
+      : productPhoto
+        ? [productPhoto]
+        : [];
+  return {
+    ...(photos.length ? { photos } : {}),
+    ...(campaign.style_images ? { style_images: campaign.style_images } : {}),
+    ...(campaign.style ? { style: campaign.style } : {}),
+    ...(item.uses_reference && campaign.competitor_reference_ids?.length
+      ? { competitor_reference_ids: campaign.competitor_reference_ids }
+      : {}),
+  };
+}
+
 function createShell(
   item: FactoryPlanItem,
   args: {
     ctx: NonNullable<Awaited<ReturnType<typeof getTopicContext>>>;
     campaignId: string;
-    photoUrl?: string;
+    inputs: PieceInputs;
     plan: FactoryPlanItem[];
     factory: FactoryState;
   },
 ): Promise<string> {
   const format = getCampaignFormat(item.format);
-  const common = { ctx: args.ctx, campaignId: args.campaignId };
-  // Only the pieces the planner chose to follow the competitor ad carry it.
-  const competitorRefId = item.uses_reference ? args.factory.competitor_reference_id : undefined;
+  const common = { ctx: args.ctx, campaignId: args.campaignId, inputs: args.inputs };
   if (item.kind === "email" || item.kind === "blog") {
     return createDraftShell({
       ...common,
       type: item.kind,
       ...(format?.emailType ? { emailType: format.emailType } : {}),
       ...(format?.blogType ? { blogType: format.blogType } : {}),
-      seriesBrief: {
-        ...buildPieceBrief(item, args.factory, args.photoUrl),
-        ...(competitorRefId ? { competitor_reference_id: competitorRefId } : {}),
-      },
+      seriesBrief: buildPieceBrief(item, args.factory),
       // Distinct email styles across the batch, by position in the plan.
       seriesSeedIndex: args.plan.findIndex((p) => p.id === item.id),
     });
@@ -131,14 +150,10 @@ function createShell(
     // 4:5 is the tallest size both feeds take; ads run square.
     flyerAspect: item.kind === "ad" ? "1:1" : "4:5",
     flyerBrief: buildFlyerBriefText(item, args.factory.sentence, args.factory.research),
-    ...(args.photoUrl ? { productPhotoUrl: args.photoUrl } : {}),
-    ...(args.factory.look_id ? { lookId: args.factory.look_id } : {}),
     ...(args.factory.flyer_style ? { flyerStyle: args.factory.flyer_style } : {}),
     flyerVariantCount: CAMPAIGN_FLYER_OPTIONS,
-    ...(args.factory.reference_urls?.length ? { referenceUrls: args.factory.reference_urls } : {}),
     ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),
     ...(args.factory.client_brand ? { clientBrand: args.factory.client_brand } : {}),
-    ...(competitorRefId ? { competitorReferenceId: competitorRefId } : {}),
     // Organic posts go out on their day through the daily cron once approved.
     // Ads never get a posting date: that cron would publish them as organic
     // posts. They're run from Ads Manager instead.

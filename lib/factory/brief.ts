@@ -43,12 +43,11 @@ export function buildResearchNotes(
  * become the piece's hook and angle, so each piece keeps the distinct idea it
  * was planned with. A real detail the owner typed is the proof; with none,
  * the writer's no-invention rule stands. Emails always get their picture:
- * the quote already priced it in.
+ * the quote already priced it in. The piece's photos travel on its inputs.
  */
 export function buildPieceBrief(
   item: FactoryPlanItem,
   factory: Pick<FactoryState, "sentence" | "research">,
-  photoUrl?: string,
 ): CampaignBrief {
   const format = getCampaignFormat(item.format);
   const research = buildResearchNotes(factory.research, item);
@@ -67,7 +66,6 @@ export function buildPieceBrief(
     ...(item.offer_slug ? { offer_slug: item.offer_slug } : {}),
     ...(item.kind === "email" && item.preview ? { subject_line: item.preview } : {}),
     ...(item.kind === "email" ? { include_image: true } : {}),
-    ...(photoUrl ? { product_photo_url: photoUrl } : {}),
     // The plan's picture idea becomes the hero's subject.
     ...(item.visual ? { image_subject: item.visual } : {}),
   };

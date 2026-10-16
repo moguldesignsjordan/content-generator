@@ -8,6 +8,7 @@ import type {
   Strategy,
   VisualVibe,
 } from "@/lib/db/types";
+import { inputsOf } from "@/lib/inputs";
 
 /**
  * The display projection of a campaign brief rendered as editable rows in the
@@ -38,7 +39,7 @@ export interface CreateBriefCard {
   ctaLabel: string | null;
   visualVibe: VisualVibe | null;
   hasProductPhoto: boolean;
-  /** How many attached photos (brief.photo_urls) will be placed in the email. */
+  /** How many of the owner's photos the piece uses (the first one leads). */
   photoCount: number;
   /** Null means the brand's default length (voice_profile.email_length). */
   length: EmailLengthPreference | null;
@@ -79,6 +80,7 @@ export function buildBriefCard(args: {
     [brief.offer_deal, brief.offer_deadline, brief.offer_exclusions]
       .filter(Boolean)
       .join(" · ") || null;
+  const photoCount = inputsOf(brief).photos?.length ?? 0;
 
   return {
     topicTitle,
@@ -98,8 +100,8 @@ export function buildBriefCard(args: {
     funnelStage,
     ctaLabel: resolveCtaLabel(brand, strategy, funnelStage),
     visualVibe: brief.visual_vibe ?? null,
-    hasProductPhoto: Boolean(brief.product_photo_url),
-    photoCount: brief.photo_urls?.length ?? 0,
+    hasProductPhoto: photoCount > 0,
+    photoCount,
     length: brief.length ?? null,
     includeImage: brief.include_image ?? null,
   };

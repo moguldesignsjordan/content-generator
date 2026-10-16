@@ -43,11 +43,15 @@ import type {
   DraftMeta,
   DraftSeoData,
   DraftUsage,
+  PieceInputs,
   TopicContext,
 } from "@/lib/db/types";
+import { inputsOf, splitPhotos } from "@/lib/inputs";
 import { LENGTH_RETRY_TOLERANCE, MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { maybeAutoHeroImage, type GenerationEvent } from "./generate";
+import { heroFromProductPhoto } from "./generate-image";
+import { loadCompetitorRef } from "./competitor-ref";
 import { chosenAngle, pickAngle } from "./pick-angle";
 import { logError, logWarn } from "@/lib/log";
 
@@ -62,7 +66,13 @@ import { logError, logWarn } from "@/lib/log";
 export async function generateBlogForTopicStreamed(
   draftId: string,
   ctx: TopicContext,
-  opts: { campaignId?: string; blogTypeOverride?: BlogType; briefOverride?: CampaignBrief },
+  opts: {
+    campaignId?: string;
+    blogTypeOverride?: BlogType;
+    briefOverride?: CampaignBrief;
+    /** The draft's photos, style, and competitor ads (meta.inputs). */
+    inputs?: PieceInputs;
+  },
   onEvent: (event: GenerationEvent) => void,
 ): Promise<void> {
   try {
@@ -73,6 +83,8 @@ export async function generateBlogForTopicStreamed(
     // A per-piece brief (series or factory, meta.series_brief) wins over the
     // shared campaign brief, the same precedence regenerateBlogDraft uses.
     const brief = opts.briefOverride ?? (await loadBrief(opts.campaignId));
+    const inputs = inputsOf(opts.inputs ? { inputs: opts.inputs } : null, brief);
+    ctx.competitorRef = await loadCompetitorRef(inputs.competitor_reference_ids?.[0], ctx.brand.id);
 
     // Decide what the post should argue before writing it. Non-fatal: a null
     // angle leaves the prompt exactly as it was before this step existed.
@@ -109,21 +121,26 @@ export async function generateBlogForTopicStreamed(
 
     let copy = cleanBlogCopy(parsed);
 
-    // Brand-level opt-in: auto-create the post's hero image (first
-    // generation only; non-fatal, the draft ships without one on failure).
-    // Blog heroes have no placement choice; they render under the title.
-    const heroImage = await maybeAutoHeroImage(
-      ctx,
-      copy.title,
-      usageDeltas,
-      { draftId, onEvent },
-      {
-        kind: "blog",
-        ...(brief?.product_photo_url ? { productPhotoUrl: brief.product_photo_url } : {}),
-        ...(brief?.image_subject ? { subject: brief.image_subject } : {}),
-        ...(brief?.key_message ? { keyMessage: brief.key_message } : {}),
-      },
-    );
+    // The owner's first photo is the post's top image as-is (splitPhotos);
+    // without one, the brand-level opt-in auto-creates it (first generation
+    // only; non-fatal, the draft ships without one on failure). Blog heroes
+    // have no placement choice; they render under the title.
+    const { heroPhoto } = splitPhotos(inputs, brief);
+    const heroImage =
+      (heroPhoto
+        ? await heroFromProductPhoto(heroPhoto, copy.title, ctx.brand.id, draftId)
+        : undefined) ??
+      (await maybeAutoHeroImage(
+        ctx,
+        copy.title,
+        usageDeltas,
+        { draftId, onEvent },
+        {
+          kind: "blog",
+          ...(brief?.image_subject ? { subject: brief.image_subject } : {}),
+          ...(brief?.key_message ? { keyMessage: brief.key_message } : {}),
+        },
+      ));
     const render = (output: BlogDraftOutput) => {
       const revised = cleanBlogCopy(output);
       return { copy: revised, html: renderBlogPreviewHtml(revised, ctx.brand, heroImage) };
@@ -217,6 +234,8 @@ export async function regenerateBlogDraft(
   if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
 
   const brief = draftCtx.meta.series_brief ?? (await loadBrief(draftCtx.campaignId));
+  const inputs = inputsOf(draftCtx.meta, brief);
+  ctx.competitorRef = await loadCompetitorRef(inputs.competitor_reference_ids?.[0], ctx.brand.id);
   const feedbackExamples = await listFeedbackEmailExamples(ctx.brand.id, 3, "blog");
   const { system, user, blogType } = buildBlogMessages(ctx, {
     brief,
@@ -285,6 +304,9 @@ export async function regenerateBlogDraft(
     ...(draftCtx.meta.source_draft_id
       ? { source_draft_id: draftCtx.meta.source_draft_id }
       : {}),
+    // A campaign piece keeps its own brief and inputs on the new version.
+    ...(draftCtx.meta.series_brief ? { series_brief: draftCtx.meta.series_brief } : {}),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
     usage,
   };
 

@@ -337,6 +337,42 @@ export type CampaignStatus = "briefing" | "generating" | "drafted" | "done";
  * consumed by image style and email design-style selection. */
 export type VisualVibe = "punchy" | "sleek" | "playful" | "premium";
 
+/** The look a piece follows. `images` follows PieceInputs.style_images. */
+export type StyleChoice =
+  | { kind: "our" }
+  | { kind: "none" }
+  | { kind: "look"; look_id: string }
+  | { kind: "images" };
+
+/** Designs to match: the owner's own (upload) or competitor ads they ticked. */
+export interface StyleImages {
+  urls: string[];
+  from: "upload" | "competitor";
+}
+
+/** Everything the owner supplied beyond the words, carried whole through
+ * every handoff (chat brief, draft meta, campaign, launched pieces) so no
+ * step can drop one. Read through inputsOf (lib/inputs.ts), which also
+ * understands the older per-field shape. */
+export interface PieceInputs {
+  /** Real photos to use in the picture, shown exactly as they look. The
+   * first one leads (an email's or blog's top image). */
+  photos?: string[];
+  /** Kept while another style is picked, so switching back is one tap. */
+  style_images?: StyleImages;
+  /** Unset follows the style images when there are any, else Our style. */
+  style?: StyleChoice;
+  /** Saved competitor ads to learn from; the first one shapes the copy. */
+  competitor_reference_ids?: string[];
+}
+
+/** Photos one piece carries; an email places at most MAX_BRIEF_PHOTOS. */
+export const MAX_PIECE_PHOTOS = 8;
+
+/** Photos one design shows: Nano Banana Pro lists 6 high-fidelity object
+ * images, and with 3 style images and a logo that's 10 of its 14. */
+export const MAX_PHOTOS_PER_DESIGN = 6;
+
 export interface CampaignBrief {
   goal?: string;
   audience_notes?: string;
@@ -370,17 +406,11 @@ export interface CampaignBrief {
    * vibe-narrowed rotation; a regenerate's styleOverride still wins over
    * this (a locked draft keeps its look). */
   email_style?: EmailStyleId;
-  /** A real, already-hosted photo (usually the mapped product's own image)
-   * to use as the hero AS-IS instead of generating one. Only ever set from a
-   * known-good URL: the selected product's stored image_url, or a photo the
-   * user uploaded through the interview, never invented by the model. */
+  /** Photos, style, and competitor ads for this piece. */
+  inputs?: PieceInputs;
+  /** Legacy (read through inputsOf, never written): the hero photo. */
   product_photo_url?: string;
-  /** Real, already-hosted photos the user attached in chat (uploaded or
-   * picked from the media library) to place INSIDE the email, in order.
-   * Generation places every one; a code backstop splices any it missed.
-   * Distinct from product_photo_url (the hero): these can be several and
-   * land in the body. Same URL rule: only echoed from an attached-image
-   * notice or the library, never invented. */
+  /** Legacy (read through inputsOf, never written): photos for the email body. */
   photo_urls?: string[];
   /** A real number, result, or story the user gave, to point at near-verbatim
    * instead of the model inventing one. The anti-fabrication rule in
@@ -419,17 +449,9 @@ export interface CampaignBrief {
   /** Interview state: how many emails the campaign should have, in the
    * user's words (e.g. "2 per product, 6 total" or "5"). */
   email_count?: string;
-  /** Id of a saved competitor_references row (migration 025) to adapt this
-   * piece's hook/angle/structure/CTA from, with its wording as a suggestion.
-   * Single (mirrors email_style's design-ref [0]-only pattern). Non-text
-   * field (an id, not free text a chat turn would author): does NOT go in
-   * CAMPAIGN_BRIEF_TEXT_FIELDS, needs its own mergeBrief branch like
-   * product_photo_url. */
+  /** Legacy (read through inputsOf, never written): one competitor ad id. */
   competitor_reference_id?: string;
-  /** Social only: hosted designs the user attached in chat for the flyer to
-   * match (layout, type, feel), at most MAX_FLYER_REFERENCES. They reach the
-   * image model as images; a text description alone never steers it. Same
-   * URL rule as photo_urls. */
+  /** Legacy (read through inputsOf, never written): designs to match. */
   style_reference_urls?: string[];
   /** Social only: the business a flyer is for when it isn't this brand (an
    * agency making a client's flyer). Its colors and logo replace the brand's. */
@@ -459,8 +481,7 @@ export interface CampaignBrief {
  * enough that a pasted wall of HTML can't balloon the brief or the prompt. */
 export const MAX_CONVERSATION_NOTES_CHARS = 6000;
 
-/** Attached designs a flyer matches; with a product photo and a logo that's
- * 5 references, inside every image model's limit. */
+/** Style images a design follows (StyleChoice `images`). */
 export const MAX_FLYER_REFERENCES = 3;
 
 /** The business a flyer is made for, when it isn't the account's brand. */
@@ -583,6 +604,8 @@ export interface FactoryPlanItem {
   offer_slug?: string;
   /** The planner chose this piece to follow the campaign's competitor ad. */
   uses_reference?: boolean;
+  /** The owner's photos the planner matched to this piece, one or several. */
+  photos?: string[];
   /** Set once launched. */
   draft_id?: string;
 }
@@ -601,18 +624,20 @@ export interface FactoryState {
   kinds: FactoryKind[];
   size: number;
   days: number;
-  photo_url?: string;
+  /** The chat's photos, style, and competitor ads. The planner gives each
+   * piece its own photos, the style is shared by every post and ad, and only
+   * plan items with uses_reference follow the competitor ads. */
+  inputs?: PieceInputs;
   /** Matched saved product, when the sentence is about one. */
   offer_slug?: string;
-  /** The design look picked for this campaign's social posts and ads. */
-  look_id?: string;
-  /** Designs attached in chat for the posts and ads to match; they win over
-   * look_id. reference_profile is read once at launch and shared. */
-  reference_urls?: string[];
+  /** The style images' design, read once at planning and shared. */
   reference_profile?: DesignLookProfile;
   /** The business the campaign's posts and ads are for, when not this brand. */
   client_brand?: ClientBrand;
-  /** A competitor ad picked in chat; only plan items with uses_reference follow it. */
+  /** Legacy (read through inputsOf, never written). */
+  photo_url?: string;
+  look_id?: string;
+  reference_urls?: string[];
   competitor_reference_id?: string;
   /** One design direction for every post and ad, so the set looks related
    * when no look or attached design leads. Picked by the planner. */
@@ -675,11 +700,13 @@ export interface TopicContext {
    * user liked the look of, whose layout generation recreates. Optional for the
    * same reason as referenceEmails. */
   emailDesignRefs?: StyleReference[];
-  /** The competitor ad (migration 025) the brief points at via
-   * competitor_reference_id, when one was picked. Single, not a list (mirrors
-   * emailDesignRefs' [0]-only usage): null when unset or the id no longer
-   * resolves. */
+  /** The competitor ad (migration 025) the piece's inputs lead with, when
+   * one was picked. Single, not a list (mirrors emailDesignRefs' [0]-only
+   * usage): null when unset or the id no longer resolves. */
   competitorRef?: CompetitorReference | null;
+  /** What the chat learned about the account (brand_memory, migration 007),
+   * for every writer. Optional so hand-built contexts still typecheck. */
+  memories?: BrandMemory[];
 }
 
 // What we store in drafts.content for an email draft.
@@ -1015,6 +1042,8 @@ export interface FlyerVariant {
   layout?: FlyerLayout;
   /** True once this option was re-rendered on the pro image tier. */
   finalized?: boolean;
+  /** The owner's photos this option shows, so a re-render keeps them. */
+  photos?: string[];
 }
 
 // ── Design looks (migration 031) ─────────────────────────────────────────────
@@ -1234,6 +1263,9 @@ export interface DraftMeta {
   // each email in the series keeps its own angle/message/offer. Lives in meta
   // (jsonb) and survives generation because populateDraft merges meta.
   series_brief?: CampaignBrief;
+  /** The photos, style, and competitor ads this draft was made from,
+   * snapshotted when the shell was created. Read through inputsOf. */
+  inputs?: PieceInputs;
   // ── Social flyer fields (content_jobs.type='social' drafts only). All jsonb,
   // no migration needed; they survive generation because populateDraft merges
   // meta rather than replacing it.
@@ -1254,8 +1286,7 @@ export interface DraftMeta {
   style_reference_id?: string;
   // "ad" when the flyer is a paid FB/IG ad; absent means an organic post.
   flyer_format?: FlyerFormat;
-  // The competitor_references row (migration 025) whose distilled strategy
-  // steers this flyer's copy and scene, if any. Never its words or image.
+  // Legacy (read through inputsOf, never written): one competitor ad id.
   competitor_reference_id?: string;
   // The design-direction preset this flyer was rendered with. Persisted as
   // the RESOLVED style (an explicit pick or the varied-rotation result), so
@@ -1273,15 +1304,14 @@ export interface DraftMeta {
   /** "YYYY-MM-DD" (UTC) a scheduled social post goes out once approved. Set by
    * the weekly social schedule; the daily cron posts it on that day. */
   planned_publish_at?: string;
-  /** Social only: a real, already-hosted product photo the flyer art is built
-   * around (factory upload, or the promoted product's own photo). */
+  /** Legacy (read through inputsOf, never written): the product photo. */
   product_photo_url?: string;
-  /** The design look (migration 031) this flyer follows; unset means the
-   * brand's default look, if it has one, and "none" opts out of it. */
+  /** The design look (migration 031) a flyer followed, written at its first
+   * render so re-renders keep it. Legacy drafts also read it as the choice. */
   look_id?: string;
-  /** Designs attached in chat for this flyer to match; they win over
-   * look_id. reference_profile is their design, read once at generation. */
+  /** Legacy (read through inputsOf, never written): designs to match. */
   reference_urls?: string[];
+  /** The style images' design, read once and reused by re-renders. */
   reference_profile?: DesignLookProfile;
   /** Set when the flyer is for another business: its colors and logo. */
   client_brand?: ClientBrand;

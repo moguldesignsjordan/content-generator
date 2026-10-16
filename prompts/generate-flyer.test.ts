@@ -87,10 +87,16 @@ describe("buildFlyerImagePrompt", () => {
   });
 
   it("locks the product when its photo is attached, and orders the references", () => {
-    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", true, undefined, { hasProduct: true });
+    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", true, undefined, { photoCount: 1 });
     expect(prompt).toContain("first attached image is the real product");
     expect(prompt).toContain("unchanged");
     expect(prompt).toContain("The last attached image is a style reference");
+  });
+
+  it("locks every product when several photos are attached", () => {
+    const prompt = buildFlyerImagePrompt(copy, tokens, "1:1", false, undefined, { photoCount: 3 });
+    expect(prompt).toContain("The first 3 attached images are the real products");
+    expect(prompt).toContain("arranged together");
   });
 
   it("appends the style-transfer directive only when a reference is attached", () => {
@@ -272,6 +278,14 @@ describe("parseFlyerVariants", () => {
     );
     expect(v.extras).toEqual([{ slot: "date pills", text: "Nov 2 | 8 PM" }]);
   });
+
+  it("keeps each option's whole, positive, unique photo numbers", () => {
+    const [v] = parseFlyerVariants(
+      { variants: [{ headline: "H", caption: "C", scene: "S", photos: [2, 1, 2, 0, 1.5, "3"] }] },
+      4,
+    );
+    expect(v.photos).toEqual([2, 1]);
+  });
 });
 
 describe("flyerVariantsTool", () => {
@@ -284,6 +298,15 @@ describe("flyerVariantsTool", () => {
     expect(items().required).toContain("caption");
     expect(items().properties).toHaveProperty("hashtags");
     expect(items().properties).not.toHaveProperty("ad");
+  });
+
+  it("requires each option's photos only when the owner's photos are attached", () => {
+    expect(items().properties).not.toHaveProperty("photos");
+    const withPhotos = (flyerVariantsTool("post", false, true).input_schema.properties as {
+      variants: { items: Items };
+    }).variants.items;
+    expect(withPhotos.properties).toHaveProperty("photos");
+    expect(withPhotos.required).toContain("photos");
   });
 
   it("swaps caption and hashtags for the ad fields on an ad", () => {
@@ -304,7 +327,7 @@ describe("flyerVariantsTool", () => {
 describe("buildFlyerCopyMessages", () => {
   const base = {
     brandName: "Mogul",
-    voiceBlock: "BRAND: Mogul\nVOICE: direct",
+    brandContext: "BRAND: Mogul\nVOICE: direct",
     topicTitle: "Why slow sites lose clients",
     aspect: "1:1" as const,
     variants: { count: 4 },
@@ -319,6 +342,19 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain("Square post (1:1)");
     expect(user).toContain("VOICE: direct");
     expect(user).not.toContain("EXISTING EMAIL");
+  });
+
+  it("asks each option to pick the owner's photos and stage them as they look", () => {
+    expect(buildFlyerCopyMessages(base).user).not.toContain("PRODUCT PHOTOS");
+    const { user } = buildFlyerCopyMessages({ ...base, photoCount: 3 });
+    expect(user).toContain("PRODUCT PHOTOS: the 3 images above are real photos");
+    expect(user).toContain("set photos to the ones it shows");
+    expect(user).toContain("Never invent a product");
+  });
+
+  it("carries the chat's brief block", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, briefBlock: "CAMPAIGN BRIEF (from the strategy conversation; serve this):\n  Goal: Sell cards" });
+    expect(user).toContain("Goal: Sell cards");
   });
 
   const competitorRef: CompetitorReference = {
@@ -511,9 +547,15 @@ describe("buildFlyerDesignPrompt", () => {
   });
 
   it("numbers the product first, then the examples", () => {
-    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { hasProduct: true });
-    expect(prompt).toContain("Image 1 is the real product photo. Images 2 to 3 are the design examples to match.");
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { photoCount: 1 });
+    expect(prompt).toContain("Image 1 is a real photo of the owner's product. Images 2 to 3 are the design examples to match.");
     expect(prompt).toContain("Show the product from Image 1 exactly as photographed");
+  });
+
+  it("numbers several product photos before the examples", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 2, roles }, { photoCount: 3 });
+    expect(prompt).toContain("Images 1 to 3 are real photos of the owner's products. Images 4 to 5 are the design examples to match.");
+    expect(prompt).toContain("Show every product from Images 1 to 3 exactly as photographed");
   });
 
   it("gives each line of text its own type direction", () => {

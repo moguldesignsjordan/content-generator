@@ -9,11 +9,8 @@ import type {
   Product,
 } from "@/lib/db/types";
 import {
-  buildBrandVoiceBlock,
+  buildBrandContext,
   buildCompetitorReferenceBlock,
-  buildGuidelinesBlock,
-  buildMemoryBlock,
-  buildPositioningBlock,
   buildProductLines,
 } from "./brand-voice";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
@@ -93,6 +90,12 @@ export const SAVE_PLAN_TOOL: Anthropic.Tool = {
               description:
                 "True when this piece adapts the COMPETITOR REFERENCE. Only when one is given.",
             },
+            photos: {
+              type: "array",
+              items: { type: "integer" },
+              description:
+                "Only when PRODUCT PHOTOS are attached: the numbers of the photos (1, 2, ...) this piece shows, one, or several together for a lineup.",
+            },
           },
           required: [
             "kind",
@@ -160,6 +163,8 @@ export function buildPlanMessages(args: {
   counts: Record<FactoryKind, number>;
   /** A competitor ad picked in chat for some pieces to adapt. */
   competitorRef?: CompetitorReference | null;
+  /** How many product photos ride ahead of the user text as image blocks. */
+  photoCount?: number;
 }): { system: string; user: string } {
   const kinds = FACTORY_KINDS.filter((k) => args.counts[k] > 0);
   const total = kinds.reduce((sum, k) => sum + args.counts[k], 0);
@@ -169,15 +174,10 @@ export function buildPlanMessages(args: {
     "You plan marketing campaigns for one small business. A plan is a table of",
     "distinct pieces, each built on its own idea, in the brand's real voice.",
     "",
-    buildBrandVoiceBlock(args.brand, args.primaryIcp),
-    "",
-    buildPositioningBlock(args.brand),
-    "",
-    buildGuidelinesBlock(args.brand),
+    buildBrandContext(args),
     "",
     "PRODUCTS AND SERVICES (slug: name):",
     ...buildProductLines(args.products),
-    ...(args.memories.length ? ["", buildMemoryBlock(args.memories)] : []),
   ]
     .filter((line) => line !== undefined)
     .join("\n");
@@ -192,6 +192,12 @@ export function buildPlanMessages(args: {
           "REAL FACTS ABOUT THIS BUSINESS: only what the owner said above and the brand info. Flag needs_detail wherever proof would help.",
         ]),
     ...(competitorBlock ? ["", competitorBlock] : []),
+    ...(args.photoCount
+      ? [
+          "",
+          `PRODUCT PHOTOS: the ${args.photoCount === 1 ? "image" : `${args.photoCount} images`} above ${args.photoCount === 1 ? "is a real photo" : "are real photos"} of the owner's products, numbered 1 to ${args.photoCount} in order. Look at each one.`,
+        ]
+      : []),
     "",
     `PLAN EXACTLY ${total} PIECES: ${kinds.map((k) => `${args.counts[k]} ${k}`).join(", ")}.`,
     "",
@@ -203,6 +209,9 @@ export function buildPlanMessages(args: {
     "- Hooks are concrete and specific to this business: a real detail, a number from the facts, a named situation the reader recognizes. Never generic openers like 'Unlock', 'Elevate', 'In today's world', 'Ever wondered', or 'Look no further'.",
     ...(args.research
       ? ["- Build on the research: use the hook patterns and trends where they fit, and set inspired_by to the source URL that sparked the piece."]
+      : []),
+    ...(args.photoCount
+      ? ["- Set photos on every piece to the PRODUCT PHOTOS it shows: the one that best fits its idea, or several together when the piece is about more than one product (a lineup). Use each photo at least once when there are enough pieces. Write its visual around the real products in those photos, exactly as they look. Never describe a product that isn't in one of the photos."]
       : []),
     ...(competitorBlock
       ? [`- Adapt the COMPETITOR REFERENCE in about a third of the pieces (${Math.max(1, Math.round(total / 3))} of ${total}), the ones it suits best: their hook and structure follow it, in this brand's own words and offer. Set uses_reference true on exactly those. The rest stay their own ideas.`]

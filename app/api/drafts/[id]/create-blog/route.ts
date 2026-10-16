@@ -4,6 +4,7 @@ import { isAnthropicConfigured } from "@/lib/clients/anthropic";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { createDraftShell, getTopicContext } from "@/lib/db/queries";
 import { requireDraftInBrand } from "@/lib/draft-access";
+import { inputsOfDraft } from "@/lib/pipeline/generate";
 
 /**
  * Spins a blog draft off an existing (email) draft, no re-briefing: resolves
@@ -61,6 +62,7 @@ export async function POST(
       // Remember which email this blog grew out of, so the Blogs list and the
       // blog review screen can link back to it (stored in meta.source_draft_id).
       sourceDraftId,
+      inputs: await inputsOfDraft(source),
     });
     return NextResponse.json({ draftId });
   } catch (err) {

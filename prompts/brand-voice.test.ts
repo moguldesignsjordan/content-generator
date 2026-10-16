@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type {
+  Brand,
+  BrandMemory,
   CampaignBrief,
   CompetitorReference,
   Product,
   ReferenceEmail,
 } from "@/lib/db/types";
 import {
+  buildBrandContext,
   buildBriefStateBlock,
   buildCampaignBriefBlock,
   buildCompetitorReferenceBlock,
@@ -117,32 +120,30 @@ describe("buildProductLines", () => {
 });
 
 describe("buildBriefStateBlock", () => {
-  it("reports the vibe and product photo state", () => {
+  it("reports the vibe and a legacy brief's product photo", () => {
     const block = buildBriefStateBlock(
       { visual_vibe: "punchy", product_photo_url: "https://example.com/a.jpg" } as CampaignBrief,
       "topic-1",
     );
     expect(block).toContain("Vibe: punchy");
-    expect(block).toContain("Product photo: attached, will be the hero as-is");
+    expect(block).toContain("Photos to use in the picture: 1, the first one leads: https://example.com/a.jpg");
   });
 
   it("reports attached photos with a count", () => {
     const block = buildBriefStateBlock(
       {
-        photo_urls: ["https://example.com/a.jpg", "https://example.com/b.jpg"],
+        inputs: { photos: ["https://example.com/a.jpg", "https://example.com/b.jpg"] },
       } as CampaignBrief,
       null,
     );
-    expect(block).toContain(
-      "Photos in the email: 2 attached, each will be placed in the email",
-    );
+    expect(block).toContain("Photos to use in the picture: 2, the first one leads");
   });
 
   it("shows the not-set defaults when the brief is empty", () => {
     const block = buildBriefStateBlock({} as CampaignBrief, null);
     expect(block).toContain("Vibe: (not set)");
-    expect(block).toContain("Product photo: (none)");
-    expect(block).toContain("Photos in the email: (none)");
+    expect(block).toContain("Photos to use in the picture: (none)");
+    expect(block).toContain("Style: Our style");
     expect(block).toContain("Proof: (not set)");
     expect(block).toContain("Hook: (not set)");
     expect(block).toContain("Reader belief: (not set)");
@@ -400,17 +401,36 @@ describe("buildCompetitorReferenceBlock", () => {
   });
 });
 
-describe("buildBriefStateBlock competitor reference", () => {
-  it("reports the competitor reference state", () => {
-    expect(
-      buildBriefStateBlock(
-        { competitor_reference_id: "c1" } as CampaignBrief,
-        null,
-      ),
-    ).toContain("Competitor reference: attached, its strategy will be adapted");
-    expect(buildBriefStateBlock({} as CampaignBrief, null)).toContain(
-      "Competitor reference: (none)",
+describe("buildBriefStateBlock inputs", () => {
+  it("reports the competitor ads, including a legacy brief's", () => {
+    expect(buildBriefStateBlock({ competitor_reference_id: "c1" } as CampaignBrief, null)).toContain(
+      "Competitor ads: 1 (the first shapes the words",
     );
+    expect(buildBriefStateBlock({} as CampaignBrief, null)).toContain("Competitor ads: (none)");
+  });
+
+  it("lists the photos with their URLs and names the style", () => {
+    const block = buildBriefStateBlock(
+      {
+        inputs: {
+          photos: ["https://x/a.jpg", "https://x/b.jpg"],
+          style_images: { urls: ["https://x/ad.jpg"], from: "competitor" },
+        },
+      } as CampaignBrief,
+      null,
+    );
+    expect(block).toContain("Photos to use in the picture: 2, the first one leads: https://x/a.jpg, https://x/b.jpg");
+    expect(block).toContain("Style: follows their ads (1), in the brand's colors and logo");
+  });
+
+  it("keeps the ads as an option while Our style is picked", () => {
+    const block = buildBriefStateBlock(
+      {
+        inputs: { style_images: { urls: ["https://x/ad.jpg"], from: "competitor" }, style: { kind: "our" } },
+      } as CampaignBrief,
+      null,
+    );
+    expect(block).toContain("Style: Our style; their ads (1) kept as an option in the look picker");
   });
 });
 
@@ -429,5 +449,56 @@ describe("buildCampaignBriefBlock style_example", () => {
     expect(buildCampaignBriefBlock({ goal: "Book calls" })).not.toContain(
       "STYLE EXAMPLE",
     );
+  });
+});
+
+describe("buildBrandContext", () => {
+  const brand = {
+    name: "Moguls",
+    voice_profile: { voice: "Direct and warm" },
+    guidelines: { do_language: ["Say 'you'"] },
+  } as unknown as Brand;
+
+  it("puts guidelines, voice, then what the chat learned, without forget ids", () => {
+    const block = buildBrandContext(
+      { brand, primaryIcp: null, memories: [{ id: "m1", content: "Never mention discounts" } as BrandMemory] },
+      "social",
+    );
+    expect(block.indexOf("BRAND: Moguls")).toBeGreaterThan(-1);
+    expect(block.indexOf("Say 'you'")).toBeLessThan(block.indexOf("BRAND: Moguls"));
+    expect(block).toContain("THINGS LEARNED ABOUT THIS ACCOUNT");
+    expect(block).toContain("  - Never mention discounts");
+    expect(block).not.toContain("m1");
+  });
+
+  it("leaves the learned section out when there's nothing learned", () => {
+    expect(buildBrandContext({ brand, primaryIcp: null })).not.toContain("THINGS LEARNED");
+  });
+});
+
+describe("buildCampaignBriefBlock for social", () => {
+  const brief = {
+    goal: "Sell door hangers",
+    subject_line: "Door hangers that work",
+    preheader: "Printed fast",
+    style_example: "An email to read like",
+    offer_deal: "20% off",
+    offer_deadline: "Friday",
+    conversation_notes: "We print in 48 hours",
+  } as CampaignBrief;
+
+  it("drops the email-only lines and carries the offer terms", () => {
+    const block = buildCampaignBriefBlock(brief, "social");
+    expect(block).not.toContain("SUBJECT LINE");
+    expect(block).not.toContain("PREHEADER");
+    expect(block).not.toContain("STYLE EXAMPLE");
+    expect(block).toContain("OFFER (real, from the user; use exactly these terms): 20% off; deadline Friday");
+    expect(block).toContain("WHAT THE USER ACTUALLY SAID");
+  });
+
+  it("keeps the email block unchanged by default", () => {
+    const block = buildCampaignBriefBlock(brief);
+    expect(block).toContain("SUBJECT LINE");
+    expect(block).not.toContain("OFFER (real");
   });
 });

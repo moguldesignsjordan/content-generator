@@ -100,6 +100,7 @@ export async function GET(
           {
             campaignId: draftCtx.campaignId ?? undefined,
             briefOverride: draftCtx.meta.series_brief,
+            inputs: draftCtx.meta.inputs,
             jobType: draftCtx.jobType,
             emailTypeOverride: draftCtx.emailType ?? undefined,
             blogTypeOverride: draftCtx.blogType ?? undefined,

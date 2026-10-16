@@ -6,11 +6,9 @@ import type {
   TopicContext,
 } from "@/lib/db/types";
 import {
-  buildBrandVoiceBlock,
+  buildBrandContext,
   buildCampaignBriefBlock,
   buildCompetitorReferenceBlock,
-  buildGuidelinesBlock,
-  buildPositioningBlock,
   buildStrategyBlock,
 } from "./brand-voice";
 import { buildOfferBlock, resolveCta } from "./generate-email";
@@ -154,9 +152,7 @@ export function buildAngleMessages(
     "writes it. Be concrete and opinionated. A vague angle is worse than a narrow",
     "one that might be wrong.",
     "",
-    buildGuidelinesBlock(ctx.brand),
-    buildBrandVoiceBlock(ctx.brand, ctx.primaryIcp, channel),
-    buildPositioningBlock(ctx.brand),
+    buildBrandContext(ctx, channel),
     buildStrategyBlock(ctx),
     buildCompetitorReferenceBlock(ctx.competitorRef),
     buildPerformanceBlock(opts.topPerformers),

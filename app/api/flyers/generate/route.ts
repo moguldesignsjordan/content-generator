@@ -18,6 +18,7 @@ import {
 } from "@/prompts/generate-flyer";
 import type { FlyerAspect, FlyerFormat, FlyerStyleId, ImageModelTier } from "@/lib/db/types";
 import { isImageModelTier } from "@/lib/image-models";
+import { styleFromLookId } from "@/lib/inputs";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { getSessionUser } from "@/lib/supabase/server";
@@ -144,10 +145,12 @@ export async function POST(request: Request) {
       flyerBrief: brief,
       styleReferenceId,
       flyerStyle,
-      competitorReferenceId,
       flyerFormat,
       ...(flyerModel ? { flyerModel } : {}),
-      ...(lookId ? { lookId } : {}),
+      inputs: {
+        ...(lookId ? { style: styleFromLookId(lookId) } : {}),
+        ...(competitorReferenceId ? { competitor_reference_ids: [competitorReferenceId] } : {}),
+      },
     });
     return NextResponse.json({ draftId });
   } catch (err) {

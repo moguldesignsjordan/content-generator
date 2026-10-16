@@ -244,7 +244,7 @@ export interface SaveCompetitorReferenceInput {
 /**
  * Saves a competitor ad to the swipe file (competitor_references, migration
  * 025) and distills its marketing STRATEGY once, so it can be picked for
- * future emails via update_brief.competitor_reference_id. The DB write and
+ * future pieces via update_brief.competitor_reference_id. The DB write and
  * Claude distillation both happen here (like remember), unlike update_brief's
  * pure state merge.
  */
@@ -401,9 +401,9 @@ export interface SaveLookInput {
 export const SAVE_LOOK_TOOL: Anthropic.Tool = {
   name: "save_look",
   description:
-    "Save the designs attached for this flyer (update_brief.style_reference_urls) " +
-    "as a look the owner can pick for future flyers. Only after they say yes " +
-    "to saving it.",
+    "Save the owner's own designs attached for this flyer (the images they " +
+    "labeled Style) as a look they can pick for future flyers. Only after " +
+    "they say yes to saving it, and never for competitor ads.",
   input_schema: {
     type: "object",
     properties: {

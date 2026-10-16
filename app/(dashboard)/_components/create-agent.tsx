@@ -36,6 +36,7 @@ import type {
   FactoryKind,
   FunnelStage,
   MediaAsset,
+  PieceInputs,
   SeriesDraftRef,
 } from "@/lib/db/types";
 import { LookPicker } from "./look-picker";
@@ -67,12 +68,23 @@ interface Msg {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  /** Which of `images` the user labeled Style; the rest are photos. */
+  styleImages?: string[];
 }
 
-/** An image staged on the composer, uploaded and hosted but not yet sent. */
+/** An image staged on the composer, uploaded and hosted but not yet sent.
+ * Its role is the user's own label: a photo to use in the picture as it
+ * is, or a style for the design to follow. */
 interface PendingImage {
   url: string;
   name: string;
+  role: "picture" | "style";
+}
+
+/** The style images the look picker can offer, from the chat's response. */
+interface StyleImages {
+  urls: string[];
+  from: "upload" | "competitor";
 }
 
 /* Concrete things you can type, cycled through the empty composer so the
@@ -123,10 +135,9 @@ interface CampaignHandoff {
   size: number;
   days: number;
   research: boolean;
-  photo_url?: string;
-  reference_urls?: string[];
+  /** The chat's photos, style, and competitor ads, passed through whole. */
+  inputs?: PieceInputs;
   client_brand?: ClientBrand;
-  competitor_reference_id?: string;
 }
 
 interface CampaignRun {
@@ -193,6 +204,8 @@ interface CreateResponse {
   showLookPicker?: boolean;
   /** The user shared an Ad Library page: its ads show under the reply. */
   adLibraryUrl?: string | null;
+  /** The style the brief follows, as the look picker shows it. */
+  style?: { value: string | null; images: StyleImages | null };
   /** The piece shown live in the thread, and a change the agent asked for. */
   preview?: ChatPreview | null;
   previewAction?: PreviewAction | null;
@@ -287,8 +300,13 @@ export function CreateAgent({
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   // The agent asked for a design look; the picker shows under its reply.
   const [lookPickerOpen, setLookPickerOpen] = useState(false);
-  // null = the brand default look, same as the factory.
+  // The picker's selection: null = Our style, "images" = the style images,
+  // "none" = No reference, else a saved look. Sent only when the user taps.
   const [lookId, setLookId] = useState<string | null>(null);
+  // What the brief follows on the server, so an unconfirmed tap still counts.
+  const [savedLook, setSavedLook] = useState<string | null>(null);
+  // The user's style images or ticked ads, offered as their own picker tile.
+  const [styleImages, setStyleImages] = useState<StyleImages | null>(null);
   const [adLibraryUrl, setAdLibraryUrl] = useState<string | null>(null);
   // The brief card stays out of the thread unless opened (or Auto mode is
   // waiting on Generate).
@@ -352,7 +370,7 @@ export function CreateAgent({
           const res = await fetch("/api/uploads/image", { method: "POST", body });
           const data = (await res.json()) as { url?: string; error?: string };
           if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that image.");
-          setPendingImages((imgs) => [...imgs, { url: data.url!, name: file.name }]);
+          setPendingImages((imgs) => [...imgs, { url: data.url!, name: file.name, role: "picture" }]);
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Couldn't upload that image.");
         }
@@ -393,7 +411,14 @@ export function CreateAgent({
     setPendingImages((imgs) =>
       imgs.some((i) => i.url === asset.url)
         ? imgs.filter((i) => i.url !== asset.url)
-        : [...imgs, { url: asset.url, name: asset.alt ?? "Saved image" }],
+        : [...imgs, { url: asset.url, name: asset.alt ?? "Saved image", role: "picture" }],
+    );
+  }
+
+  /** Flips a staged image between a photo to use and a style to follow. */
+  function toggleImageRole(url: string) {
+    setPendingImages((imgs) =>
+      imgs.map((i) => (i.url === url ? { ...i, role: i.role === "style" ? "picture" : "style" } : i)),
     );
   }
 
@@ -430,11 +455,16 @@ export function CreateAgent({
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
 
-  /** competitorAdId: the first ad ticked in the Ad Library picker. */
-  function send(text: string, competitorAdId?: string) {
+  /** extra: the ads ticked in the Ad Library picker (in tick order), or a
+   * look picker tap. */
+  function send(text: string, extra: { competitorAdIds?: string[]; lookChoice?: string } = {}) {
     const t = text.trim();
     const imageUrls = pendingImages.map((p) => p.url);
+    const styleUrls = pendingImages.filter((p) => p.role === "style").map((p) => p.url);
     if ((!t && imageUrls.length === 0) || loading || generating) return;
+    // A look tapped in the open picker counts even when they reply by typing.
+    const lookChoice =
+      extra.lookChoice ?? (lookPickerOpen && lookId !== savedLook ? (lookId ?? "our") : undefined);
     const displayText =
       t || (imageUrls.length === 1 ? "(attached a photo)" : "(attached photos)");
     setInput("");
@@ -450,9 +480,10 @@ export function CreateAgent({
         role: "user",
         content: displayText,
         ...(imageUrls.length ? { images: imageUrls } : {}),
+        ...(styleUrls.length ? { styleImages: styleUrls } : {}),
       },
     ]);
-    void postToAgent(displayText, imageUrls, competitorAdId);
+    void postToAgent(displayText, imageUrls, styleUrls, { ...extra, lookChoice });
   }
 
   function sendFromLanding() {
@@ -472,10 +503,16 @@ export function CreateAgent({
     setPicked(null);
   }
 
-  async function postToAgent(text: string, imageUrls: string[], competitorAdId?: string) {
+  async function postToAgent(
+    text: string,
+    imageUrls: string[],
+    styleUrls: string[],
+    extra: { competitorAdIds?: string[]; lookChoice?: string },
+  ) {
     setLoading(true);
     setLiveText("");
     setLiveStatus(imageUrls.length ? "Looking at your photos" : "Thinking");
+    const photoUrls = imageUrls.filter((u) => !styleUrls.includes(u));
     const hintTimer = setTimeout(() => setHint(true), 8000);
     const controller = new AbortController();
     // This route can chain several tool round-trips server-side (up to
@@ -491,10 +528,11 @@ export function CreateAgent({
           message: text,
           history: messages,
           campaignId,
-          images: imageUrls.length ? imageUrls : undefined,
+          images: photoUrls.length ? photoUrls : undefined,
+          ...(styleUrls.length ? { styleImages: styleUrls } : {}),
           auto: mode === "auto",
-          ...(lookId ? { lookId } : {}),
-          ...(competitorAdId ? { competitorAdId } : {}),
+          ...(extra.lookChoice ? { lookChoice: extra.lookChoice } : {}),
+          ...(extra.competitorAdIds?.length ? { competitorAdIds: extra.competitorAdIds } : {}),
         }),
         signal: controller.signal,
       });
@@ -530,6 +568,12 @@ export function CreateAgent({
       setOptions(data.options ?? null);
       setLookPickerOpen(Boolean(data.showLookPicker));
       setAdLibraryUrl(data.adLibraryUrl ?? null);
+      // The server owns the style: the picker shows what the brief follows.
+      if (data.style) {
+        setLookId(data.style.value);
+        setSavedLook(data.style.value);
+        setStyleImages(data.style.images);
+      }
       if (data.series?.length) setSeries(data.series);
       setReady(Boolean(data.readyToGenerate));
       if (typeof data.auto === "boolean") setMode(data.auto ? "auto" : "guided");
@@ -591,6 +635,8 @@ export function CreateAgent({
     setPendingImages([]);
     setLookPickerOpen(false);
     setLookId(null);
+    setSavedLook(null);
+    setStyleImages(null);
     setBriefOpen(false);
     setPreview(null);
     setQueued(null);
@@ -616,13 +662,9 @@ export function CreateAgent({
           days: handoff.days,
           research: handoff.research,
           campaign_id: chatCampaignId,
-          ...(handoff.photo_url ? { photo_url: handoff.photo_url } : {}),
-          ...(lookId ? { look_id: lookId } : {}),
-          ...(handoff.reference_urls?.length ? { reference_urls: handoff.reference_urls } : {}),
+          // The chat's photos, style, and competitor ads, whole.
+          ...(handoff.inputs ? { inputs: handoff.inputs } : {}),
           ...(handoff.client_brand ? { client_brand: handoff.client_brand } : {}),
-          ...(handoff.competitor_reference_id
-            ? { competitor_reference_id: handoff.competitor_reference_id }
-            : {}),
         }),
       });
       if (!res.ok) {
@@ -760,6 +802,7 @@ export function CreateAgent({
                     onRemoveImage={(url) =>
                       setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
                     }
+                    onToggleImageRole={toggleImageRole}
                   />
                 </motion.div>
               </div>
@@ -907,7 +950,7 @@ export function CreateAgent({
                       <span className="bar-spectrum h-1 w-4 rounded-full" />
                       Pick a style
                     </span>
-                    <LookPicker value={lookId} onChange={setLookId} />
+                    <LookPicker value={lookId} onChange={setLookId} styleImages={styleImages} />
                     <StepChip
                       primary
                       label="Use this"
@@ -915,9 +958,14 @@ export function CreateAgent({
                         send(
                           lookId === "none"
                             ? "No reference, you pick the style."
-                            : lookId
-                              ? "I picked a saved look to follow."
-                              : "Use our style.",
+                            : lookId === "images"
+                              ? styleImages?.from === "competitor"
+                                ? "Follow their ads' look, in our colors."
+                                : "Follow my designs."
+                              : lookId
+                                ? "I picked a saved look to follow."
+                                : "Use our style.",
+                          { lookChoice: lookId ?? "our" },
                         )
                       }
                     />
@@ -937,7 +985,7 @@ export function CreateAgent({
                           ids.length === 1
                             ? "Learn from the ad I picked."
                             : `I saved ${ids.length} ads. Learn from the first one I picked.`,
-                          ids[0],
+                          { competitorAdIds: ids },
                         )
                       }
                     />
@@ -987,6 +1035,7 @@ export function CreateAgent({
                   onRemoveImage={(url) =>
                     setPendingImages((imgs) => imgs.filter((i) => i.url !== url))
                   }
+                  onToggleImageRole={toggleImageRole}
                 />
               </div>
             </motion.div>
@@ -1122,6 +1171,7 @@ function ComposerBar({
   placeholderCycle,
   pendingImages,
   onRemoveImage,
+  onToggleImageRole,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -1145,6 +1195,8 @@ function ComposerBar({
   /** Images uploaded and staged, waiting to ride with the next send. */
   pendingImages?: PendingImage[];
   onRemoveImage?: (url: string) => void;
+  /** Flips a staged image between a photo to use and a style to follow. */
+  onToggleImageRole?: (url: string) => void;
 }) {
   const attachRef = useRef<HTMLInputElement>(null);
   const cycling = placeholderCycle !== undefined && !ready;
@@ -1152,22 +1204,50 @@ function ComposerBar({
   return (
     <div className="hero-ring composer-glow flex flex-col gap-1.5 rounded-[28px] border border-border bg-surface-2 p-2 pl-2.5">
       {pendingImages && pendingImages.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-0.5 pt-0.5">
+        <div className="flex flex-wrap gap-2 px-0.5 pt-0.5">
           {pendingImages.map((img) => (
-            <div
-              key={img.url}
-              className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[var(--radius-md)] border border-border"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.url} alt={img.name} className="h-full w-full object-cover" />
-              {onRemoveImage && (
+            <div key={img.url} className="flex w-16 shrink-0 flex-col items-center gap-1">
+              <div
+                className={cn(
+                  "group relative h-12 w-12 overflow-hidden rounded-[var(--radius-md)] border",
+                  img.role === "style" ? "border-accent" : "border-border",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.url} alt={img.name} className="h-full w-full object-cover" />
+                {onRemoveImage && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveImage(img.url)}
+                    aria-label={`Remove ${img.name}`}
+                    className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                  >
+                    <CloseIcon size={10} />
+                  </button>
+                )}
+              </div>
+              {onToggleImageRole && (
                 <button
                   type="button"
-                  onClick={() => onRemoveImage(img.url)}
-                  aria-label={`Remove ${img.name}`}
-                  className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => onToggleImageRole(img.url)}
+                  aria-label={
+                    img.role === "style"
+                      ? `${img.name}: a style to follow. Tap to use it in the picture instead.`
+                      : `${img.name}: used in the picture as it is. Tap to follow it as a style instead.`
+                  }
+                  title={
+                    img.role === "style"
+                      ? "A design to follow. Tap to use it in the picture instead."
+                      : "Shown in the picture as it is. Tap to follow it as a style instead."
+                  }
+                  className={cn(
+                    "rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none transition-colors",
+                    img.role === "style"
+                      ? "border-accent/50 bg-accent/[0.12] text-foreground"
+                      : "border-border text-muted hover:text-foreground",
+                  )}
                 >
-                  <CloseIcon size={10} />
+                  {img.role === "style" ? "Style" : "In picture"}
                 </button>
               )}
             </div>
@@ -1614,8 +1694,8 @@ function BriefCardView({
 
       {card.photoCount > 0 && (
         <p className="mt-2 px-1 text-[12px] text-muted">
-          {card.photoCount} photo{card.photoCount === 1 ? "" : "s"} attached, each
-          will be placed in this email
+          {card.photoCount} photo{card.photoCount === 1 ? "" : "s"} attached, shown as
+          they are{card.photoCount > 1 ? ", the first one leads" : ""}
         </p>
       )}
 

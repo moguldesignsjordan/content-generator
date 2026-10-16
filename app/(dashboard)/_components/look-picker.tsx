@@ -8,16 +8,21 @@ import { LookBuilder } from "./look-builder";
 
 // Picks the design look flyers follow. null = Our style (the default look,
 // else the flyers the brand approved or liked); "none" = No reference
-// (the AI picks a fresh style per option); otherwise a saved look's id.
+// (the AI picks a fresh style per option); "images" = the chat's style
+// images (the owner's own designs or the competitor ads they ticked);
+// otherwise a saved look's id.
 
 export function LookPicker({
   value,
   onChange,
   disabled,
+  styleImages,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
+  /** Offered as their own tile when the chat has any. */
+  styleImages?: { urls: string[]; from: "upload" | "competitor" } | null;
 }) {
   const toast = useToast();
   const [looks, setLooks] = useState<DesignLook[] | null>(null);
@@ -42,16 +47,22 @@ export function LookPicker({
   const activeId = value === null || value === defaultLook?.id ? null : value;
   const active = activeId === null ? defaultLook : (looks?.find((l) => l.id === activeId) ?? null);
 
+  const imagesHint =
+    styleImages?.from === "competitor"
+      ? "Follows their ads' layout and type, in your brand colors with your logo. Never their words, products, or photos."
+      : "Follows your designs, in your brand colors.";
   const hint =
     activeId === "none"
       ? "No reference: the AI picks a fresh style for each option, in your brand colors."
-      : activeId !== null
-        ? (active?.profile?.summary ?? "Flyers follow these examples, in your brand colors.")
-        : defaultLook
-          ? (defaultLook.profile?.summary ?? `Follows your "${defaultLook.name}" look.`)
-          : house.length
-            ? "Follows flyers you approved or liked. Add examples to set it exactly."
-            : "Our style needs examples. Add 2 or 3 of your own designs, or pick No reference.";
+      : activeId === "images"
+        ? imagesHint
+        : activeId !== null
+          ? (active?.profile?.summary ?? "Flyers follow these examples, in your brand colors.")
+          : defaultLook
+            ? (defaultLook.profile?.summary ?? `Follows your "${defaultLook.name}" look.`)
+            : house.length
+              ? "Follows flyers you approved or liked. Add examples to set it exactly."
+              : "Our style needs examples. Add 2 or 3 of your own designs, or pick No reference.";
 
   async function setDefault(look: DesignLook, isDefault: boolean) {
     const res = await fetch(`/api/looks/${look.id}`, {
@@ -83,6 +94,28 @@ export function LookPicker({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
+        {styleImages && styleImages.urls.length > 0 && (
+          <button
+            type="button"
+            aria-pressed={activeId === "images"}
+            disabled={disabled}
+            onClick={() => onChange("images")}
+            className={cn(
+              "flex h-[72px] w-40 flex-col overflow-hidden rounded-[var(--radius-md)] border text-left transition-colors",
+              activeId === "images" ? "border-accent" : "border-border hover:border-border-strong",
+            )}
+          >
+            <span className="flex h-11 w-full">
+              {styleImages.urls.slice(0, 3).map((url) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={url} src={url} alt="" className="h-full min-w-0 flex-1 object-cover" loading="lazy" />
+              ))}
+            </span>
+            <span className="truncate px-2 py-1 text-[12px] font-medium text-foreground">
+              {styleImages.from === "competitor" ? "Their ads" : "Your designs"}
+            </span>
+          </button>
+        )}
         <button
           type="button"
           aria-pressed={activeId === null}

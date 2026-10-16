@@ -16,12 +16,10 @@ import type {
 } from "@/lib/db/types";
 import type { BrandTokens } from "@/lib/email/templates/types";
 import {
-  buildBrandVoiceBlock,
+  buildBrandContext,
   buildCampaignBriefBlock,
   buildCompetitorReferenceBlock,
-  buildGuidelinesBlock,
   buildKeywordLines,
-  buildPositioningBlock,
   buildStrategyBlock,
   buildReferenceEmailsBlock,
 } from "./brand-voice";
@@ -456,14 +454,13 @@ export function buildOfferBlock(
 }
 
 /**
- * The user's attached photos (brief.photo_urls), rendered as a hard placement
- * instruction. The pipeline's ensureBriefPhotos backstop splices any the
- * model skips, but model placement is much better (it weaves them between the
- * right sections with real alt text), so the prompt asks first. Empty string
- * when none are attached, so the prompt is unchanged.
+ * The owner's photos for the email body (splitPhotos), rendered as a
+ * hard placement instruction. The pipeline's ensureBriefPhotos backstop
+ * splices any the model skips, but model placement is much better (it weaves
+ * them between the right sections with real alt text), so the prompt asks
+ * first. Empty string when there are none, so the prompt is unchanged.
  */
-export function buildBriefPhotosBlock(brief?: CampaignBrief | null): string {
-  const urls = brief?.photo_urls;
+export function buildBriefPhotosBlock(urls?: string[]): string {
   if (!urls?.length) return "";
   return [
     `PHOTOS TO PLACE (${urls.length} real photo${urls.length === 1 ? "" : "s"} the user attached for THIS email; every`,
@@ -675,6 +672,8 @@ export function buildEmailMessages(
      * Absent when that step was skipped or failed, in which case the model
      * chooses its own angle as it always did. */
     angle?: Angle | null;
+    /** The owner's photos to place in the body (splitPhotos). */
+    bodyPhotos?: string[];
   } = {},
 ): {
   system: string;
@@ -689,9 +688,7 @@ export function buildEmailMessages(
   lengthTarget: EmailLengthTarget;
 } {
   const { topic, brand } = ctx;
-  const guidelinesBlock = buildGuidelinesBlock(brand);
-  const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "email");
-  const positioningBlock = buildPositioningBlock(brand);
+  const brandContext = buildBrandContext(ctx, "email");
   const referenceBlock = buildReferenceEmailsBlock(ctx.referenceEmails);
   const competitorBlock = buildCompetitorReferenceBlock(ctx.competitorRef);
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
@@ -745,9 +742,7 @@ export function buildEmailMessages(
     "complete marketing email: copy that sounds exactly like the brand, designed as",
     "modern, readable HTML under the design system below.",
     "",
-    guidelinesBlock,
-    voiceBlock,
-    positioningBlock,
+    brandContext,
     buildStrategyBlock(ctx),
     referenceBlock,
     competitorBlock,
@@ -829,7 +824,7 @@ export function buildEmailMessages(
       ? `CALL TO ACTION (use this intent, write the button text in brand voice): ${ctaText}`
       : "CALL TO ACTION: a soft invitation to reply or learn more.",
     buildOfferBlock(ctx, opts.brief),
-    buildBriefPhotosBlock(opts.brief),
+    buildBriefPhotosBlock(opts.bodyPhotos),
     ctx.product?.url
       ? `CTA URL: use the offer link above when the CTA points at the offer.`
       : `CTA URL: leave blank unless the related offer implies an obvious destination.`,

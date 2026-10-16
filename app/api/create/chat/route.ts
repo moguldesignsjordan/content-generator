@@ -40,13 +40,26 @@ import type {
   ClientBrand,
   CampaignBrief,
   ChatPreviewRef,
+  CompetitorReference,
   FactoryKind,
   FunnelStage,
+  PieceInputs,
   Product,
   SeriesDraftRef,
   Strategy,
+  StyleImages,
 } from "@/lib/db/types";
-import { CAMPAIGN_BRIEF_TEXT_FIELDS } from "@/lib/db/types";
+import { CAMPAIGN_BRIEF_TEXT_FIELDS, MAX_FLYER_REFERENCES } from "@/lib/db/types";
+import {
+  addPhotos,
+  effectiveStyle,
+  followedStyleImages,
+  inputsOf,
+  lookPickerValue,
+  styleFromPicker,
+  withInputs,
+  withStyleImages,
+} from "@/lib/inputs";
 import {
   CHAT_WEB_TOOLS,
   CREATE_TOOLS,
@@ -74,6 +87,7 @@ import { DEFAULT_FLYER_ASPECT, isFlyerAspect } from "@/prompts/generate-flyer";
 import { buildBriefCard, topicContextFor, type CreateBriefCard } from "@/lib/brief-card";
 import { extractCompetitorProfile } from "@/lib/pipeline/extract-competitor";
 import { describeOurStyle } from "@/lib/pipeline/generate-flyer";
+import { inputsOfDraft } from "@/lib/pipeline/generate";
 import { cleanFlyerEdit, type PreviewAction } from "@/lib/chat-preview";
 import { cleanExamples, cleanLookName, storageHostFromEnv } from "@/lib/looks";
 import { extractLookProfile } from "@/lib/pipeline/extract-look";
@@ -118,10 +132,9 @@ interface StartedCampaign {
   size: number;
   days: number;
   research: boolean;
-  photo_url?: string;
-  reference_urls?: string[];
+  /** The chat's photos, style, and competitor ads, whole. */
+  inputs?: PieceInputs;
   client_brand?: ClientBrand;
-  competitor_reference_id?: string;
 }
 
 const NO_OUR_STYLE =
@@ -130,10 +143,17 @@ const NO_OUR_STYLE =
   "your reply (2 or 3 of their own designs), or pick No reference to let you " +
   "choose a fresh style.";
 
-/** Flyers follow a saved look, No reference, or Our style; only the last can
- * be empty, and an empty one must never fall back silently. */
-async function canUseOurStyle(ctx: { brand: Brand; lookId?: string }): Promise<boolean> {
-  return Boolean(ctx.lookId) || (await describeOurStyle(ctx.brand.id)) !== null;
+/** What the look picker shows: the current choice, and the style images
+ * (the user's own designs or the ads they ticked) as a tile of their own. */
+function pickerStyle(brief: CampaignBrief): { value: string | null; images: StyleImages | null } {
+  const inputs = inputsOf(brief);
+  return { value: lookPickerValue(inputs), images: inputs.style_images ?? null };
+}
+
+/** Flyers follow style images, a saved look, No reference, or Our style; only
+ * the last can be empty, and an empty one must never fall back silently. */
+async function canUseOurStyle(brandId: string, inputs: PieceInputs): Promise<boolean> {
+  return effectiveStyle(inputs).kind !== "our" || (await describeOurStyle(brandId)) !== null;
 }
 
 /** What the chat shows while a tool runs; null for tools that only save. */
@@ -190,6 +210,8 @@ interface ChatMsg {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  /** Which of `images` the user labeled Style; the rest are photos. */
+  styleImages?: string[];
 }
 
 /** Only the app's own Supabase storage host may be injected as an image
@@ -218,15 +240,21 @@ function sanitizeImageUrls(urls: string[] | undefined): string[] | undefined {
   return safe.length ? safe : undefined;
 }
 
-/** Images the image pipeline will fetch server-side must be our own uploads,
- * the same host rule as sanitizeImageUrls; anything else is dropped. */
-function keepOwnImages(brief: CampaignBrief): CampaignBrief {
-  const next = { ...brief };
-  if (next.style_reference_urls) {
-    const safe = sanitizeImageUrls(next.style_reference_urls);
-    if (safe) next.style_reference_urls = safe;
-    else delete next.style_reference_urls;
-  }
+/** Images the image pipeline will fetch server-side must be our own uploads
+ * (the same host rule as sanitizeImageUrls) or a product's stored photo;
+ * anything else is dropped. */
+function keepOwnImages(brief: CampaignBrief, products: Product[]): CampaignBrief {
+  const inputs = inputsOf(brief);
+  const productPhotos = new Set(products.map((p) => p.image_url).filter(Boolean));
+  const photos = (inputs.photos ?? []).filter(
+    (url) => productPhotos.has(url) || sanitizeImageUrls([url]),
+  );
+  const styleUrls = inputs.style_images ? sanitizeImageUrls(inputs.style_images.urls) : undefined;
+  const next = withInputs(brief, {
+    ...inputs,
+    photos,
+    style_images: inputs.style_images && styleUrls ? { ...inputs.style_images, urls: styleUrls } : undefined,
+  });
   const logo = next.client_brand?.logo_url;
   if (next.client_brand && logo && !sanitizeImageUrls([logo])) {
     next.client_brand = { ...next.client_brand };
@@ -237,18 +265,21 @@ function keepOwnImages(brief: CampaignBrief): CampaignBrief {
 
 /** Wraps a user message's text as a plain string (cheap) or, when images are
  * attached, a content array carrying real image blocks so the model sees
- * them (vision) plus their URLs in the text so it can echo one back into
- * update_brief.product_photo_url. */
+ * them (vision), plus each one's URL and the label the user gave it. The
+ * route has already saved them by that label; the model never sorts them. */
 function withImageBlocks(
   text: string,
   images: string[] | undefined,
+  styleImages: string[] = [],
 ): Anthropic.MessageParam["content"] {
   if (!images?.length) return text;
-  const urlList = images.map((u, i) => `u${i + 1}: ${u}`).join(", ");
+  const urlList = images
+    .map((u, i) => `u${i + 1}: ${u} (${styleImages.includes(u) ? "style to follow" : "photo to use in the picture"})`)
+    .join(", ");
   return [
     {
       type: "text",
-      text: `${text}\n\nATTACHED IMAGES (visible above; URLs: ${urlList}). If one is the product photo to feature, call update_brief with product_photo_url set to that exact URL. If they're photos to appear in the email itself, call update_brief with photo_urls listing those exact URLs (all of them, in order). If one is a design the flyer should look like, call update_brief with style_reference_urls set to its exact URL. If a flyer is ON SCREEN and the photo is for it, call edit_flyer with photo_url set to that exact URL instead.`,
+      text: `${text}\n\nATTACHED IMAGES (visible above, each with the label the user gave it, already saved by that label: ${urlList}). Never re-sort them. If a flyer is ON SCREEN and they're for it, call edit_flyer with photo_url set to that exact URL (photo_use place for a photo, style for a style image).`,
     },
     ...images.map((url) => ({
       type: "image" as const,
@@ -344,16 +375,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, campaignId, images, auto, lookId, competitorAdId } =
+    const { message, history, campaignId, images, styleImages, auto, lookChoice, competitorAdIds } =
       (await req.json()) as {
         message?: string;
         history?: ChatMsg[];
         campaignId?: string | null;
+        /** Attached images the user labeled "Use in picture". */
         images?: string[];
+        /** Attached images the user labeled "Style". */
+        styleImages?: string[];
         auto?: boolean;
-        lookId?: string | null;
-        /** The first ad ticked in the chat's Ad Library picker (an ad archive id). */
-        competitorAdId?: string | null;
+        /** A look picker tap: "our", "none", "images", or a saved look's id. */
+        lookChoice?: string | null;
+        /** The ads ticked in the chat's Ad Library picker (ad archive ids), in tick order. */
+        competitorAdIds?: string[];
       };
     if (!message?.trim()) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -369,7 +404,11 @@ export async function POST(req: NextRequest) {
     }
     const { brand, strategy, icps } = data;
     // A look id from the client must be one of this brand's looks.
-    if (lookId && lookId !== "none" && !(await getDesignLook(lookId, brand.id))) {
+    if (
+      lookChoice &&
+      !["our", "none", "images"].includes(lookChoice) &&
+      !(await getDesignLook(lookChoice, brand.id))
+    ) {
       return NextResponse.json({ error: "That look doesn't exist." }, { status: 404 });
     }
     const primaryIcp = icps.find((i) => i.is_primary) ?? icps[0] ?? null;
@@ -418,46 +457,99 @@ export async function POST(req: NextRequest) {
       .map((m) => ({
         role: m.role,
         content:
-          m.role === "user" ? withImageBlocks(m.content, sanitizeImageUrls(m.images)) : m.content,
+          m.role === "user"
+            ? withImageBlocks(m.content, sanitizeImageUrls(m.images), m.styleImages)
+            : m.content,
       }));
     if (priorTurns.length > 0) {
       priorTurns[priorTurns.length - 1] = withCacheBreakpoint(
         priorTurns[priorTurns.length - 1],
       );
     }
-    const briefState = buildBriefStateBlock(
-      campaign.brief ?? {},
-      campaign.topic_id,
-    );
     const onScreen = await loadOnScreen(campaign.chat_state?.preview, brand.id);
-    const sanitizedImages = sanitizeImageUrls(images);
+    const photos = sanitizeImageUrls(images) ?? [];
+    const styleUploads = sanitizeImageUrls(styleImages) ?? [];
+    const attached = [...photos, ...styleUploads];
+    // The picker saved the ticked ads before sending. Looked up by source_url
+    // so an ad saved earlier counts too, in tick order: the first shapes the words.
+    const tickedIds = (competitorAdIds ?? []).filter(
+      (id): id is string => typeof id === "string" && /^\d+$/.test(id),
+    );
+    const savedAds = tickedIds.length ? await listCompetitorReferences(brand.id) : [];
+    const pickedAds = tickedIds
+      .map((id) => savedAds.find((r) => r.source_url === adLibraryAdUrl(id)))
+      .filter((r): r is CompetitorReference => Boolean(r));
+
+    // Refreshed every turn (not merged) so the digest always reflects the whole
+    // conversation as it stands, including edits and corrections.
+    const conversationNotes = buildConversationNotes(history, message.trim());
+
+    // What the user attached, ticked, or tapped this turn lands in the brief's
+    // inputs before the model runs, by the user's own labels.
+    let turnInputs = inputsOf(campaign.brief);
+    turnInputs = addPhotos(turnInputs, photos);
+    turnInputs = withStyleImages(turnInputs, styleUploads, "upload");
+    if (pickedAds.length) {
+      const ids = pickedAds.map((r) => r.id);
+      turnInputs = {
+        ...turnInputs,
+        competitor_reference_ids: [
+          ...ids,
+          ...(turnInputs.competitor_reference_ids ?? []).filter((id) => !ids.includes(id)),
+        ],
+      };
+      // Ticked ads become the look too (in the brand's colors), unless the
+      // user attached designs of their own; the look picker switches back.
+      turnInputs = withStyleImages(
+        turnInputs,
+        pickedAds
+          .map((r) => r.image_url)
+          .filter((u): u is string => Boolean(u))
+          .slice(0, MAX_FLYER_REFERENCES),
+        "competitor",
+      );
+    }
+    if (lookChoice) {
+      turnInputs = { ...turnInputs, style: styleFromPicker(lookChoice, turnInputs) };
+    }
+    const turnBrief = keepOwnImages(
+      withInputs(
+        {
+          ...(campaign.brief ?? {}),
+          ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
+        },
+        turnInputs,
+      ),
+      products,
+    );
+
+    const briefState = buildBriefStateBlock(turnBrief, campaign.topic_id);
     // A bare URL in the message (and no attached image, which already has
     // its own handling) might be a competitor ad the user wants saved: scrape
     // it server-side now so the model sees real extracted text or an honest
     // "couldn't read it" note, never a naked link it would have to guess about.
     // An Ad Library page is never scraped here: the client shows its ads to
     // pick from, through the same preview/save routes the Media page uses.
-    const adLibraryUrl = sanitizedImages?.length ? null : findAdLibraryUrl(message);
-    // The picker saved the ticked ads before sending; the first one shapes
-    // this piece. Looked up by source_url so an ad saved earlier counts too.
-    const pickedAd =
-      competitorAdId && /^\d+$/.test(competitorAdId)
-        ? ((await listCompetitorReferences(brand.id)).find(
-            (r) => r.source_url === adLibraryAdUrl(competitorAdId),
-          ) ?? null)
-        : null;
+    const adLibraryUrl = attached.length ? null : findAdLibraryUrl(message);
     let messageForModel = adLibraryUrl
       ? `${message.trim()}\n\nSYSTEM NOTE: ${adLibraryUrl} is a Facebook Ad Library page. ` +
         "Its top ads are showing as a picker under your reply. In one short line, ask " +
         "them to tick the ads worth learning from; the first one they tick shapes this " +
-        "piece. Don't call save_competitor_reference for it."
-      : await withScrapedCompetitorUrl(message.trim(), !!sanitizedImages?.length);
-    if (pickedAd) {
+        "piece's words, and their look becomes the style. Don't call " +
+        "save_competitor_reference for it."
+      : await withScrapedCompetitorUrl(message.trim(), attached.length > 0);
+    if (pickedAds.length) {
+      const followsTheirLook = followedStyleImages(inputsOf(turnBrief))?.from === "competitor";
       messageForModel +=
         `\n\nSYSTEM NOTE: the ads they ticked are saved to Competitor Ads, and ` +
-        `"${pickedAd.name}" is attached to this piece. Say in one line you'll adapt ` +
+        `"${pickedAds[0].name}" shapes this piece's words: say in one line you'll adapt ` +
         "its hook, structure, and some of its phrasing in the brand's own voice, never " +
-        "copy it, then carry on.";
+        "copy it." +
+        (followsTheirLook
+          ? " Their look is now the style for posts and ads, in the brand's own colors " +
+            "and logo; the look picker shows it selected, and Our style is one tap away."
+          : "") +
+        " Then carry on.";
     }
     const messages: Anthropic.MessageParam[] = [
       ...priorTurns,
@@ -465,21 +557,14 @@ export async function POST(req: NextRequest) {
         role: "user",
         content: withImageBlocks(
           `${briefState}${onScreen ? `\n\n${onScreen.line}` : ""}\n\nUSER MESSAGE:\n${messageForModel}`,
-          sanitizedImages,
+          attached.length ? attached : undefined,
+          styleUploads,
         ),
       },
     ];
 
-    // Refreshed every turn (not merged) so the digest always reflects the whole
-    // conversation as it stands, including edits and corrections.
-    const conversationNotes = buildConversationNotes(history, message.trim());
-
     const state: TurnState = {
-      brief: {
-        ...(campaign.brief ?? {}),
-        ...(conversationNotes ? { conversation_notes: conversationNotes } : {}),
-        ...(pickedAd ? { competitor_reference_id: pickedAd.id } : {}),
-      },
+      brief: turnBrief,
       topicId: campaign.topic_id,
       // Seed the card's topic/CTA rows from the attached topic so they show
       // immediately on turns that don't re-select.
@@ -499,7 +584,6 @@ export async function POST(req: NextRequest) {
       topics,
       products,
       campaignId: campaign.id,
-      lookId: lookId || undefined,
       onScreen,
       userMessages: [
         ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
@@ -563,7 +647,7 @@ export async function POST(req: NextRequest) {
             return stream.finalMessage();
           };
 
-          send("status", { label: sanitizedImages ? "Looking at your photos" : "Thinking" });
+          send("status", { label: attached.length ? "Looking at your photos" : "Thinking" });
 
           // One turn can span several tool round-trips, each with its own text block.
           // Collected, then joined (see joinReplySegments): raw concatenation ran them
@@ -745,7 +829,8 @@ export async function POST(req: NextRequest) {
             {
               role: "user" as const,
               content: message.trim(),
-              ...(sanitizedImages ? { images: sanitizedImages } : {}),
+              ...(attached.length ? { images: attached } : {}),
+              ...(styleUploads.length ? { styleImages: styleUploads } : {}),
             },
             { role: "assistant" as const, content: reply },
           ].slice(-40);
@@ -797,6 +882,7 @@ export async function POST(req: NextRequest) {
             campaign: state.campaign,
             showLookPicker: state.showLookPicker,
             adLibraryUrl: state.adLibraryUrl,
+            style: pickerStyle(state.brief),
             preview: state.draftId && state.channel
               ? { draftId: state.draftId, channel: state.channel }
               : onScreen
@@ -849,8 +935,6 @@ async function dispatchTool(
     topics: CampaignTopicOption[];
     products: Product[];
     campaignId: string;
-    /** The flyer look picked on Create; social drafts only. */
-    lookId?: string;
     /** The piece previewed in the chat, if any. */
     onScreen: OnScreen | null;
     /** Every user message this conversation, oldest first. */
@@ -862,7 +946,9 @@ async function dispatchTool(
       const input = block.input as UpdateBriefInput;
       state.brief = keepOwnImages(
         autoAttachProductPhoto(mergeBrief(state.brief, input), input, ctx.products),
+        ctx.products,
       );
+      const inputs = inputsOf(state.brief);
       const saved = ([...CAMPAIGN_BRIEF_TEXT_FIELDS, "visual_vibe"] as const)
         .filter((k) => typeof input[k] === "string" && input[k]!.trim())
         .map((k) => `${k}=${state.brief[k]}`);
@@ -871,30 +957,24 @@ async function dispatchTool(
       if (typeof input.style_example === "string" && input.style_example.trim()) {
         saved.push("style_example=(attached, generation will match its style)");
       }
-      if (state.brief.product_photo_url) {
-        saved.push("product_photo_url=(attached, will be used as the hero image)");
-      }
-      if (Array.isArray(input.photo_urls)) {
-        const count = state.brief.photo_urls?.length ?? 0;
+      if (Array.isArray(input.photos) || input.use_ai_image_instead === true) {
+        const count = inputs.photos?.length ?? 0;
         saved.push(
           count
-            ? `photo_urls=(${count} photo${count === 1 ? "" : "s"} attached, each will be placed in the email)`
-            : "photo_urls cleared",
+            ? `photos=(${count} to use in the picture, the first one leads)`
+            : "photos cleared, an AI image will be made instead",
         );
       }
-      if (input.use_ai_image_instead === true) {
-        saved.push("product_photo_url and photo_urls cleared, an AI image will be generated instead");
-      }
-      if (state.brief.competitor_reference_id) {
-        saved.push("competitor_reference_id=(attached, its strategy will be adapted, never copied)");
-      }
-      if (Array.isArray(input.style_reference_urls)) {
-        const count = state.brief.style_reference_urls?.length ?? 0;
+      if (Array.isArray(input.style_images)) {
+        const count = inputs.style_images?.urls.length ?? 0;
         saved.push(
           count
-            ? `style_reference_urls=(${count} design${count === 1 ? "" : "s"} the flyer will match; Our style and the look picker aren't needed)`
-            : "style_reference_urls cleared",
+            ? `style_images=(${count} design${count === 1 ? "" : "s"} to follow; the look picker isn't needed)`
+            : "style_images cleared",
         );
+      }
+      if (input.competitor_reference_id && inputs.competitor_reference_ids?.length) {
+        saved.push("competitor ad attached (its approach will be adapted, never copied)");
       }
       if (input.client_brand && state.brief.client_brand) {
         const cb = state.brief.client_brand;
@@ -955,50 +1035,27 @@ async function dispatchTool(
       }
       const topicCtx = await getTopicContext(state.topicId);
       if (!topicCtx) return "That topic no longer exists.";
-      const references = state.brief.style_reference_urls;
-      if (input.channel === "social" && !references?.length && !(await canUseOurStyle(ctx))) {
+      const inputs = inputsOf(state.brief);
+      if (input.channel === "social" && !(await canUseOurStyle(ctx.brand.id, inputs))) {
         state.showLookPicker = true;
         return `Not made yet. ${NO_OUR_STYLE}`;
       }
-      // A standalone social image rides the flyer pipeline: the brief's
-      // message/angle/goal become the flyer brief the same way the /flyers/new
-      // form's free-text brief does.
-      const flyerBrief =
-        input.channel === "social"
-          ? [
-              state.brief.key_message,
-              state.brief.angle,
-              state.brief.goal ? `Goal: ${state.brief.goal}` : "",
-              state.brief.tone ? `Tone: ${state.brief.tone}` : "",
-              state.brief.visual_vibe ? `Feel: ${state.brief.visual_vibe}` : "",
-              state.brief.offer_deal ? `Offer: ${state.brief.offer_deal}` : "",
-              state.brief.offer_price ? `Price: ${state.brief.offer_price}` : "",
-              state.brief.constraints,
-              state.brief.proof ? `Proof: ${state.brief.proof}` : "",
-              state.brief.offer_deadline ? `Deadline: ${state.brief.offer_deadline}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n") || undefined
-          : undefined;
       const draftId = await createDraftShell({
         ctx: topicCtx,
         campaignId: ctx.campaignId,
         type: input.channel,
         emailType: input.email_type,
         blogType: input.blog_type,
+        inputs,
         ...(input.channel === "social"
           ? {
               flyerAspect: isFlyerAspect(input.flyer_aspect)
                 ? input.flyer_aspect
                 : DEFAULT_FLYER_ASPECT,
-              flyerBrief,
-              competitorReferenceId: state.brief.competitor_reference_id,
+              // The flyer writer reads the same brief block the email and
+              // blog writers do, the user's own words included.
+              seriesBrief: state.brief,
               flyerFormat: input.social_format === "ad" ? "ad" : "post",
-              ...(ctx.lookId ? { lookId: ctx.lookId } : {}),
-              ...(state.brief.product_photo_url
-                ? { productPhotoUrl: state.brief.product_photo_url }
-                : {}),
-              ...(references?.length ? { referenceUrls: references } : {}),
             }
           : {}),
       });
@@ -1007,7 +1064,7 @@ async function dispatchTool(
       return JSON.stringify({
         draftId,
         channel: input.channel,
-        ...(input.channel === "social" && references?.length
+        ...(input.channel === "social" && followedStyleImages(inputs)?.from === "upload"
           ? {
               note: "It follows their attached design. In your reply, offer in one short line to save that design as a look for next time (save_look).",
             }
@@ -1020,8 +1077,8 @@ async function dispatchTool(
       if (!summary) return "start_campaign needs a summary of the campaign.";
       const kinds = FACTORY_KINDS.filter((k) => input.kinds?.includes(k));
       const hasImages = !kinds.length || kinds.includes("social") || kinds.includes("ad");
-      const references = state.brief.style_reference_urls;
-      if (hasImages && !references?.length && !(await canUseOurStyle(ctx))) {
+      const inputs = inputsOf(state.brief);
+      if (hasImages && !(await canUseOurStyle(ctx.brand.id, inputs))) {
         state.showLookPicker = true;
         return `Not planned yet. ${NO_OUR_STYLE}`;
       }
@@ -1032,11 +1089,9 @@ async function dispatchTool(
         days: input.days === 14 ? 14 : 30,
         // Research spends money: only with the owner's own yes in this chat.
         research: input.research === true && userAskedForResearch(ctx.userMessages),
-        ...(state.brief.product_photo_url ? { photo_url: state.brief.product_photo_url } : {}),
-        ...(references?.length ? { reference_urls: references } : {}),
-        ...(state.brief.competitor_reference_id
-          ? { competitor_reference_id: state.brief.competitor_reference_id }
-          : {}),
+        // The planner gives each piece its own photos; the style and the
+        // competitor ads travel whole.
+        ...(Object.keys(inputs).length ? { inputs } : {}),
       };
       return "Handed to the planner. Reply with one short line that you're planning it now.";
     }
@@ -1064,11 +1119,13 @@ async function dispatchTool(
     case "save_look": {
       const name = cleanLookName((block.input as SaveLookInput).name);
       if (!name) return "Give the look a short name.";
+      // Only the owner's own designs: ticked competitor ads stay with this chat.
+      const own = inputsOf(state.brief).style_images;
       const examples = cleanExamples(
-        (state.brief.style_reference_urls ?? []).map((url) => ({ url, source: "upload" })),
+        (own?.from === "upload" ? own.urls : []).map((url) => ({ url, source: "upload" })),
         storageHostFromEnv(),
       );
-      if (!examples) return "There are no attached designs in this chat to save.";
+      if (!examples) return "There are no attached designs of their own in this chat to save.";
       // The flyer already read the design; reuse that instead of paying again.
       const draftId = state.draftId ?? ctx.onScreen?.draftId;
       const made = draftId ? await getDraftWithJobContext(draftId, ctx.brand.id) : null;
@@ -1130,6 +1187,7 @@ async function dispatchTool(
         campaignId: source.campaignId ?? undefined,
         type: "blog",
         sourceDraftId: input.source_draft_id,
+        inputs: await inputsOfDraft(source),
       });
       state.draftId = draftId;
       state.channel = "blog";
@@ -1158,6 +1216,7 @@ async function dispatchTool(
         type: "social",
         sourceDraftId: input.source_draft_id,
         flyerAspect: "1:1",
+        inputs: await inputsOfDraft(source),
       });
       state.draftId = draftId;
       state.channel = "social";
@@ -1234,7 +1293,9 @@ function autoAttachProductPhoto(
   if (input.use_ai_image_instead === true) return brief;
   if (typeof input.offer_slug !== "string" || !input.offer_slug.trim()) return brief;
   const product = products.find((p) => p.slug === brief.offer_slug);
-  if (!product?.image_url) return brief;
-  return { ...brief, product_photo_url: product.image_url, include_image: true };
+  const inputs = inputsOf(brief);
+  // The owner's own photos always win over the product's stored one.
+  if (!product?.image_url || inputs.photos?.length) return brief;
+  return withInputs(brief, addPhotos(inputs, [product.image_url]));
 }
 

@@ -79,6 +79,20 @@ describe("cleanPlanItems", () => {
     expect(dropped).not.toHaveProperty("uses_reference");
   });
 
+  it("maps a piece's photo numbers to the owner's photos, ignoring bad numbers", () => {
+    const [first, second, third] = cleanPlanItems(
+      [
+        raw({ photos: [2, 1, 2] }),
+        raw({ photos: [3] }),
+        raw({ kind: "ad", format: "ad_social_proof", photos: [1.5, "1"] }),
+      ],
+      { ...opts, photoUrls: ["https://x/a.jpg", "https://x/b.jpg"] },
+    );
+    expect(first.photos).toEqual(["https://x/b.jpg", "https://x/a.jpg"]);
+    expect(second).not.toHaveProperty("photos");
+    expect(third).not.toHaveProperty("photos");
+  });
+
   it("caps each kind at its planned count", () => {
     const out = cleanPlanItems(
       [raw({ kind: "ad", format: "ad_social_proof" }), raw({ kind: "ad", format: "ad_direct_benefit" })],

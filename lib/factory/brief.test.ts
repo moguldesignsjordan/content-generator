@@ -34,15 +34,10 @@ describe("buildPieceBrief", () => {
     ).toBe("Under 1 hour, 24/7");
   });
 
-  it("gives blogs no subject line or forced image, and passes the product photo", () => {
-    const brief = buildPieceBrief(
-      { ...base, kind: "blog", format: "blog_how_to" },
-      { sentence: "x" },
-      "https://example.supabase.co/p.jpg",
-    );
+  it("gives blogs no subject line or forced image", () => {
+    const brief = buildPieceBrief({ ...base, kind: "blog", format: "blog_how_to" }, { sentence: "x" });
     expect(brief.subject_line).toBeUndefined();
     expect(brief.include_image).toBeUndefined();
-    expect(brief.product_photo_url).toBe("https://example.supabase.co/p.jpg");
   });
 });
 

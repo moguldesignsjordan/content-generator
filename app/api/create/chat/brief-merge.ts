@@ -7,9 +7,9 @@ import {
 } from "@/lib/db/types";
 import type { UpdateBriefInput } from "@/prompts/create-agent";
 import { emailHtmlToText, stripEmDashes } from "@/lib/text";
-import { MAX_BRIEF_PHOTOS } from "@/lib/email/brief-photos";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
+import { inputsOf, withInputs } from "@/lib/inputs";
 import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
 
 // Pulled out of route.ts (which Next.js only allows GET/POST/config exports
@@ -66,45 +66,41 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
   ) {
     next.email_style = input.email_style;
   }
-  // A directly-typed URL still has to pass isHttpUrl; the model is told to
-  // only ever echo one back from an upload notice, but this is the real
-  // guard against an invented or malformed value landing in the brief.
-  if (typeof input.product_photo_url === "string" && isHttpUrl(input.product_photo_url.trim())) {
-    next.product_photo_url = input.product_photo_url.trim();
-    next.include_image = true;
-  }
-  // Replace semantics (the model resends the whole list), same URL guard as
-  // product_photo_url, deduped and capped so a runaway call can't balloon
-  // the brief. An explicit empty array clears the list.
-  if (Array.isArray(input.photo_urls)) {
-    const urls = Array.from(
-      new Set(
-        input.photo_urls
-          .filter((u): u is string => typeof u === "string")
-          .map((u) => u.trim())
-          .filter(isHttpUrl),
-      ),
-    ).slice(0, MAX_BRIEF_PHOTOS);
-    if (urls.length) next.photo_urls = urls;
-    else delete next.photo_urls;
+  // Photos, style images, and competitor ads live in inputs (lib/inputs.ts).
+  // The lists have replace semantics (the model resends the whole list); a
+  // URL still has to pass isHttpUrl, the real guard against an invented or
+  // malformed value (the route then keeps only our own uploads).
+  let inputs = inputsOf(next);
+  if (Array.isArray(input.photos)) {
+    inputs = {
+      ...inputs,
+      photos: input.photos
+        .filter((u): u is string => typeof u === "string")
+        .map((u) => u.trim())
+        .filter(isHttpUrl),
+    };
   }
   if (input.use_ai_image_instead === true) {
-    delete next.product_photo_url;
-    delete next.photo_urls;
+    inputs = { ...inputs, photos: [] };
+  }
+  if (Array.isArray(input.style_images)) {
+    const urls = cleanReferenceUrls(input.style_images, isHttpUrl);
+    inputs = urls.length
+      ? { ...inputs, style_images: { urls, from: "upload" }, style: { kind: "images" } }
+      : { ...inputs, style_images: undefined };
   }
   // Only ever set from save_competitor_reference's own returned id (the
-  // model is told never to invent one); a non-empty-string guard is the real
-  // check, same rigor as product_photo_url's URL guard for its own field.
-  if (
-    typeof input.competitor_reference_id === "string" &&
-    input.competitor_reference_id.trim()
-  ) {
-    next.competitor_reference_id = input.competitor_reference_id.trim();
-  }
-  if (Array.isArray(input.style_reference_urls)) {
-    const urls = cleanReferenceUrls(input.style_reference_urls, isHttpUrl);
-    if (urls.length) next.style_reference_urls = urls;
-    else delete next.style_reference_urls;
+  // model is told never to invent one); it goes first, so it shapes the copy.
+  const competitorId =
+    typeof input.competitor_reference_id === "string" ? input.competitor_reference_id.trim() : "";
+  if (competitorId) {
+    inputs = {
+      ...inputs,
+      competitor_reference_ids: [
+        competitorId,
+        ...(inputs.competitor_reference_ids ?? []).filter((id) => id !== competitorId),
+      ],
+    };
   }
   const client = input.client_brand ? cleanClientBrand(input.client_brand, isHttpUrl) : null;
   if (client) next.client_brand = client;
@@ -118,7 +114,7 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
   } else if (input.campaign_kind && CAMPAIGN_KINDS.includes(input.campaign_kind)) {
     next.campaign_kind = input.campaign_kind;
   }
-  return next;
+  return withInputs(next, inputs);
 }
 
 /**

@@ -12,6 +12,7 @@ import type {
   CampaignBrief,
   ContentJobType,
   EmailType,
+  PieceInputs,
   TopicContext,
 } from "@/lib/db/types";
 
@@ -56,6 +57,8 @@ export function joinRun(
     /** Campaign-series position (meta.series_seed_index); makes a series
      * email's style/layout rotation deterministic and distinct-by-index. */
     seedIndex?: number;
+    /** The draft's photos, style, and competitor ads (meta.inputs). */
+    inputs?: PieceInputs;
   },
   listener: Listener,
 ): () => void {
@@ -102,6 +105,8 @@ async function startRun(
     /** Campaign-series position (meta.series_seed_index); makes a series
      * email's style/layout rotation deterministic and distinct-by-index. */
     seedIndex?: number;
+    /** The draft's photos, style, and competitor ads (meta.inputs). */
+    inputs?: PieceInputs;
   },
   emit: (event: GenerationEvent) => void,
 ): Promise<void> {

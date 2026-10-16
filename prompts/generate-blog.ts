@@ -7,11 +7,10 @@ import type {
   TopicContext,
 } from "@/lib/db/types";
 import {
-  buildBrandVoiceBlock,
+  buildBrandContext,
   buildCampaignBriefBlock,
-  buildGuidelinesBlock,
+  buildCompetitorReferenceBlock,
   buildKeywordLines,
-  buildPositioningBlock,
   buildStrategyBlock,
 } from "./brand-voice";
 import { buildFeedbackBlock, buildOfferBlock, resolveCta } from "./generate-email";
@@ -272,9 +271,7 @@ export function buildBlogMessages(
   } = {},
 ): { system: string; user: string; blogType: BlogType } {
   const { topic, brand } = ctx;
-  const guidelinesBlock = buildGuidelinesBlock(brand);
-  const voiceBlock = buildBrandVoiceBlock(brand, ctx.primaryIcp, "blog");
-  const positioningBlock = buildPositioningBlock(brand);
+  const brandContext = buildBrandContext(ctx, "blog");
   const briefBlock = buildCampaignBriefBlock(opts.brief ?? null);
   const offerBlock = buildOfferBlock(ctx, opts.brief);
   const { ctaText } = resolveCta(ctx);
@@ -289,10 +286,9 @@ export function buildBlogMessages(
     "genuinely useful blog post that sounds exactly like the brand and is built",
     "to rank for its target keyword without reading like SEO filler.",
     "",
-    guidelinesBlock,
-    voiceBlock,
-    positioningBlock,
+    brandContext,
     buildStrategyBlock(ctx),
+    buildCompetitorReferenceBlock(ctx.competitorRef),
     buildFeedbackBlock(opts.feedbackExamples),
     "",
     "WRITING PRINCIPLES:",

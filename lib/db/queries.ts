@@ -3,6 +3,7 @@ import { getAdminClient } from "./client";
 import { isMissingColumnError, isMissingTableError } from "./table-guard";
 import { logError, logWarn } from "@/lib/log";
 import { buildInternalLinkTargets, type LinkCandidate } from "@/lib/blog/internal-links";
+import { compactInputs, followedStyleImages } from "@/lib/inputs";
 import type {
   AppLog,
   AppLogLevel,
@@ -61,6 +62,7 @@ import type {
   MediaAssetSource,
   OnboardingState,
   PerformanceMetric,
+  PieceInputs,
   Pillar,
   PillarWithClusters,
   PlanCode,
@@ -235,11 +237,13 @@ export async function getTopicContext(
 
   // The reference email library steers every email's style, and the email
   // design library steers its layout. A pre-migration-015/016 DB just means an
-  // empty library, never a broken generation.
-  const [referenceEmails, emailDesignRefs, linkCandidates] = await Promise.all([
+  // empty library, never a broken generation. What the chat learned about the
+  // account reaches every writer the same way.
+  const [referenceEmails, emailDesignRefs, linkCandidates, memories] = await Promise.all([
     listReferenceEmails(brand.id),
     listStyleReferences(brand.id, "email"),
     listPublishedPillarTopics(pillar.id),
+    listBrandMemory(brand.id).catch(() => []),
   ]);
 
   return {
@@ -260,6 +264,7 @@ export async function getTopicContext(
     product,
     referenceEmails,
     emailDesignRefs,
+    memories,
   };
 }
 
@@ -325,22 +330,18 @@ export async function createDraftShell(args: {
   flyerBrief?: string;
   styleReferenceId?: string;
   flyerStyle?: FlyerStyleId;
-  competitorReferenceId?: string;
   flyerFormat?: FlyerFormat;
   /** Social only: the day the weekly schedule plans to post it. */
   plannedPublishAt?: string;
-  /** Social only: a real, already-hosted product photo the art is built
-   * around (meta.product_photo_url). */
-  productPhotoUrl?: string;
+  /** The photos, style, and competitor ads this draft is made from
+   * (meta.inputs), whatever its kind. */
+  inputs?: PieceInputs;
   /** Social only: the image model picked for the options (meta.flyer_model). */
   flyerModel?: ImageModelTier;
-  /** Social only: the design look to follow (meta.look_id). */
-  lookId?: string;
   /** Social only: options to render (meta.flyer_variant_count). */
   flyerVariantCount?: number;
-  /** Social only: designs attached in chat to match (meta.reference_urls),
-   * and their profile when it was already read (a campaign reads it once). */
-  referenceUrls?: string[];
+  /** Social only: the style images' design when it was already read (a
+   * campaign reads it once for every post). */
   referenceProfile?: DesignLookProfile;
   /** Social only: the business the flyer is for, when it isn't this brand. */
   clientBrand?: ClientBrand;
@@ -360,17 +361,15 @@ export async function createDraftShell(args: {
     flyerBrief,
     styleReferenceId,
     flyerStyle,
-    competitorReferenceId,
     flyerFormat,
     plannedPublishAt,
-    productPhotoUrl,
+    inputs,
     flyerModel,
-    lookId,
     flyerVariantCount,
-    referenceUrls,
     referenceProfile,
     clientBrand,
   } = args;
+  const pieceInputs = compactInputs(inputs ?? {});
 
   // campaign_id only when a campaign drove the draft, so plain generation
   // still works before migration 002 adds the column.
@@ -406,15 +405,14 @@ export async function createDraftShell(args: {
     ...(flyerBrief ? { flyer_brief: flyerBrief } : {}),
     ...(styleReferenceId ? { style_reference_id: styleReferenceId } : {}),
     ...(flyerStyle ? { flyer_style: flyerStyle } : {}),
-    ...(competitorReferenceId ? { competitor_reference_id: competitorReferenceId } : {}),
     ...(flyerFormat === "ad" ? { flyer_format: flyerFormat } : {}),
     ...(plannedPublishAt ? { planned_publish_at: plannedPublishAt } : {}),
-    ...(productPhotoUrl ? { product_photo_url: productPhotoUrl } : {}),
+    ...(Object.keys(pieceInputs).length ? { inputs: pieceInputs } : {}),
     ...(flyerModel ? { flyer_model: flyerModel } : {}),
-    ...(lookId ? { look_id: lookId } : {}),
     ...(flyerVariantCount ? { flyer_variant_count: flyerVariantCount } : {}),
-    ...(referenceUrls?.length ? { reference_urls: referenceUrls } : {}),
-    ...(referenceUrls?.length && referenceProfile ? { reference_profile: referenceProfile } : {}),
+    ...(followedStyleImages(pieceInputs) && referenceProfile
+      ? { reference_profile: referenceProfile }
+      : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),
   };
 

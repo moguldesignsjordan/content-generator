@@ -1,4 +1,4 @@
-import type { FactoryKind, FactoryPlanItem } from "@/lib/db/types";
+import { MAX_PHOTOS_PER_DESIGN, type FactoryKind, type FactoryPlanItem } from "@/lib/db/types";
 import {
   FACTORY_KINDS,
   formatsForKind,
@@ -27,6 +27,7 @@ export interface RawPlanItem {
   detail_prompt?: unknown;
   offer_slug?: unknown;
   uses_reference?: unknown;
+  photos?: unknown;
 }
 
 function text(value: unknown, max = 400): string {
@@ -62,6 +63,8 @@ export function cleanPlanItems(
     counts: Record<FactoryKind, number>;
     productSlugs: Set<string>;
     newId: () => string;
+    /** The owner's product photos; an item's `photos` are 1-based indexes into these. */
+    photoUrls?: string[];
   },
 ): Omit<FactoryPlanItem, "date">[] {
   const remaining = { ...opts.counts };
@@ -99,6 +102,14 @@ export function cleanPlanItems(
     const inspiredBy = text(item.inspired_by, 500);
     const needsDetail = item.needs_detail === true;
     const detailPrompt = needsDetail ? text(item.detail_prompt, 200) : "";
+    const photos = Array.from(
+      new Set(
+        (Array.isArray(item.photos) ? item.photos : [])
+          .filter((n): n is number => typeof n === "number" && Number.isInteger(n))
+          .map((n) => opts.photoUrls?.[n - 1])
+          .filter((url): url is string => Boolean(url)),
+      ),
+    ).slice(0, MAX_PHOTOS_PER_DESIGN);
 
     out.push({
       id: opts.newId(),
@@ -116,6 +127,7 @@ export function cleanPlanItems(
       ...(detailPrompt ? { detail_prompt: detailPrompt } : {}),
       ...(slug && opts.productSlugs.has(slug) ? { offer_slug: slug } : {}),
       ...(item.uses_reference === true ? { uses_reference: true } : {}),
+      ...(photos.length ? { photos } : {}),
     });
     remaining[kind]--;
   }

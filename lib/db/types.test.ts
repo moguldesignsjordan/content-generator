@@ -11,6 +11,7 @@ type NonTextField =
   | "visual_vibe"
   | "image_style"
   | "email_style"
+  | "inputs"
   | "product_photo_url"
   | "photo_urls"
   | "use_ai_image_instead"

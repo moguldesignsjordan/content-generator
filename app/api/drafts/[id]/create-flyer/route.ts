@@ -4,6 +4,7 @@ import { isGeminiConfigured } from "@/lib/clients/gemini-image";
 import { isSupabaseConfigured } from "@/lib/db/client";
 import { createDraftShell, getTopicContext } from "@/lib/db/queries";
 import { requireDraftInBrand } from "@/lib/draft-access";
+import { inputsOfDraft } from "@/lib/pipeline/generate";
 import { guardAiRoute } from "@/lib/ai-guard";
 
 /**
@@ -65,6 +66,7 @@ export async function POST(
       type: "social",
       sourceDraftId,
       flyerAspect: "1:1",
+      inputs: await inputsOfDraft(source),
     });
     return NextResponse.json({ draftId });
   } catch (err) {
