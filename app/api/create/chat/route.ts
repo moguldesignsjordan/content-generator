@@ -112,6 +112,9 @@ import {
   inferSplit,
   isProductSet,
   makesCampaign,
+  markAsked,
+  MAX_QUESTIONS,
+  openQuestions,
   type ChatQuestion,
 } from "@/lib/create-questions";
 
@@ -123,6 +126,9 @@ export const maxDuration = 300;
 // generate_content is 2-3 round-trips); 8 gives slack for a clarify-then-
 // continue turn without letting a confused model loop indefinitely.
 const MAX_STEPS = 8;
+
+/** Chip ids on the confirm that mean go (or change it). */
+const CONFIRM_IDS = new Set(["go", "research_yes", "research_no", "change"]);
 
 // Tools whose results never change what the model says next (they save or
 // display), so a turn that already has its reply text can end right after
@@ -210,8 +216,6 @@ function toolStatusLabel(block: Anthropic.Messages.ToolUseBlock): string | null 
     }
     case "start_campaign":
       return "Handing it to the planner";
-    case "ask":
-      return "Lining up a few questions";
     case "show_product_import":
       return "Opening your products";
     case "edit_flyer":
@@ -596,7 +600,7 @@ export async function POST(req: NextRequest) {
       ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
       message.trim(),
     ];
-    const turnBrief = inferSplit(
+    let turnBrief = inferSplit(
       applyAnswers(
         keepOwnImages(
           withInputs(
@@ -612,6 +616,14 @@ export async function POST(req: NextRequest) {
       ),
       userMessages.join("\n"),
     );
+    // A vibe tapped while Our style has no examples yet means a fresh style in
+    // that vibe, not a dead end at the look picker on Make it.
+    if (
+      turnBrief.visual_vibe !== campaign.brief?.visual_vibe &&
+      !(await canUseOurStyle(brand.id, inputsOf(turnBrief)))
+    ) {
+      turnBrief = withInputs(turnBrief, { ...inputsOf(turnBrief), style: { kind: "none" } });
+    }
 
     const briefState = buildBriefStateBlock(turnBrief, campaign.topic_id);
     // A bare URL in the message (and no attached image, which already has
@@ -894,16 +906,24 @@ export async function POST(req: NextRequest) {
           }
 
           let reply = joinReplySegments(replyParts);
+          // The chips answer a question, so the reply always ends with it, and the
+          // transcript keeps it for the next turn.
+          const question = state.questions?.[0]?.question;
+          if (question && !reply.includes("?")) reply = reply ? `${reply} ${question}` : question;
           if (!reply) {
-            reply = state.draftId
-              ? "Making it now. It'll show up right here."
-              : state.campaign
-                ? "Planning it now."
-                : state.previewAction
-                  ? "On it, updating the preview now."
-                  : state.questions?.length
-                    ? "A few quick things so it comes out right."
-                    : emptyReplyFallback(state.brief);
+            if (state.draftId) reply = "Making it now. It'll show up right here.";
+            else if (state.campaign) reply = "Planning it now.";
+            else if (state.previewAction) reply = "On it, updating the preview now.";
+            else if (state.options?.length) reply = "Tap one, or tell me in your own words.";
+            else if (!state.brief.making) reply = "What are we making today?";
+            else {
+              const plan = makesCampaign(state.brief);
+              reply = plan ? "Want me to plan it?" : "Want me to make it?";
+              state.options = [
+                { id: plan ? "research_no" : "go", label: plan ? "Plan it" : "Make it", kind: "action" },
+                { id: "change", label: "Change something", kind: "action" },
+              ];
+            }
           }
           // Chat bubbles render as plain text, so any markdown the model slipped in
           // would reach the user as literal asterisks. The prompt forbids it; this
@@ -1131,11 +1151,11 @@ async function dispatchTool(
       if (!questions.length) {
         return "None of those are open (already answered or asked), so nothing was shown. Don't ask them again: go to the confirm.";
       }
-      state.questions = [...(state.questions ?? []), ...questions].slice(0, 3);
+      state.questions = questions.slice(0, MAX_QUESTIONS);
       return (
-        `Showing ${questions.map((q) => q.id).join(", ")} as one card under your reply.` +
-        (dropped.length ? ` Dropped (not open): ${dropped.join(", ")}.` : "") +
-        " Don't repeat the questions in your text."
+        `Showing the chips for ${state.questions[0].id} under your reply.` +
+        (dropped.length ? ` Dropped (not open, or one too many): ${dropped.join(", ")}.` : "") +
+        " End your reply with that question, in your own words."
       );
     }
     case "suggest_options": {
@@ -1144,6 +1164,11 @@ async function dispatchTool(
       state.options = (input.options ?? []).filter(
         (o) => o.kind !== "topic" || ctx.topics.some((t) => t.id === o.id),
       );
+      // The confirm names the defaults for whatever is still open, so none of
+      // it gets asked after.
+      if (state.options.some((o) => CONFIRM_IDS.has(o.id))) {
+        state.brief = markAsked(state.brief, openQuestions(state.brief));
+      }
       return "Options shown to the user.";
     }
     case "generate_content": {
@@ -1424,23 +1449,6 @@ async function dispatchTool(
     }
     default:
       return "Unknown tool.";
-  }
-}
-
-/** The reply when the model said nothing at all, for the kind being made. */
-function emptyReplyFallback(brief: CampaignBrief): string {
-  switch (brief.making) {
-    case "flyer":
-    case "ad":
-      return "What should be biggest on it?";
-    case "blog":
-      return "Who's reading this one?";
-    case "campaign":
-      return "What should the campaign push first?";
-    case "email":
-      return "What's the one thing this email needs to land?";
-    default:
-      return "What are we making today?";
   }
 }
 

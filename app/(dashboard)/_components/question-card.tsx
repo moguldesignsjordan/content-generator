@@ -44,144 +44,107 @@ export function StepChip({
   );
 }
 
-const LOOK_LABELS: Record<string, string> = {
-  our: "Our style",
-  none: "No reference, you pick",
-  images: "Follow the designs I added",
-  ads: "Follow the ads I picked",
-};
+/** What a look picked in the style question says in the thread. */
+export function lookMessage(lookId: string | null, styleImages: { from: "upload" | "competitor" } | null): string {
+  if (lookId === null || lookId === "our") return "Use our style.";
+  if (lookId === "none") return "No reference, you pick the style.";
+  if (lookId === "ads") return "Follow the ads I picked, in our colors.";
+  if (lookId === "images") {
+    return styleImages?.from === "competitor" ? "Follow their ads' look, in our colors." : "Follow my designs.";
+  }
+  return "I picked a saved look to follow.";
+}
 
 /**
- * The follow-up questions as one card: each with its own tap answers (one or
- * several) and a "Type it" field, and one Send. The style question hosts the
- * look picker; the photos question points at the paperclip. Typing in the
- * composer instead still works.
+ * The tap answers for the agent's question, right under its message: one tap
+ * sends a single-choice answer, several-choice ones send on Done. The style
+ * question adds a chip that opens the look picker; style and photos point at
+ * the paperclip. Typing in the composer answers it too.
  */
 export function QuestionCard({
-  questions,
+  question: q,
   disabled,
   lookId,
   onLookChange,
-  lookTouched,
   styleImages,
   adPicks,
   onAdPicks,
   onSend,
 }: {
-  questions: ChatQuestion[];
+  question: ChatQuestion;
   disabled: boolean;
   lookId: string | null;
   onLookChange: (value: string | null) => void;
-  /** True once they tapped a look in this card. */
-  lookTouched: boolean;
   styleImages: { urls: string[]; from: "upload" | "competitor" } | null;
   adPicks: string[];
   onAdPicks: (ids: string[]) => void;
   onSend: (text: string, answers: QuestionAnswer[], lookChoice?: string) => void;
 }) {
-  const [picked, setPicked] = useState<Record<string, string[]>>({});
-  const [typed, setTyped] = useState<Record<string, string>>({});
-  const [typing, setTyping] = useState<Record<string, boolean>>({});
+  const [picked, setPicked] = useState<string[]>([]);
+  const [looksOpen, setLooksOpen] = useState(false);
 
-  function toggle(q: ChatQuestion, value: string) {
-    setPicked((cur) => {
-      const now = cur[q.id] ?? [];
-      const next = q.multi
-        ? now.includes(value)
-          ? now.filter((v) => v !== value)
-          : [...now, value]
-        : now[0] === value
-          ? []
-          : [value];
-      return { ...cur, [q.id]: next };
-    });
+  function tap(value: string, label: string) {
+    if (!q.multi) {
+      onSend(label, [{ id: q.id, values: [value] }]);
+      return;
+    }
+    setPicked((now) => (now.includes(value) ? now.filter((v) => v !== value) : [...now, value]));
   }
 
-  const lookLabel = lookId === null ? LOOK_LABELS.our : (LOOK_LABELS[lookId] ?? "A saved look");
-  const lines: string[] = [];
-  const answers: QuestionAnswer[] = [];
-  for (const q of questions) {
-    const values = picked[q.id] ?? [];
-    const own = typed[q.id]?.trim() ?? "";
-    const labels = values.map((v) => q.choices.find((c) => c.value === v)?.label ?? v);
-    const parts = [...labels, ...(own ? [own] : [])];
-    if (q.id === "style" && lookTouched) parts.unshift(lookLabel);
-    if (!parts.length) continue;
-    lines.push(`${q.question} ${parts.join(", ")}`);
-    // A typed product name is a product too.
-    answers.push({ id: q.id, values: q.id === "products" && own ? [...values, own] : values });
-  }
-  const hasStyle = questions.some((q) => q.id === "style");
+  const pickedLabels = picked.map((v) => q.choices.find((c) => c.value === v)?.label ?? v);
 
   return (
-    <div className="bubble-in space-y-4 rounded-[22px] border border-border bg-surface-2 p-3.5 sm:ml-9">
-      <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-        <span className="bar-spectrum h-1 w-4 rounded-full" />
-        A few quick things
-      </span>
-      {questions.map((q) => (
-        <div key={q.id} className="space-y-2">
-          <p className="text-sm font-medium text-foreground">{q.question}</p>
-          {q.id === "style" && (
-            <LookPicker
-              value={lookId}
-              onChange={onLookChange}
-              styleImages={styleImages}
-              adPicks={adPicks}
-              onAdPicks={onAdPicks}
-            />
-          )}
-          {q.id === "photos" && (
-            <p className="text-xs text-muted">
-              Tap the paperclip below the chat to add them. No photos is fine too: the pictures get made
-              in your brand colors.
-            </p>
-          )}
-          {(q.choices.length > 0 || q.id !== "style") && (
-            <div className="flex flex-wrap gap-2">
-              {q.choices.map((c) => (
-                <StepChip
-                  key={c.value}
-                  label={c.label}
-                  pressed={(picked[q.id] ?? []).includes(c.value)}
-                  onClick={() => toggle(q, c.value)}
-                  disabled={disabled}
-                />
-              ))}
-              {!typing[q.id] && q.id !== "photos" && (
-                <StepChip
-                  label={q.id === "products" ? "+ Add" : "Type it"}
-                  onClick={() => setTyping((cur) => ({ ...cur, [q.id]: true }))}
-                  disabled={disabled}
-                />
-              )}
-            </div>
-          )}
-          {typing[q.id] && (
-            <input
-              autoFocus
-              value={typed[q.id] ?? ""}
-              onChange={(e) => setTyped((cur) => ({ ...cur, [q.id]: e.target.value }))}
-              placeholder={q.id === "products" ? "Product name" : "Your answer"}
-              maxLength={200}
-              disabled={disabled}
-              className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-2 focus:border-accent/50 focus:outline-none"
-            />
-          )}
+    <div className="bubble-in space-y-2.5 sm:pl-9">
+      {q.id === "style" && (
+        <p className="text-xs text-muted">Or tap the paperclip to add a screenshot of one you like.</p>
+      )}
+      {q.id === "photos" && (
+        <p className="text-xs text-muted">Tap the paperclip below to add them.</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {q.choices.map((c) => (
+          <StepChip
+            key={c.value}
+            label={c.label}
+            pressed={q.multi ? picked.includes(c.value) : undefined}
+            onClick={() => tap(c.value, c.label)}
+            disabled={disabled}
+          />
+        ))}
+        {q.id === "style" && (
+          <StepChip
+            label="My saved looks"
+            pressed={looksOpen}
+            onClick={() => setLooksOpen((open) => !open)}
+            disabled={disabled}
+          />
+        )}
+        {q.multi && (
+          <StepChip
+            primary
+            label="Done"
+            disabled={disabled || !picked.length}
+            onClick={() => onSend(pickedLabels.join(", "), [{ id: q.id, values: picked }])}
+          />
+        )}
+      </div>
+      {looksOpen && (
+        <div className="space-y-3 rounded-[22px] border border-border bg-surface-2 p-3.5">
+          <LookPicker
+            value={lookId}
+            onChange={onLookChange}
+            styleImages={styleImages}
+            adPicks={adPicks}
+            onAdPicks={onAdPicks}
+          />
+          <StepChip
+            primary
+            label="Use this"
+            disabled={disabled}
+            onClick={() => onSend(lookMessage(lookId, styleImages), [], lookId ?? "our")}
+          />
         </div>
-      ))}
-      <StepChip
-        primary
-        label="Send answers"
-        disabled={disabled || !lines.length}
-        onClick={() =>
-          onSend(
-            lines.join("\n"),
-            answers,
-            hasStyle && lookTouched ? (lookId ?? "our") : undefined,
-          )
-        }
-      />
+      )}
     </div>
   );
 }

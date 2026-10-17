@@ -134,15 +134,14 @@ export const START_CAMPAIGN_TOOL: Anthropic.Tool = {
   },
 };
 
-/** The follow-up questions, shown as one card with its own tap answers. */
+/** The next question, with tap answers shown under the reply. */
 export const ASK_TOOL: Anthropic.Tool = {
   name: "ask",
   description:
-    "Ask the questions listed under STILL OPEN, all at once, as one card the " +
-    "user answers with taps or typing. Only ids from STILL OPEN are shown; " +
-    "anything else is dropped, and once asked a question never comes back. " +
-    "Pair it with one short line of your own; don't repeat the questions in " +
-    "your text.",
+    "Ask ONE question from STILL OPEN: the first their words don't already " +
+    "answer. Its chips show under your message; they can tap one or type. " +
+    "Only an id from STILL OPEN is shown, and once asked a question never " +
+    "comes back. End your reply with the same question in your own words.",
   input_schema: {
     type: "object",
     properties: {
@@ -164,7 +163,7 @@ export const ASK_TOOL: Anthropic.Tool = {
               description:
                 "2 to 4 tappable answers written for this exact situation. Leave " +
                 "out for channels, size, split, per_product, products, making, " +
-                "where, post_type, and style: those choices are filled in for you.",
+                "where, post_type, style, and photos: those choices are filled in for you.",
             },
             multi: { type: "boolean", description: "True when more than one answer can be picked." },
           },

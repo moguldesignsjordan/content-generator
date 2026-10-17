@@ -6,6 +6,7 @@ import type {
   MakingKind,
   PerProduct,
   ProductSplit,
+  VisualVibe,
 } from "@/lib/db/types";
 import { inputsOf } from "@/lib/inputs";
 import { stripEmDashes } from "@/lib/text";
@@ -62,8 +63,8 @@ export interface QuestionAnswer {
 interface QuestionSpec {
   /** Plain-words version the turn state shows the model. */
   ask: string;
-  /** Structural: still asked after the first round. Everything else gets
-   * one chance, then its default. */
+  /** Structural: always asked. The rest share MAX_OPTIONAL turns, then
+   * take their defaults. */
   must?: boolean;
   applies: (brief: CampaignBrief) => boolean;
   filled: (brief: CampaignBrief) => boolean;
@@ -162,7 +163,7 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
     fallback: () => "no special offer",
   },
   style: {
-    ask: "Which look should it follow?",
+    ask: "Got a flyer or post they like the look of (a screenshot via the paperclip), or which vibe?",
     applies: hasImages,
     filled: (b) => {
       const inputs = inputsOf(b);
@@ -171,7 +172,7 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
     fallback: () => "Our style (a fresh style when Our style has no examples yet)",
   },
   photos: {
-    ask: "Real photos of the product or work to put in it?",
+    ask: "Any photos of the product or work to put in it?",
     applies: hasImages,
     filled: (b) => Boolean(inputsOf(b).photos?.length),
     fallback: () => "pictures made from the brand colors, no photos",
@@ -218,8 +219,8 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
 const ORDER: Record<MakingKind | "unknown", QuestionId[]> = {
   unknown: ["making", "about"],
   email: ["about", "detail", "action", "example"],
-  flyer: ["about", "split", "per_product", "offer", "style", "photos", "where"],
-  ad: ["about", "split", "per_product", "offer", "reach", "style", "photos"],
+  flyer: ["about", "split", "per_product", "style", "photos", "offer", "where"],
+  ad: ["about", "split", "per_product", "style", "photos", "offer", "reach"],
   blog: ["about", "reader", "proof", "post_type"],
   campaign: [
     "about",
@@ -235,22 +236,26 @@ const ORDER: Record<MakingKind | "unknown", QuestionId[]> = {
   ],
 };
 
-/** The most a single round asks. */
-export const MAX_QUESTIONS = 3;
+/** One question per message, like a person texting. */
+export const MAX_QUESTIONS = 1;
+
+/** Non-structural questions asked over the whole chat; the rest default. */
+export const MAX_OPTIONAL = 4;
 
 function relevant(brief: CampaignBrief): QuestionId[] {
   return ORDER[brief.making ?? "unknown"].filter((id) => QUESTIONS[id].applies(brief));
 }
 
-/** What's still worth asking: applicable, not filled, never asked, in
- * priority order. After the first round only structural questions remain. */
+/** What's still worth asking, in order: applicable, not filled, never asked,
+ * and within the optional budget. Only the first is asked each message. */
 export function openQuestions(brief: CampaignBrief): QuestionId[] {
   const asked = new Set(brief.asked ?? []);
-  const afterFirstRound = asked.size > 0;
-  return relevant(brief)
-    .filter((id) => !asked.has(id) && !QUESTIONS[id].filled(brief))
-    .filter((id) => !afterFirstRound || QUESTIONS[id].must)
-    .slice(0, MAX_QUESTIONS);
+  let budget = MAX_OPTIONAL - QUESTION_IDS.filter((id) => asked.has(id) && !QUESTIONS[id].must).length;
+  return relevant(brief).filter((id) => {
+    if (asked.has(id) || QUESTIONS[id].filled(brief)) return false;
+    if (QUESTIONS[id].must) return true;
+    return budget-- > 0;
+  });
 }
 
 /** Once a round has been asked: every question that won't be asked again
@@ -323,6 +328,13 @@ const MAKING_CHOICES: { label: string; value: MakingKind }[] = [
 ];
 
 const WHERE_CHOICES = ["Instagram or Facebook post", "Story or Reel", "Feed portrait"];
+
+const VIBE_CHOICES: { label: string; value: VisualVibe }[] = [
+  { label: "Bold and loud", value: "punchy" },
+  { label: "Clean and simple", value: "sleek" },
+  { label: "Fun and playful", value: "playful" },
+  { label: "High-end", value: "premium" },
+];
 const POST_TYPE_CHOICES = ["How-to", "List", "Case study", "Opinion piece"];
 
 const asChoices = (labels: string[]): QuestionChoice[] =>
@@ -358,8 +370,10 @@ export function fixedChoices(
     case "post_type":
       return { choices: asChoices(POST_TYPE_CHOICES), multi: false };
     case "style":
-      // The card shows the look picker here instead of chips.
-      return { choices: [], multi: false };
+      // The chips add a saved-looks chip that opens the look picker.
+      return { choices: VIBE_CHOICES.map((c) => ({ ...c })), multi: false };
+    case "photos":
+      return { choices: [{ label: "No photos, make the pictures", value: "none" }], multi: false };
     default:
       return null;
   }
@@ -432,6 +446,11 @@ export function applyAnswers(brief: CampaignBrief, answers: unknown): CampaignBr
         if (names.length) next.products = names;
         break;
       }
+      case "style": {
+        const vibe = VIBE_CHOICES.find((c) => c.value === picked[0])?.value;
+        if (vibe) next.visual_vibe = vibe;
+        break;
+      }
     }
   }
   return next;
@@ -449,10 +468,10 @@ const MAX_CHOICE_CHARS = 60;
 const MAX_MODEL_CHOICES = 4;
 
 /**
- * The ask tool's questions as the card shows them: only ids still open
- * survive (a question can't come back), code-owned choices replace the
- * model's, and every open id counts as asked from here on (one left out was
- * judged already answered).
+ * The ask tool's question as the chips show it: only an id still open
+ * survives (a question can't come back), code-owned choices replace the
+ * model's, and it plus every open id before it counts as asked from here on
+ * (one skipped was judged already answered).
  */
 export function cleanAsk(
   input: unknown,
@@ -491,7 +510,8 @@ export function cleanAsk(
     });
     if (questions.length === MAX_QUESTIONS) break;
   }
-  return { questions, dropped, brief: questions.length ? markAsked(brief, open) : brief };
+  const last = questions.length ? open.indexOf(questions[questions.length - 1].id) : -1;
+  return { questions, dropped, brief: last >= 0 ? markAsked(brief, open.slice(0, last + 1)) : brief };
 }
 
 /** Lines for the turn state: what's open, what was asked and its default. */
@@ -500,7 +520,7 @@ export function checklistLines(brief: CampaignBrief): string[] {
   const skipped = skippedDefaults(brief);
   return [
     open.length
-      ? `STILL OPEN (ask only these, all at once, with the ask tool; leave out any their words already answer): ${open
+      ? `STILL OPEN (in order; ask ONE per message with the ask tool, the first their words don't already answer): ${open
           .map((id) => `${id} (${QUESTIONS[id].ask})`)
           .join("; ")}`
       : "STILL OPEN: nothing. Don't ask more questions: confirm in one sentence, naming the defaults below.",

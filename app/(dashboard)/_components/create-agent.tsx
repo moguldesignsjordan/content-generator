@@ -42,7 +42,7 @@ import type {
   SeriesDraftRef,
 } from "@/lib/db/types";
 import { LookPicker } from "./look-picker";
-import { CHIP_CLASS, QuestionCard, StepChip } from "./question-card";
+import { CHIP_CLASS, lookMessage, QuestionCard, StepChip } from "./question-card";
 import { ProductImport } from "./product-import";
 import type { ChatQuestion, QuestionAnswer } from "@/lib/create-questions";
 import { AdLibraryPicker } from "./ad-library-picker";
@@ -141,6 +141,9 @@ interface ProductImportOffer {
 }
 
 /** What a send carries besides the text. */
+/** Confirm chips that mean make it (or plan it). */
+const GO_ACTIONS = ["go", "research_yes", "research_no"];
+
 interface SendExtra {
   competitorAdIds?: string[];
   lookChoice?: string;
@@ -341,8 +344,9 @@ export function CreateAgent({
   const [lookId, setLookId] = useState<string | null>(null);
   // What the brief follows on the server, so an unconfirmed tap still counts.
   const [savedLook, setSavedLook] = useState<string | null>(null);
-  // A look tapped in the question card's style question.
-  const [lookTouched, setLookTouched] = useState(false);
+  // A Make it tap that stopped at the look picker (Our style had no examples):
+  // the pick then carries it, so it makes the thing instead of confirming again.
+  const [blockedGo, setBlockedGo] = useState<string | null>(null);
   // Saved competitor ads picked in the look picker, in pick order.
   const [adPicks, setAdPicks] = useState<string[]>([]);
   // The user's style images or ticked ads, offered as their own picker tile.
@@ -526,7 +530,6 @@ export function CreateAgent({
     setOptions(null);
     setQuestions(null);
     setProductImport(null);
-    setLookTouched(false);
     setAdPicks([]);
     setLookPickerOpen(false);
     setAdLibraryUrl(null);
@@ -627,6 +630,11 @@ export function CreateAgent({
       setQuestions(data.questions?.length ? data.questions : null);
       setProductImport(data.productImport ?? null);
       setLookPickerOpen(Boolean(data.showLookPicker));
+      setBlockedGo(
+        data.showLookPicker && !data.draftId && !data.campaign && GO_ACTIONS.includes(extra.action ?? "")
+          ? (extra.action ?? null)
+          : null,
+      );
       setAdLibraryUrl(data.adLibraryUrl ?? null);
       // The server owns the style: the picker shows what the brief follows.
       if (data.style) {
@@ -1013,15 +1021,11 @@ export function CreateAgent({
 
                 {questions && !loading && (
                   <QuestionCard
-                    key={questions.map((q) => q.id).join()}
-                    questions={questions}
+                    key={questions[0].id}
+                    question={questions[0]}
                     disabled={loading || generating}
                     lookId={lookId}
-                    onLookChange={(v) => {
-                      setLookId(v);
-                      setLookTouched(true);
-                    }}
-                    lookTouched={lookTouched}
+                    onLookChange={setLookId}
                     styleImages={styleImages}
                     adPicks={adPicks}
                     onAdPicks={setAdPicks}
@@ -1069,20 +1073,10 @@ export function CreateAgent({
                       primary
                       label="Use this"
                       onClick={() =>
-                        send(
-                          lookId === "ads"
-                            ? "Follow the ads I picked, in our colors."
-                            : lookId === "none"
-                              ? "No reference, you pick the style."
-                              : lookId === "images"
-                                ? styleImages?.from === "competitor"
-                                  ? "Follow their ads' look, in our colors."
-                                  : "Follow my designs."
-                                : lookId
-                                  ? "I picked a saved look to follow."
-                                  : "Use our style.",
-                          { lookChoice: lookId ?? "our" },
-                        )
+                        send(lookMessage(lookId, styleImages), {
+                          lookChoice: lookId ?? "our",
+                          ...(blockedGo ? { action: blockedGo } : {}),
+                        })
                       }
                     />
                   </div>

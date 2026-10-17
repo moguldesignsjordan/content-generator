@@ -218,7 +218,7 @@ describe("buildBriefStateBlock", () => {
 
   it("ends with the checklist: what's open and what was asked", () => {
     const open = buildBriefStateBlock({ making: "campaign", key_message: "x" } as CampaignBrief, null);
-    expect(open).toContain("STILL OPEN (ask only these");
+    expect(open).toContain("STILL OPEN (in order; ask ONE per message");
     expect(open).toContain("channels (");
     const asked = buildBriefStateBlock(
       { making: "campaign", key_message: "x", asked: ["channels", "products", "size"] } as CampaignBrief,

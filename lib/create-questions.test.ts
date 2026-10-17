@@ -21,13 +21,17 @@ describe("openQuestions", () => {
     expect(openQuestions(brief({}))).toEqual(["making", "about"]);
   });
 
-  it("asks an email's open questions in priority order, three at most", () => {
-    expect(openQuestions(brief({ making: "email" }))).toEqual(["about", "detail", "action"]);
+  it("lists an email's open questions in priority order", () => {
+    expect(openQuestions(brief({ making: "email" }))).toEqual(["about", "detail", "action", "example"]);
     expect(openQuestions(brief({ making: "email", key_message: "Spring sale" }))).toEqual([
       "detail",
       "action",
       "example",
     ]);
+  });
+
+  it("asks a flyer about its style and reference right after what it's about", () => {
+    expect(openQuestions(brief({ making: "flyer" }))).toEqual(["about", "style", "photos", "offer", "where"]);
   });
 
   it("skips what's filled", () => {
@@ -37,7 +41,7 @@ describe("openQuestions", () => {
   });
 
   it("asks style and photos only for kinds with pictures", () => {
-    expect(openQuestions(brief({ making: "flyer", key_message: "x" }))).toEqual(["offer", "style", "photos"]);
+    expect(openQuestions(brief({ making: "flyer", key_message: "x" }))).toEqual(["style", "photos", "offer", "where"]);
     expect(openQuestions(brief({ making: "blog", key_message: "x" }))).toEqual(["reader", "proof", "post_type"]);
     const emailsOnly = brief({ making: "campaign", key_message: "x", channels: ["email"], products: ["cards"] });
     expect(openQuestions(emailsOnly)).not.toContain("style");
@@ -48,9 +52,9 @@ describe("openQuestions", () => {
     const one = brief({ making: "flyer", products: ["cards"] });
     expect(openQuestions(one)).not.toContain("split");
     const two = brief({ making: "flyer", products: ["cards", "banners"] });
-    expect(openQuestions(two)).toEqual(["split", "offer", "style"]);
-    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "offer", "style"]);
-    expect(openQuestions({ ...two, split: "together" })).toEqual(["offer", "style", "photos"]);
+    expect(openQuestions(two)).toEqual(["split", "style", "photos", "offer", "where"]);
+    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "style", "photos", "offer"]);
+    expect(openQuestions({ ...two, split: "together" })).toEqual(["style", "photos", "offer", "where"]);
   });
 
   it("asks size only when the campaign isn't one per product", () => {
@@ -65,13 +69,17 @@ describe("openQuestions", () => {
     expect(openQuestions(asked)).not.toContain("action");
   });
 
-  it("after the first round asks only structural questions", () => {
-    const b = markAsked(brief({ making: "flyer", products: ["cards", "banners"] }), ["split", "offer", "style"]);
-    // split was asked and unanswered; offer and style are gone; photos and
-    // where never come up.
-    expect(openQuestions(b)).toEqual([]);
-    // A structural answer opens a new structural question.
-    expect(openQuestions({ ...b, split: "each" })).toEqual(["per_product"]);
+  it("keeps asking the rest one at a time after the first question", () => {
+    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["about", "style"]);
+    expect(openQuestions(b)).toEqual(["photos", "offer", "where"]);
+  });
+
+  it("caps the optional questions across the whole chat, never the structural ones", () => {
+    const b = brief({ making: "campaign", key_message: "x", products: ["a", "b"] });
+    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "photos"]);
+    const later = markAsked(b, ["channels", "split", "size", "style", "photos"]);
+    expect(openQuestions(later)).toEqual([]);
+    expect(openQuestions({ ...later, split: "each" })).toEqual(["per_product"]);
   });
 });
 
@@ -81,8 +89,8 @@ describe("skippedDefaults", () => {
   });
 
   it("names a default for everything unanswered once a round happened", () => {
-    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["offer", "style", "photos"]);
-    expect(skippedDefaults(b).map((s) => s.id)).toEqual(["offer", "style", "photos", "where"]);
+    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["style", "photos", "offer", "where"]);
+    expect(skippedDefaults(b).map((s) => s.id)).toEqual(["style", "photos", "offer", "where"]);
     expect(skippedDefaults(b).find((s) => s.id === "where")?.fallback).toBe("a square post");
   });
 
@@ -153,6 +161,18 @@ describe("fixedChoices", () => {
     expect(products?.multi).toBe(true);
   });
 
+  it("offers vibes for style and a no-photos chip for photos", () => {
+    expect(fixedChoices("style", brief({}), [])?.choices.map((c) => c.value)).toEqual([
+      "punchy",
+      "sleek",
+      "playful",
+      "premium",
+    ]);
+    expect(fixedChoices("photos", brief({}), [])?.choices.map((c) => c.label)).toEqual([
+      "No photos, make the pictures",
+    ]);
+  });
+
   it("leaves the model's own questions to the model", () => {
     expect(fixedChoices("offer", brief({}), [])).toBeNull();
   });
@@ -166,8 +186,10 @@ describe("applyAnswers", () => {
       { id: "split", values: ["each"] },
       { id: "per_product", values: ["3"] },
       { id: "products", values: ["  Business cards ", "business cards", "Banners"] },
+      { id: "style", values: ["sleek"] },
     ]);
     expect(next).toEqual({
+      visual_vibe: "sleek",
       channels: ["social", "ad"],
       size: 6,
       days: 14,
@@ -187,25 +209,25 @@ describe("applyAnswers", () => {
 });
 
 describe("cleanAsk", () => {
-  it("shows only open questions, fills fixed choices, and marks every open id asked", () => {
+  it("shows one open question, fills fixed choices, and marks it and the skipped ones asked", () => {
     const b = brief({ making: "campaign", key_message: "Print week", products: ["Cards", "Banners"] });
-    expect(openQuestions(b)).toEqual(["channels", "split", "size"]);
+    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "photos"]);
     const { questions, dropped, brief: next } = cleanAsk(
       {
         questions: [
-          { id: "channels", question: "What should it include?", choices: ["ignored"] },
           { id: "offer", question: "Any deal?" },
-          { id: "split", question: "One design each, or all together?" },
+          { id: "split", question: "One design each, or all together?", choices: ["ignored"] },
+          { id: "size", question: "How big?" },
         ],
       },
       b,
       [],
     );
-    expect(questions.map((q) => q.id)).toEqual(["channels", "split"]);
-    expect(questions[0].choices.map((c) => c.value)).toEqual(["social", "ad", "email", "blog"]);
+    expect(questions.map((q) => q.id)).toEqual(["split"]);
+    expect(questions[0].choices.map((c) => c.value)).toEqual(["each", "together"]);
     expect(dropped).toEqual(["offer"]);
-    // size was left out, so the model judged it answered: it counts as asked.
-    expect(next.asked).toEqual(["channels", "split", "size"]);
+    // channels came first and was skipped, so the model judged it answered.
+    expect(next.asked).toEqual(["channels", "split"]);
     expect(cleanAsk({ questions: [{ id: "channels", question: "Again?" }] }, next, []).questions).toEqual([]);
   });
 
@@ -245,5 +267,11 @@ describe("checklistLines", () => {
   it("says to confirm when nothing is open", () => {
     const b = markAsked(brief({ making: "email", key_message: "x" }), ["detail", "action", "example"]);
     expect(checklistLines(b)[0]).toContain("STILL OPEN: nothing");
+  });
+
+  it("asks for one question at a time", () => {
+    const line = checklistLines(brief({ making: "flyer", key_message: "x" }))[0];
+    expect(line).toContain("ask ONE per message");
+    expect(line).toContain("style (Got a flyer or post they like the look of");
   });
 });
