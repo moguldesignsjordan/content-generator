@@ -386,6 +386,8 @@ export async function regenerateFlyerImage(args: {
   clientBrand?: ClientBrand;
   /** meta.flyer_variant_index: keeps the picked option's riff on re-render. */
   variantIndex?: number;
+  /** The owner's "What should change?" note; ignored with exactPrompt. */
+  changeNote?: string;
   draftId: string;
 }): Promise<{ image: ContentImage; usage: UsageDelta[] }> {
   if (!isGeminiConfigured()) {
@@ -436,6 +438,7 @@ export async function regenerateFlyerImage(args: {
         usageDeltas,
         client,
         riff: look.riffs ? args.variantIndex ?? 0 : undefined,
+        changeNote: args.changeNote,
       });
       if (designed) return { image: designed, usage: usageDeltas };
     }
@@ -451,6 +454,7 @@ export async function regenerateFlyerImage(args: {
       draftId: args.draftId,
       usageDeltas,
       client,
+      changeNote: args.changeNote,
     });
     if (designed) return { image: designed, usage: usageDeltas };
   }
@@ -465,6 +469,7 @@ export async function regenerateFlyerImage(args: {
     : buildFlyerImagePrompt(args.copy, tokens, args.aspect, Boolean(reference), args.style, {
         photoCount: photos.length,
         quietZone: quietZoneFor(layout),
+        changeNote: args.changeNote,
       });
 
   const rendered = await renderImage({
@@ -1188,6 +1193,7 @@ async function renderDesignedFlyer(
     style?: FlyerStyleId;
     /** What the examples say (readExamplesText). */
     examplesText?: string;
+    changeNote?: string;
   },
 ): Promise<ContentImage | null> {
   const client = opts.client ?? null;
@@ -1230,6 +1236,7 @@ async function renderDesignedFlyer(
         logoCorner: corner,
         riff: opts.riff,
         fontIsDefault: !ctx.brand.visual_identity?.fonts?.heading,
+        changeNote: opts.changeNote,
         ...(client
           ? {
               client: {

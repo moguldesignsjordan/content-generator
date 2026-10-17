@@ -133,6 +133,11 @@ describe("flyer style presets", () => {
     expect(isFlyerStyle(undefined)).toBe(false);
   });
 
+  it("presets leave color to the brand palette instead of setting a color mood", () => {
+    expect(FLYER_STYLE_DIRECTIONS.elegant).not.toMatch(/understated color|materials/);
+    expect(FLYER_STYLE_DIRECTIONS.minimal).not.toContain("restrained palette");
+  });
+
   it("pickFlyerStyleSet returns distinct catalog styles, deterministic per seed", () => {
     const seed = "11111111-2222-3333-4444-555555555555";
     const set = pickFlyerStyleSet(seed, 4);
@@ -343,6 +348,7 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain("Square post (1:1)");
     expect(user).toContain("VOICE: direct");
     expect(user).not.toContain("EXISTING EMAIL");
+    expect(system).toContain("they read\n  as one family");
   });
 
   it("asks each option to pick the owner's photos and stage them as they look", () => {
@@ -545,6 +551,12 @@ describe("buildFlyerDesignPrompt", () => {
     expect(prompt).toContain(FLYER_STYLE_DIRECTIONS.bold_type);
     expect(prompt).toContain('"Your website is losing you clients"');
     expect(prompt).not.toContain("example");
+    expect(prompt).toContain('Call to action: "Book a call", a clear action element in the accent color.');
+  });
+
+  it("keeps accents and capitalization in the typeset lines", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
+    expect(prompt).toContain("with the same accents and capitalization");
   });
 
   it("drops the button when the look uses none, and names a previous misspelling", () => {
@@ -631,6 +643,16 @@ describe("buildFlyerDesignPrompt", () => {
   it("allows only the people the scene names, on both render paths", () => {
     expect(buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles })).toContain(PEOPLE_RULE);
     expect(buildFlyerImagePrompt(copy, tokens, "1:1", false)).toContain(PEOPLE_RULE);
+  });
+
+  it("ends both render paths with the owner's change note, and leaves it out when blank", () => {
+    const note = "Greener background, bigger headline";
+    const design = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles }, { changeNote: note });
+    const art = buildFlyerImagePrompt(copy, tokens, "1:1", false, undefined, { changeNote: note });
+    expect(design.endsWith(`(the text lines stay exactly as given): ${note}`)).toBe(true);
+    expect(art.endsWith(`except the no-text rule: ${note}`)).toBe(true);
+    expect(buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles })).not.toContain("The owner asked");
+    expect(buildFlyerImagePrompt(copy, tokens, "1:1", false)).not.toContain("The owner asked");
   });
 
   it("uses the look's type alone when the brand saved no font", () => {

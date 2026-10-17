@@ -52,7 +52,7 @@ export const FLYER_STYLE_DIRECTIONS: Record<FlyerStyleId, string> = {
     "large open area where the headline will sit.",
   minimal:
     "Style direction: sleek and minimal. Generous empty space, one small " +
-    "focal element, restrained palette, hairline details, quiet premium feel.",
+    "focal element, sparing use of the accent, hairline details, quiet premium feel.",
   photo_backdrop:
     "Style direction: a full-bleed photograph drawn from the scene, naturally " +
     "lit, with calm, simple areas where text can sit.",
@@ -69,8 +69,8 @@ export const FLYER_STYLE_DIRECTIONS: Record<FlyerStyleId, string> = {
     "Style direction: smooth flowing brand-color gradients with a soft glow, " +
     "modern tech-launch energy.",
   elegant:
-    "Style direction: premium and elegant. Refined materials, luxurious " +
-    "spacing, delicate details, understated color.",
+    "Style direction: premium and elegant. Luxurious spacing, precise " +
+    "alignment, fine hairline details, one restrained focal element, no ornament.",
 };
 
 export function isFlyerStyle(value: unknown): value is FlyerStyleId {
@@ -373,6 +373,10 @@ export function buildFlyerCopyMessages(args: {
     "- scene: imagery and composition only. Never describe the text, colors,",
     "  or fonts, or any element that carries text (headlines, prices, buttons,",
     "  badges, gauges, footers); the render prompt handles those.",
+    "- scene: one clear visual idea that supports the headline, never competes",
+    "  with it. When it shows several items (shops, products, tools), they read",
+    "  as one family: the same style, scale, and level of detail, with room",
+    "  between them, never a crowded row.",
     "- mockup: only when the scene shows off a designed item the brand makes",
     "  or sells, so it looks finished instead of blank. A made-up business",
     "  that fits the item, never a real one; phone numbers in 555-01XX.",
@@ -643,7 +647,7 @@ export function buildFlyerImagePrompt(
   aspect: FlyerAspect,
   hasReference: boolean,
   style?: FlyerStyleId,
-  opts: { photoCount?: number; quietZone?: FlyerQuietZone } = {},
+  opts: { photoCount?: number; quietZone?: FlyerQuietZone; changeNote?: string } = {},
 ): string {
   const photos = opts.photoCount ?? 0;
   const c = tokens.colors;
@@ -681,6 +685,11 @@ export function buildFlyerImagePrompt(
     PEOPLE_RULE,
     "Absolutely no text anywhere: no words, letters, numbers, logos, signs, labels, captions, or watermarks (the product's own printed label is the only exception).",
     "Specific and crafted, never generic stock imagery: no handshakes, no people pointing at laptops, no lightbulbs.",
+    // Last, so the owner's ask wins over the defaults above; the art stays
+    // text-free because the text is composed on top in code.
+    opts.changeNote
+      ? `The owner asked for these changes, which take priority over everything above except the no-text rule: ${opts.changeNote}`
+      : "",
   ].filter(Boolean);
 
   return parts.join(" ");
@@ -728,6 +737,8 @@ export function buildFlyerDesignPrompt(
     client?: { name: string; hasLogo: boolean; hasColors: boolean };
     /** The brand saved no heading font, so tokens carry the generic default. */
     fontIsDefault?: boolean;
+    /** The owner's "What should change?" note from the edit sheet. */
+    changeNote?: string;
   } = {},
 ): string {
   const p = look.profile;
@@ -765,7 +776,9 @@ export function buildFlyerDesignPrompt(
     `Headline: "${copy.headline}", ${headlineType}.`,
     copy.subtext ? `Supporting line: "${copy.subtext}", smaller and quieter than the headline.` : "",
     ...(copy.extras ?? []).map((e) => `${e.slot.charAt(0).toUpperCase()}${e.slot.slice(1).replace(/\.$/, "")}: "${e.text}".`),
-    showCta ? `Call to action: "${copy.cta}"${p ? `, styled as a ${p.cta_style}` : ""}.` : "",
+    showCta
+      ? `Call to action: "${copy.cta}"${p ? `, styled as a ${p.cta_style}` : hasExamples ? "" : ", a clear action element in the accent color"}.`
+      : "",
   ].filter(Boolean);
 
   const colors =
@@ -813,7 +826,7 @@ export function buildFlyerDesignPrompt(
     `Subject for this piece${hasExamples ? ", drawn in the examples' rendering style" : ""}: ${copy.scene.trim().replace(/\.$/, "")}.`,
     PEOPLE_RULE,
     mockup,
-    `On the flyer itself, typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
+    `On the flyer itself, typeset EXACTLY these lines and no other words, every word spelled exactly as given, with the same accents and capitalization. ${lines.join(" ")}`,
     hasExamples ? "Any other text element the examples have (taglines, footers, lists, labels) is left out of this design entirely." : "",
     ...(opts.misspelled?.length
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
@@ -835,6 +848,9 @@ export function buildFlyerDesignPrompt(
     mockup
       ? "Every other printed item, screen, sign, and package in the scene stays blank. No watermarks and no placeholder text anywhere else."
       : "Printed items, screens, signs, and packaging in the scene stay blank (only a real product photo keeps its own label). No watermarks and no placeholder text anywhere.",
+    opts.changeNote
+      ? `The owner asked for these changes, which take priority over the look and layout above (the text lines stay exactly as given): ${opts.changeNote}`
+      : "",
   ]
     .filter(Boolean)
     .join(" ");

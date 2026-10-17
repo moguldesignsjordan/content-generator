@@ -66,6 +66,7 @@ export function FlyerSheet({
   const [cta, setCta] = useState(copy?.cta ?? "");
   const [aspect, setAspect] = useState<FlyerAspect>(initialAspect);
   const [styleId, setStyleId] = useState(styleReferenceId ?? "");
+  const [changeNote, setChangeNote] = useState("");
   const [styles, setStyles] = useState<StyleRow[]>([]);
   const [showPrompt, setShowPrompt] = useState(false);
   const [exactPrompt, setExactPrompt] = useState("");
@@ -87,6 +88,7 @@ export function FlyerSheet({
     setCta(copy?.cta ?? "");
     setAspect(initialAspect);
     setStyleId(styleReferenceId ?? "");
+    setChangeNote("");
     setExactPrompt("");
     setShowPrompt(false);
     setFile(null);
@@ -136,6 +138,8 @@ export function FlyerSheet({
     if (model) form.set("model", model);
     if (showPrompt && exactPrompt.trim()) {
       form.set("exactPrompt", exactPrompt.trim());
+    } else if (changeNote.trim()) {
+      form.set("changeNote", changeNote.trim());
     }
     void submit(form, "Couldn't regenerate the flyer.");
   }
@@ -242,6 +246,21 @@ export function FlyerSheet({
                 disabled={busy}
               />
             </Field>
+            {!showPrompt && (
+              <Field
+                label="What should change? (optional)"
+                hint="Added to the design prompt as a priority instruction."
+              >
+                <Textarea
+                  rows={3}
+                  value={changeNote}
+                  onChange={(e) => setChangeNote(e.target.value)}
+                  placeholder="Greener background, put the phone on the right, bigger headline"
+                  maxLength={500}
+                  disabled={busy}
+                />
+              </Field>
+            )}
             <Field label="Post shape">
               <SegmentedControl
                 value={aspect}
@@ -289,12 +308,12 @@ export function FlyerSheet({
                 }}
                 className="text-[13px] font-medium text-accent transition-colors hover:text-accent-press"
               >
-                {showPrompt ? "Hide the full prompt" : "Edit the full prompt instead"}
+                {showPrompt ? "Hide the full prompt" : "View or edit the full prompt"}
               </button>
               {showPrompt && (
                 <Field
                   className="mt-2"
-                  hint="Sent to the image model exactly as written; the fields above are ignored for the visuals (the headline still names the draft)."
+                  hint="The prompt behind the current design. Sent to the image model exactly as written; the fields above and the change note are ignored for the visuals (the headline still names the draft)."
                 >
                   <Textarea
                     rows={7}

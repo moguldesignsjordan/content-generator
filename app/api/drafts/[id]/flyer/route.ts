@@ -33,11 +33,14 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // The edit sheet pre-fills the full prompt a design was made with (about 4,000
 // chars for a designed flyer); a cut-off one loses its colors and text.
 const MAX_EXACT_PROMPT_CHARS = 8000;
+const MAX_CHANGE_NOTE_CHARS = 500;
 
 /**
  * POST multipart/form-data — edits to a social flyer draft. Modes:
  *  - "generate" (default): re-renders the design. { headline?, subtext?,
- *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt? }.
+ *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt?,
+ *    changeNote? }. changeNote is the owner's "What should change?" ask,
+ *    added to the generated prompt as a priority instruction.
  *    referenceRole "place" (+ referenceNote) edits the current design to
  *    include the reference instead of copying its style.
  *    Copy fields default to the stored flyer_copy; exactPrompt sends the full
@@ -310,6 +313,8 @@ export async function POST(
 
     const exactPrompt =
       (form.get("exactPrompt") as string | null)?.trim().slice(0, MAX_EXACT_PROMPT_CHARS) || undefined;
+    const changeNote =
+      stripEmDashes(String(form.get("changeNote") ?? "").trim()).slice(0, MAX_CHANGE_NOTE_CHARS) || undefined;
     const rawModel = form.get("model");
     const renderTier = isImageModelTier(rawModel) ? rawModel : null;
     const variantIndex = meta.flyer_variant_index;
@@ -354,6 +359,7 @@ export async function POST(
       style: meta.flyer_style,
       reference,
       exactPrompt,
+      changeNote,
       ...(renderTier ? { model: resolveImageModel(renderTier) } : {}),
       ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
       inputs: inputsOf(meta),
