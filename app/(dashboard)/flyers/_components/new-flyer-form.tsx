@@ -215,7 +215,7 @@ export function NewFlyerForm({
           hint={`${
             imageModelOptions.find((m) => m.id === model)?.description ??
             "Uses the model picked in Settings."
-          } Four options are made, so a flyer costs four images.`}
+          } Three options are made, so a flyer costs three images.`}
         >
           <Select value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
             <option value="">My default</option>

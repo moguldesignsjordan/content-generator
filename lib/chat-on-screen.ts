@@ -38,7 +38,7 @@ export async function loadOnScreen(ref: ChatPreviewRef | undefined, brandId: str
           : `, ${optionCount} options (showing option ${meta.flyer_variant_index + 1})`
         : "";
     const text = copy
-      ? `. Its text: headline "${copy.headline}"${copy.subtext ? `, supporting line "${copy.subtext}"` : ""}${copy.cta ? `, call to action "${copy.cta}"` : ""}`
+      ? `. Its text: headline "${copy.headline}"${copy.subtext ? `, supporting line "${copy.subtext}"` : ""}`
       : "";
     what = `a flyer${showing}${text}`;
   } else {

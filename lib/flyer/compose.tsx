@@ -9,14 +9,13 @@ import { loadFlyerFonts } from "./fonts";
 import { artHeightFraction, headlineSize, primaryFontFamily, type FlyerLayout } from "./layout";
 
 // Composes a finished flyer: the model's text-free artwork plus the headline,
-// supporting line, CTA, and logo set in code with the brand's real fonts and
+// supporting line, and logo set in code with the brand's real fonts and
 // colors. Spelling is exact because the text never passes through the image
 // model. Rendered with next/og (bundled with Next, no extra dependency).
 
 export interface FlyerText {
   headline: string;
   subtext?: string;
-  cta?: string;
 }
 
 interface LoadedLogo {
@@ -122,7 +121,6 @@ export async function composeFlyer(args: {
   // Colors: the band is the brand's primary; text on every surface is picked
   // for contrast against what's actually behind it.
   const band = hex(tokens.colors.primary, "#111827");
-  const accent = hex(tokens.colors.accent, "#7C3AED");
   const cardBg = hex(tokens.colors.background, "#FFFFFF");
   const brandText = hex(tokens.colors.text, "#111827");
   const surface =
@@ -133,9 +131,6 @@ export async function composeFlyer(args: {
       : contrast(brandText, surface) >= 4.5
         ? brandText
         : readableTextColor(surface);
-  // The CTA pill must stand out from the surface it sits on.
-  const pillBg = contrast(accent, surface) >= 1.6 ? accent : textColor;
-  const pillText = readableTextColor(pillBg);
 
   const textBlock = (
     <div style={{ display: "flex", flexDirection: "column", gap: Math.round(22 * s), width: "100%" }}>
@@ -163,24 +158,6 @@ export async function composeFlyer(args: {
           }}
         >
           {text.subtext}
-        </div>
-      ) : null}
-      {text.cta ? (
-        <div style={{ display: "flex" }}>
-          <div
-            style={{
-              display: "flex",
-              background: pillBg,
-              color: pillText,
-              fontFamily: fontSet.heading,
-              fontWeight: 700,
-              fontSize: Math.round(W * 0.034),
-              padding: `${Math.round(18 * s)}px ${Math.round(36 * s)}px`,
-              borderRadius: 999,
-            }}
-          >
-            {text.cta}
-          </div>
         </div>
       ) : null}
     </div>

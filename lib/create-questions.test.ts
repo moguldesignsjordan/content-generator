@@ -30,8 +30,13 @@ describe("openQuestions", () => {
     ]);
   });
 
-  it("asks a flyer about its style and reference right after what it's about", () => {
-    expect(openQuestions(brief({ making: "flyer" }))).toEqual(["about", "style", "photos", "offer", "where"]);
+  it("asks a flyer what it's for, images, colors, style or reference, then wording", () => {
+    expect(openQuestions(brief({ making: "flyer" }))).toEqual(["about", "photos", "colors", "style", "wording"]);
+  });
+
+  it("skips colors once a scheme is picked and wording once exact words or a deal are in", () => {
+    const b = brief({ making: "flyer", key_message: "x", colors: ["#111111"], offer_deal: "20% off" });
+    expect(openQuestions(b)).toEqual(["photos", "style"]);
   });
 
   it("skips what's filled", () => {
@@ -41,7 +46,7 @@ describe("openQuestions", () => {
   });
 
   it("asks style and photos only for kinds with pictures", () => {
-    expect(openQuestions(brief({ making: "flyer", key_message: "x" }))).toEqual(["style", "photos", "offer", "where"]);
+    expect(openQuestions(brief({ making: "flyer", key_message: "x" }))).toEqual(["photos", "colors", "style", "wording"]);
     expect(openQuestions(brief({ making: "blog", key_message: "x" }))).toEqual(["reader", "proof", "post_type"]);
     const emailsOnly = brief({ making: "campaign", key_message: "x", channels: ["email"], products: ["cards"] });
     expect(openQuestions(emailsOnly)).not.toContain("style");
@@ -52,9 +57,9 @@ describe("openQuestions", () => {
     const one = brief({ making: "flyer", products: ["cards"] });
     expect(openQuestions(one)).not.toContain("split");
     const two = brief({ making: "flyer", products: ["cards", "banners"] });
-    expect(openQuestions(two)).toEqual(["split", "style", "photos", "offer", "where"]);
-    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "style", "photos", "offer"]);
-    expect(openQuestions({ ...two, split: "together" })).toEqual(["style", "photos", "offer", "where"]);
+    expect(openQuestions(two)).toEqual(["split", "photos", "colors", "style", "wording"]);
+    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "photos", "style", "wording"]);
+    expect(openQuestions({ ...two, split: "together" })).toEqual(["photos", "colors", "style", "wording"]);
   });
 
   it("asks size only when the campaign isn't one per product", () => {
@@ -70,8 +75,8 @@ describe("openQuestions", () => {
   });
 
   it("keeps asking the rest one at a time after the first question", () => {
-    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["about", "style"]);
-    expect(openQuestions(b)).toEqual(["photos", "offer", "where"]);
+    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["about", "photos"]);
+    expect(openQuestions(b)).toEqual(["colors", "style", "wording"]);
   });
 
   it("caps the optional questions across the whole chat, never the structural ones", () => {
@@ -89,14 +94,14 @@ describe("skippedDefaults", () => {
   });
 
   it("names a default for everything unanswered once a round happened", () => {
-    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["style", "photos", "offer", "where"]);
-    expect(skippedDefaults(b).map((s) => s.id)).toEqual(["style", "photos", "offer", "where"]);
-    expect(skippedDefaults(b).find((s) => s.id === "where")?.fallback).toBe("a square post");
+    const b = markAsked(brief({ making: "flyer", key_message: "x" }), ["photos", "colors", "style", "wording"]);
+    expect(skippedDefaults(b).map((s) => s.id)).toEqual(["photos", "colors", "style", "wording"]);
+    expect(skippedDefaults(b).find((s) => s.id === "colors")?.fallback).toBe("the brand colors");
   });
 
   it("drops what they answered", () => {
-    const b = markAsked(brief({ making: "flyer", key_message: "x", offer_deal: "20% off" }), ["offer"]);
-    expect(skippedDefaults(b).map((s) => s.id)).not.toContain("offer");
+    const b = markAsked(brief({ making: "flyer", key_message: "x", offer_deal: "20% off" }), ["wording"]);
+    expect(skippedDefaults(b).map((s) => s.id)).not.toContain("wording");
   });
 });
 
@@ -234,7 +239,7 @@ describe("cleanAsk", () => {
   it("keeps the model's choices for its own questions, capped and cleaned", () => {
     const { questions } = cleanAsk(
       { questions: [{ id: "offer", question: `Any deal${EM_DASH}or price?`, choices: ["20% off", "", "Free shipping", "a", "b", "c"], multi: true }] },
-      brief({ making: "flyer", key_message: "x" }),
+      brief({ making: "ad", key_message: "x" }),
       [],
     );
     expect(questions).toEqual([
@@ -247,6 +252,15 @@ describe("cleanAsk", () => {
     ]);
   });
 
+  it("always offers the brand colors first for colors", () => {
+    const { questions } = cleanAsk(
+      { questions: [{ id: "colors", question: "Brand colors?", choices: ["Black and gold", "My brand colors", "Pastels"] }] },
+      brief({ making: "flyer", key_message: "x", asked: ["photos"] }),
+      [],
+    );
+    expect(questions[0].choices.map((c) => c.label)).toEqual(["My brand colors", "Black and gold", "Pastels"]);
+  });
+
   it("asks nothing and marks nothing when no question survives", () => {
     const b = brief({ making: "email", key_message: "x" });
     const out = cleanAsk({ questions: [{ id: "style", question: "Look?" }] }, b, []);
@@ -257,11 +271,11 @@ describe("cleanAsk", () => {
 
 describe("checklistLines", () => {
   it("lists what's open, then what was asked with its default", () => {
-    const b = markAsked(brief({ making: "flyer", key_message: "x", products: ["a", "b"] }), ["offer"]);
+    const b = markAsked(brief({ making: "flyer", key_message: "x", products: ["a", "b"] }), ["wording"]);
     const lines = checklistLines(b);
     expect(lines[0]).toContain("STILL OPEN");
     expect(lines[0]).toContain("split (A separate design for each product, or one with all of them?)");
-    expect(lines[1]).toContain("offer: no special offer");
+    expect(lines[1]).toContain("wording: words written from what it's for, no special offer");
   });
 
   it("says to confirm when nothing is open", () => {

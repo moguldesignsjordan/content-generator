@@ -409,7 +409,6 @@ export const EDIT_FLYER_TOOL: Anthropic.Tool = {
       option: { type: "integer", description: "Switch to this option number (1-based)." },
       headline: { type: "string", description: "New headline, exactly as it should appear." },
       subtext: { type: "string", description: "New supporting line; empty string removes it." },
-      cta: { type: "string", description: "New call to action; empty string removes it." },
       scene: { type: "string", description: "What the art should show instead, described visually." },
       photo_url: {
         type: "string",

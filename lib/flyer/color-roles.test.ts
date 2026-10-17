@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapBrandColors } from "./color-roles";
+import { mapBrandColors, pickedColors } from "./color-roles";
 import { contrast } from "@/lib/color/contrast";
 
 const mogul = {
@@ -37,5 +37,20 @@ describe("mapBrandColors", () => {
     const roles = mapBrandColors({ primary: "rgb(1,2,3)", accent: "#FFAE3C" }, "light");
     expect(roles.background).toBe("#FAFAF7");
     expect(roles.accent).toBe("#FFAE3C");
+  });
+});
+
+describe("pickedColors", () => {
+  it("draws with the picked scheme on neutrals instead of the brand's palette", () => {
+    const colors = pickedColors(mogul, ["#111111", "#d4af37"]);
+    expect(colors).toMatchObject({ primary: "#111111", accent: "#D4AF37", secondary: "#D4AF37", background: "#FFFFFF" });
+    const roles = mapBrandColors(colors, "dark");
+    expect(roles.background).toBe("#111111");
+    expect(roles.accent).toBe("#D4AF37");
+  });
+
+  it("keeps the brand's colors without a valid pick", () => {
+    expect(pickedColors(mogul, undefined)).toBe(mogul);
+    expect(pickedColors(mogul, ["gold"])).toBe(mogul);
   });
 });

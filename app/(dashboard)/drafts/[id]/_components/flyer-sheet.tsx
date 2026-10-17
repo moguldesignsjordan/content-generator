@@ -36,7 +36,13 @@ interface FlyerSheetProps {
   /** The prompt behind the current render, for the exact-prompt editor. */
   promptUsed?: string;
   styleReferenceId?: string;
-  onApplied: (image: ContentImage, copy: FlyerCopy | null, aspect: FlyerAspect) => void;
+  /** variantIndex is the option a redesign was saved as; unset for an upload. */
+  onApplied: (
+    image: ContentImage,
+    copy: FlyerCopy | null,
+    aspect: FlyerAspect,
+    variantIndex?: number,
+  ) => void;
 }
 
 type Tab = "design" | "add" | "upload";
@@ -63,7 +69,6 @@ export function FlyerSheet({
 
   const [headline, setHeadline] = useState(copy?.headline ?? "");
   const [subtext, setSubtext] = useState(copy?.subtext ?? "");
-  const [cta, setCta] = useState(copy?.cta ?? "");
   const [aspect, setAspect] = useState<FlyerAspect>(initialAspect);
   const [styleId, setStyleId] = useState(styleReferenceId ?? "");
   const [changeNote, setChangeNote] = useState("");
@@ -85,7 +90,6 @@ export function FlyerSheet({
     if (!open) return;
     setHeadline(copy?.headline ?? "");
     setSubtext(copy?.subtext ?? "");
-    setCta(copy?.cta ?? "");
     setAspect(initialAspect);
     setStyleId(styleReferenceId ?? "");
     setChangeNote("");
@@ -115,9 +119,10 @@ export function FlyerSheet({
         image?: ContentImage;
         copy?: FlyerCopy;
         aspect?: FlyerAspect;
+        variantIndex?: number;
       };
       if (!res.ok || !data.image) throw new ApiError(data.error ?? failMessage, data);
-      onApplied(data.image, data.copy ?? copy, data.aspect ?? aspect);
+      onApplied(data.image, data.copy ?? copy, data.aspect ?? aspect, data.variantIndex);
       toast.success("Flyer updated.");
       onClose();
     } catch (err) {
@@ -132,7 +137,6 @@ export function FlyerSheet({
     form.set("mode", "generate");
     form.set("headline", headline);
     form.set("subtext", subtext);
-    form.set("cta", cta);
     form.set("aspect", aspect);
     form.set("styleReferenceId", styleId || "none");
     if (model) form.set("model", model);
@@ -235,14 +239,6 @@ export function FlyerSheet({
                 value={subtext}
                 onChange={(e) => setSubtext(e.target.value)}
                 maxLength={100}
-                disabled={busy}
-              />
-            </Field>
-            <Field label="Call to action (optional)">
-              <Input
-                value={cta}
-                onChange={(e) => setCta(e.target.value)}
-                maxLength={40}
                 disabled={busy}
               />
             </Field>

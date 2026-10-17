@@ -21,7 +21,7 @@ import { stripEmDashes, stripMarkdown } from "@/lib/text";
 // Flyer prompt assembly: one FAST_MODEL call produces several alternative
 // flyers, each with its copy AND a scene concept (save_flyer_variants), then
 // buildFlyerImagePrompt turns each into a text-free ARTWORK prompt. The
-// headline, supporting line, CTA, and logo are composed on top in code with
+// headline, supporting line, and logo are composed on top in code with
 // the brand's real fonts (lib/flyer/compose.tsx), so spelling and type are
 // always exact and on-brand.
 
@@ -88,7 +88,7 @@ function seedHash(seed: string): number {
 }
 
 /** How many options one flyer generation renders. */
-export const FLYER_VARIANT_COUNT = 4;
+export const FLYER_VARIANT_COUNT = 3;
 
 /**
  * `count` DISTINCT presets for a multi-variant generation, a consecutive run
@@ -151,12 +151,6 @@ const FLYER_COPY_PROPERTIES = {
     description:
       "One short supporting line under the headline, 12 words or fewer. " +
       "Rendered in the image. Omit if the headline stands alone.",
-  },
-  cta: {
-    type: "string",
-    description:
-      "A 2 to 4 word call-to-action for the flyer's button or banner, " +
-      "e.g. 'Book a call'. Rendered in the image.",
   },
   caption: {
     type: "string",
@@ -270,7 +264,7 @@ export function flyerVariantsTool(
     name: "save_flyer_variants",
     description:
       "Return several alternative flyers for the same topic. Each one is " +
-      "complete: its own headline/subtext/cta (typeset INTO the image exactly " +
+      "complete: its own headline/subtext (typeset INTO the image exactly " +
       `as written), ${ad ? "ad text fields" : "caption, hashtags"}, and scene. ` +
       "Make them genuinely different hooks, not rewordings of one idea.",
     input_schema: {
@@ -351,7 +345,9 @@ export function buildFlyerCopyMessages(args: {
       : "each with its own on-image text, post caption, and visual concept. Rules:",
     "- headline: 8 words max, concrete benefit or hook, no clickbait.",
     "- subtext: one short line only when it adds something; otherwise omit.",
-    "- cta: 2 to 4 words, action verb first.",
+    isAd
+      ? "- the call to action goes in the ad text and ad.cta_button, never on the image."
+      : "- the call to action goes in the caption, never on the image.",
     ...(isAd
       ? [
           "- ad.primary_text: hook in the first sentence, about 125 characters",
@@ -528,7 +524,6 @@ export function cleanFlyerCopy(out: FlyerCopyOutput): FlyerCopyOutput {
   return {
     headline: plain(out.headline.trim()),
     subtext: out.subtext?.trim() ? plain(out.subtext.trim()) : undefined,
-    cta: out.cta?.trim() ? plain(out.cta.trim()) : undefined,
     caption: plain(out.caption.trim()),
     hashtags: (out.hashtags ?? [])
       .map((h) => h.trim())
@@ -602,7 +597,6 @@ export function parseFlyerVariants(
         const copy = cleanFlyerCopy({
           headline: c.headline,
           subtext: c.subtext,
-          cta: c.cta,
           caption: ad.primary_text,
           scene: c.scene,
           extras: c.extras,
@@ -635,7 +629,7 @@ export const PEOPLE_RULE =
 
 /**
  * Builds the render prompt for the flyer's ARTWORK only. The headline,
- * supporting line, CTA, and logo are set on top afterwards in code with the
+ * supporting line, and logo are set on top afterwards in code with the
  * brand's real fonts and colors (lib/flyer/compose.tsx), so the model is told
  * to draw no text at all: image models misspell and off-brand type, code
  * doesn't. Reference images, when attached, come in this order: the owner's
@@ -742,7 +736,6 @@ export function buildFlyerDesignPrompt(
   } = {},
 ): string {
   const p = look.profile;
-  const showCta = Boolean(copy.cta) && p?.cta_style !== "none";
   const owner = opts.client
     ? opts.client.name.endsWith("s") ? `${opts.client.name}'` : `${opts.client.name}'s`
     : "";
@@ -776,9 +769,6 @@ export function buildFlyerDesignPrompt(
     `Headline: "${copy.headline}", ${headlineType}.`,
     copy.subtext ? `Supporting line: "${copy.subtext}", smaller and quieter than the headline.` : "",
     ...(copy.extras ?? []).map((e) => `${e.slot.charAt(0).toUpperCase()}${e.slot.slice(1).replace(/\.$/, "")}: "${e.text}".`),
-    showCta
-      ? `Call to action: "${copy.cta}"${p ? `, styled as a ${p.cta_style}` : hasExamples ? "" : ", a clear action element in the accent color"}.`
-      : "",
   ].filter(Boolean);
 
   const colors =
@@ -832,6 +822,9 @@ export function buildFlyerDesignPrompt(
       ? [`A previous attempt got this text wrong: ${opts.misspelled.map((m) => `"${m}"`).join(", ")}. Spell it exactly.`]
       : []),
     colors,
+    hasExamples || p
+      ? "The flyer has no buttons: leave out any button the look has, and if the look puts its accent on one, use the accent on another element instead."
+      : "The flyer has no buttons.",
     ...(photos === 1
       ? [
           "Show the product from Image 1 exactly as photographed (same shape, colors, label, printed design, and proportions).",

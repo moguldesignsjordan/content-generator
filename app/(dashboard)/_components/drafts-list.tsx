@@ -43,7 +43,7 @@ const EMPTY: Record<Kind, { title: string; body: string; href: string; cta: stri
   },
   social: {
     title: "No flyers yet",
-    body: "Design one from a topic or a quick brief, then pick from 4 options.",
+    body: "Design one from a topic or a quick brief, then pick from 3 options.",
     href: "/flyers/new",
     cta: "New flyer",
   },

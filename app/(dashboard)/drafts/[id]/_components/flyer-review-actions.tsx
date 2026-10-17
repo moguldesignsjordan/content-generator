@@ -369,7 +369,7 @@ export function FlyerReviewActions({
             <p className="mb-2 text-[12px] text-muted">
               {variants.length} options. Switching between them is free.
             </p>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {variants.map((v, i) => {
                 const selected = i === variantIndex;
                 const label =
@@ -700,12 +700,13 @@ export function FlyerReviewActions({
         aspect={aspect}
         promptUsed={image?.prompt}
         styleReferenceId={initialMeta.style_reference_id}
-        onApplied={(newImage, newCopy, newAspect) => {
+        onApplied={(newImage, newCopy, newAspect, newIndex) => {
           setImage(newImage);
           setCopy(newCopy);
           setAspect(newAspect);
-          // A custom render or upload matches none of the options anymore.
-          setVariantIndex(undefined);
+          // A redesign comes back as a new option (the refresh brings its
+          // tile); an upload matches none of them.
+          setVariantIndex(newIndex);
           router.refresh();
         }}
       />

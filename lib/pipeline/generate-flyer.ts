@@ -28,7 +28,7 @@ import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize
 import { uploadContentImage } from "./generate-image";
 import sharp from "sharp";
 import { composeFlyer, stampLogo } from "@/lib/flyer/compose";
-import { mapBrandColors } from "@/lib/flyer/color-roles";
+import { mapBrandColors, pickedColors } from "@/lib/flyer/color-roles";
 import { checkRenderedText } from "@/lib/flyer/text-check";
 import { extractLookProfile, loadLookImages } from "./extract-look";
 import { loadCompetitorRef } from "./competitor-ref";
@@ -111,6 +111,7 @@ export async function generateFlyerForTopicStreamed(
     const draftCtx = await getDraftWithJobContext(draftId);
     if (!draftCtx) throw new Error(`Draft ${draftId} not found`);
     const meta = draftCtx.meta;
+    ctx = withPickedColors(ctx, meta);
     const aspect: FlyerAspect = meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT;
 
     const writing = { phase: "writing", label: "Writing flyer copy" };
@@ -240,10 +241,11 @@ export async function regenerateFlyerDraft(
 
   await rejectDraftRecord(draftId, feedback);
 
-  const ctx = await getTopicContext(draftCtx.topicId);
-  if (!ctx) throw new Error(`Topic not found for draft ${draftId}`);
+  const topicCtx = await getTopicContext(draftCtx.topicId);
+  if (!topicCtx) throw new Error(`Topic not found for draft ${draftId}`);
 
   const meta = draftCtx.meta;
+  const ctx = withPickedColors(topicCtx, meta);
   const aspect: FlyerAspect = meta.flyer_aspect ?? DEFAULT_FLYER_ASPECT;
 
   let emailCopy: EmailCopy | null = null;
@@ -494,7 +496,7 @@ export async function regenerateFlyerImage(args: {
     ? rendered.data
     : await composeFlyer({
         art: rendered.data,
-        text: { headline: args.copy.headline, subtext: args.copy.subtext, cta: args.copy.cta },
+        text: { headline: args.copy.headline, subtext: args.copy.subtext },
         tokens,
         width: size.width,
         height: size.height,
@@ -560,12 +562,11 @@ export async function placeImageInFlyer(args: {
   if (!res.ok) throw new Error("Couldn't load the current flyer. Try again.");
   const current = Buffer.from(await res.arrayBuffer());
 
-  // Only the lines this design actually shows (a look can drop the CTA).
+  // Only the lines this design actually shows.
   const lines = [
     args.copy.headline,
     args.copy.subtext ?? "",
     ...(args.copy.extras ?? []).map((e) => e.text),
-    args.copy.cta ?? "",
   ].filter(Boolean);
   const before = await readImageText(await toPreview(current), readOpts);
   const expected =
@@ -677,7 +678,7 @@ async function renderFlyer(
   const size = FLYER_ASPECTS[opts.aspect];
   const composed = await composeFlyer({
     art: rendered.data,
-    text: { headline: copy.headline, subtext: copy.subtext, cta: copy.cta },
+    text: { headline: copy.headline, subtext: copy.subtext },
     tokens,
     width: size.width,
     height: size.height,
@@ -842,7 +843,6 @@ function toFlyerCopy(copy: FlyerCopyOutput): FlyerCopy {
   return {
     headline: copy.headline,
     ...(copy.subtext ? { subtext: copy.subtext } : {}),
-    ...(copy.cta ? { cta: copy.cta } : {}),
     caption: copy.caption,
     ...(copy.hashtags?.length ? { hashtags: copy.hashtags } : {}),
     ...(copy.ad ? { ad: copy.ad } : {}),
@@ -1030,6 +1030,15 @@ async function loadClient(brand: ClientBrand | undefined, draftId: string): Prom
   return { brand, logo: await loadProductPhoto(brand.logo_url, draftId) };
 }
 
+/** The topic with the brand in the color scheme picked in the chat, when
+ * one was, so every render path (and every re-render) draws with it. */
+export function withPickedColors(ctx: TopicContext, meta: DraftMeta): TopicContext {
+  const picked = meta.series_brief?.colors;
+  if (!picked?.length) return ctx;
+  const colors = pickedColors(resolveBrandTokens(ctx.brand).colors, picked);
+  return { ...ctx, brand: { ...ctx.brand, visual_identity: { ...ctx.brand.visual_identity, colors } } };
+}
+
 /**
  * The tokens a flyer is drawn with: the brand's, or for a client's flyer
  * their colors and no logo (code never stamps the account brand's logo on
@@ -1213,7 +1222,6 @@ async function renderDesignedFlyer(
     copy.headline,
     copy.subtext ?? "",
     ...(copy.extras ?? []).map((e) => e.text),
-    copy.cta && profile?.cta_style !== "none" ? copy.cta : "",
   ].filter(Boolean);
   const size = FLYER_ASPECTS[opts.aspect];
 

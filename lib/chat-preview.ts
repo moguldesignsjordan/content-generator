@@ -12,8 +12,6 @@ export interface FlyerEditAction {
   headline?: string;
   /** "" clears the line. */
   subtext?: string;
-  /** "" clears the button. */
-  cta?: string;
   scene?: string;
   /** A photo from this chat, hosted on our storage. */
   photo_url?: string;
@@ -59,8 +57,6 @@ export function cleanFlyerEdit(
   }
   const subtext = text(raw.subtext, 100);
   if (subtext !== undefined) action.subtext = subtext;
-  const cta = text(raw.cta, 40);
-  if (cta !== undefined) action.cta = cta;
   const scene = text(raw.scene, 400);
   if (scene) action.scene = scene;
 
@@ -93,7 +89,6 @@ export function flyerEditRerenders(action: FlyerEditAction): boolean {
   return (
     action.headline !== undefined ||
     action.subtext !== undefined ||
-    action.cta !== undefined ||
     action.scene !== undefined ||
     action.pro === true
   );

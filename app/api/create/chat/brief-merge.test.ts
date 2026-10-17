@@ -119,6 +119,12 @@ describe("mergeBrief client brand", () => {
   it("ignores a client brand without a name", () => {
     expect(mergeBrief({} as CampaignBrief, { client_brand: { colors: ["#000000"] } }).client_brand).toBeUndefined();
   });
+
+  it("saves a picked color scheme as up to 3 hex codes, and clears it on an empty list", () => {
+    const next = mergeBrief({} as CampaignBrief, { colors: ["#111111", "gold", "#D4AF37", "#FFFFFF", "#000000"] });
+    expect(next.colors).toEqual(["#111111", "#D4AF37", "#FFFFFF"]);
+    expect(mergeBrief(next, { colors: [] }).colors).toBeUndefined();
+  });
 });
 
 describe("buildConversationNotes", () => {

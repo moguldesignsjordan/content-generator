@@ -207,7 +207,7 @@ export function ChatPreviewCard({
                 <span className="font-semibold text-foreground">{flyer.variants.length} options</span>
                 {inReview && <span className="text-muted-2">Tap one to switch</span>}
               </p>
-              <div className="grid max-w-[400px] grid-cols-4 gap-2">
+              <div className="grid max-w-[400px] grid-cols-3 gap-2">
                 {flyer.variants.map((v, i) => {
                   const on = i === flyer.index;
                   return (
@@ -404,7 +404,6 @@ async function editFlyer(draftId: string, action: FlyerEditAction): Promise<void
     const fields: Record<string, string> = { mode: "generate" };
     if (action.headline !== undefined) fields.headline = action.headline;
     if (action.subtext !== undefined) fields.subtext = action.subtext;
-    if (action.cta !== undefined) fields.cta = action.cta;
     if (action.scene !== undefined) fields.scene = action.scene;
     if (action.pro) fields.tier = "pro";
     await postFlyer(draftId, fields);

@@ -75,6 +75,14 @@ export function cleanReferenceUrls(value: unknown, allowed: (url: string) => boo
   return Array.from(new Set(urls)).slice(0, MAX_FLYER_REFERENCES);
 }
 
+/** #RRGGBB colors from untrusted input, in order, at most `max`. */
+export function cleanColors(value: unknown, max: number): string[] {
+  return (Array.isArray(value) ? value : [])
+    .filter((c): c is string => typeof c === "string" && HEX_COLOR.test(c.trim()))
+    .map((c) => c.trim())
+    .slice(0, max);
+}
+
 /** The business a flyer is for, from untrusted input; null without a name.
  * Colors must be #RRGGBB, and the logo survives only when `allowed` accepts
  * its URL. */
@@ -82,10 +90,7 @@ export function cleanClientBrand(value: unknown, allowed: (url: string) => boole
   const raw = (value ?? {}) as Record<string, unknown>;
   const name = typeof raw.name === "string" ? stripEmDashes(raw.name).trim().slice(0, 80) : "";
   if (!name) return null;
-  const colors = (Array.isArray(raw.colors) ? raw.colors : [])
-    .filter((c): c is string => typeof c === "string" && HEX_COLOR.test(c.trim()))
-    .map((c) => c.trim())
-    .slice(0, 4);
+  const colors = cleanColors(raw.colors, 4);
   const logo = typeof raw.logo_url === "string" ? raw.logo_url.trim() : "";
   return {
     name,

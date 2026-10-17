@@ -552,6 +552,9 @@ export interface CampaignBrief {
   /** Social only: the business a flyer is for when it isn't this brand (an
    * agency making a client's flyer). Its colors and logo replace the brand's. */
   client_brand?: ClientBrand;
+  /** Flyers: a color scheme picked in the chat (#RRGGBB: main, accent,
+   * extra) drawn instead of the brand's colors. Unset is the brand's. */
+  colors?: string[];
   /** A verbatim digest of what the user actually typed in the create chat,
    * newest last. The structured fields above are the model's summary of the
    * conversation and lose the user's own words, details, and asides; this is
@@ -1114,8 +1117,6 @@ export interface FlyerCopy {
   headline: string;
   /** Rendered IN the image under the headline (optional). */
   subtext?: string;
-  /** Rendered IN the image as the call-to-action (optional). */
-  cta?: string;
   /** The post caption that accompanies the image; NOT rendered in it. For
    * an ad this mirrors ad.primary_text, so caption readers keep working. */
   caption: string;
@@ -1151,6 +1152,9 @@ export interface FlyerVariant {
   layout?: FlyerLayout;
   /** The owner's photos this option shows, so a re-render keeps them. */
   photos?: string[];
+  /** The design variation (DESIGN_RIFFS slot) a redesign added as a new
+   * option was made from; unset means its own position in the list. */
+  riff?: number;
 }
 
 // ── Design looks (migration 031) ─────────────────────────────────────────────
@@ -1383,7 +1387,7 @@ export interface DraftMeta {
   // ── Social flyer fields (content_jobs.type='social' drafts only). All jsonb,
   // no migration needed; they survive generation because populateDraft merges
   // meta rather than replacing it.
-  // The structured flyer: in-image text (headline/subtext/cta) + post caption.
+  // The structured flyer: in-image text (headline/subtext) + post caption.
   flyer_copy?: FlyerCopy;
   // The rendered flyer currently attached to this draft (hosted on Supabase
   // Storage; prompt field enables tweak-and-regenerate like hero images).

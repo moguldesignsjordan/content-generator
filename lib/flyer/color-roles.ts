@@ -23,6 +23,16 @@ function saturation(hex: string): number {
   return (max - min) / (1 - Math.abs(2 * l - 1));
 }
 
+/** The colors a flyer is drawn with when the chat picked a scheme instead of
+ * the brand's (main, accent, extra), on a neutral white and near-black like a
+ * client's flyer. No valid pick keeps the brand's. */
+export function pickedColors(colors: BrandColors, picked: string[] | undefined): BrandColors {
+  const valid = (picked ?? []).filter((c) => HEX.test(c)).map((c) => c.toUpperCase());
+  if (!valid.length) return colors;
+  const [primary, accent = primary, secondary = accent] = valid;
+  return { ...colors, primary, accent, secondary, background: "#FFFFFF", text: "#111114", muted: "#6B7280" };
+}
+
 export function mapBrandColors(
   colors: BrandColors,
   background: DesignLookProfile["color_roles"]["background"],

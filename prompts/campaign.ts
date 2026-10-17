@@ -68,6 +68,7 @@ export interface UpdateBriefInput {
    * returned by save_competitor_reference. */
   competitor_reference_id?: string;
   client_brand?: { name?: string; colors?: string[]; logo_url?: string };
+  colors?: string[];
 }
 
 export interface SelectTopicInput {
@@ -282,6 +283,15 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         description:
           "With 2 or more products: each when every product gets its own " +
           "design, together when one piece shows them all. Only when they said.",
+      },
+      colors: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 3,
+        description:
+          "Flyers: the color scheme they picked instead of the brand's, as " +
+          "#RRGGBB codes in order main, accent, extra (\"black and gold\" is " +
+          "[\"#111111\", \"#D4AF37\"]). An empty list goes back to the brand's colors.",
       },
       competitor_reference_id: {
         type: "string",

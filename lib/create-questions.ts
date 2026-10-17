@@ -29,7 +29,8 @@ export const QUESTION_IDS = [
   "offer",
   "style",
   "photos",
-  "where",
+  "colors",
+  "wording",
   "reach",
   "reader",
   "post_type",
@@ -158,7 +159,7 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
   },
   offer: {
     ask: "Any deal, price, or deadline to show?",
-    applies: is("flyer", "ad", "campaign"),
+    applies: is("ad", "campaign"),
     filled: (b) => Boolean(b.offer_deal || b.offer_price || b.offer_deadline),
     fallback: () => "no special offer",
   },
@@ -177,11 +178,18 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
     filled: (b) => Boolean(inputsOf(b).photos?.length),
     fallback: () => "pictures made from the brand colors, no photos",
   },
-  where: {
-    ask: "Where will it be posted?",
+  colors: {
+    ask: "Their brand colors, or a different color scheme?",
+    // A set goes to the planner, which draws in the brand's colors.
     applies: (b) => b.making === "flyer" && !isProductSet(b),
-    filled: () => false,
-    fallback: () => "a square post",
+    filled: (b) => Boolean(b.colors?.length),
+    fallback: () => "the brand colors",
+  },
+  wording: {
+    ask: "Any exact words, a deal, a price, or a date it needs to say?",
+    applies: is("flyer"),
+    filled: (b) => Boolean(b.constraints || b.offer_deal || b.offer_price || b.offer_deadline),
+    fallback: () => "words written from what it's for, no special offer",
   },
   reach: {
     ask: "Who should the ad reach?",
@@ -219,7 +227,7 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
 const ORDER: Record<MakingKind | "unknown", QuestionId[]> = {
   unknown: ["making", "about"],
   email: ["about", "detail", "action", "example"],
-  flyer: ["about", "split", "per_product", "style", "photos", "offer", "where"],
+  flyer: ["about", "split", "per_product", "photos", "colors", "style", "wording"],
   ad: ["about", "split", "per_product", "style", "photos", "offer", "reach"],
   blog: ["about", "reader", "proof", "post_type"],
   campaign: [
@@ -327,7 +335,8 @@ const MAKING_CHOICES: { label: string; value: MakingKind }[] = [
   { label: "Campaign", value: "campaign" },
 ];
 
-const WHERE_CHOICES = ["Instagram or Facebook post", "Story or Reel", "Feed portrait"];
+/** Always the first colors chip; the model words the schemes after it. */
+const BRAND_COLORS = "My brand colors";
 
 const VIBE_CHOICES: { label: string; value: VisualVibe }[] = [
   { label: "Bold and loud", value: "punchy" },
@@ -365,8 +374,6 @@ export function fixedChoices(
       const names = uniqueNames([...(brief.products ?? []), ...savedProducts]).slice(0, 12);
       return { choices: asChoices(names), multi: true };
     }
-    case "where":
-      return { choices: asChoices(WHERE_CHOICES), multi: false };
     case "post_type":
       return { choices: asChoices(POST_TYPE_CHOICES), multi: false };
     case "style":
@@ -502,10 +509,18 @@ export function cleanAsk(
             .slice(0, MAX_MODEL_CHOICES),
         )
       : [];
+    const choices =
+      fixed?.choices ??
+      (id === "colors"
+        ? asChoices([BRAND_COLORS, ...modelChoices.map((c) => c.label).filter((l) => l !== BRAND_COLORS)]).slice(
+            0,
+            MAX_MODEL_CHOICES,
+          )
+        : modelChoices);
     questions.push({
       id: id as QuestionId,
       question: text,
-      choices: fixed?.choices ?? modelChoices,
+      choices,
       multi: fixed ? fixed.multi : q.multi === true,
     });
     if (questions.length === MAX_QUESTIONS) break;

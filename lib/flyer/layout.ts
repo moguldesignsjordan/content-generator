@@ -22,8 +22,8 @@ export function quietZoneFor(layout: FlyerLayout): FlyerQuietZone {
 }
 
 /** Fraction of the canvas height the art fills (the band takes the rest).
- * A square canvas gives its band more room, since a headline, a supporting
- * line, and a button need about the same height whatever the frame. */
+ * A square canvas gives its band more room, since a headline and a
+ * supporting line need about the same height whatever the frame. */
 export function artHeightFraction(layout: FlyerLayout, width = 1080, height = 1350): number {
   const square = height / width < 1.1;
   if (layout === "band_bottom") return square ? 0.5 : 0.6;

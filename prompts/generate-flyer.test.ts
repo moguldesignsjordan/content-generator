@@ -44,7 +44,6 @@ const tokens: BrandTokens = {
 const copy: FlyerCopyOutput = {
   headline: "Your website is losing you clients",
   subtext: "We fix that in 14 days",
-  cta: "Book a call",
   caption: "Slow, dated sites cost real money. We rebuild fast.",
   hashtags: ["#webdesign"],
   scene: "A sleek laptop on a clean desk with rising analytics shapes behind it.",
@@ -71,7 +70,6 @@ describe("buildFlyerImagePrompt", () => {
     // Text is composed in code afterwards, so no copy string reaches the model.
     expect(prompt).not.toContain("Your website is losing you clients");
     expect(prompt).not.toContain("We fix that in 14 days");
-    expect(prompt).not.toContain("Book a call");
     expect(prompt).toContain("Absolutely no text anywhere");
     expect(prompt).toContain("#111827");
     expect(prompt).toContain("#7C3AED");
@@ -328,6 +326,11 @@ describe("flyerVariantsTool", () => {
     expect(items().properties).not.toHaveProperty("extras");
     expect(withExtras.properties).toHaveProperty("extras");
   });
+
+  it("has no call-to-action field in either format", () => {
+    expect(items().properties).not.toHaveProperty("cta");
+    expect(items("ad").properties).not.toHaveProperty("cta");
+  });
 });
 
 describe("buildFlyerCopyMessages", () => {
@@ -412,6 +415,8 @@ describe("buildFlyerCopyMessages", () => {
     expect(ad).not.toContain("- caption:");
     expect(ad).toContain("ad.primary_text");
     expect(ad).toContain("ad.cta_button");
+    expect(post).toContain("the call to action goes in the caption, never on the image");
+    expect(ad).toContain("the call to action goes in the ad text and ad.cta_button, never on the image");
   });
 
   it("forbids invented prices, promises, and stats in both formats", () => {
@@ -529,7 +534,6 @@ describe("buildFlyerDesignPrompt", () => {
   it("typesets the exact copy, follows the examples, and maps brand colors", () => {
     const prompt = buildFlyerDesignPrompt(copy, tokens, "4:5", { profile, exampleCount: 3, roles }, { logoCorner: "top-right" });
     expect(prompt).toContain('"Your website is losing you clients"');
-    expect(prompt).toContain('"Book a call"');
     expect(prompt).toContain("Images 1 to 3 are the design examples to match.");
     expect(prompt).toContain("#08080A");
     expect(prompt).toContain("#FFAE3C as the one accent (only on the button)");
@@ -551,7 +555,6 @@ describe("buildFlyerDesignPrompt", () => {
     expect(prompt).toContain(FLYER_STYLE_DIRECTIONS.bold_type);
     expect(prompt).toContain('"Your website is losing you clients"');
     expect(prompt).not.toContain("example");
-    expect(prompt).toContain('Call to action: "Book a call", a clear action element in the accent color.');
   });
 
   it("keeps accents and capitalization in the typeset lines", () => {
@@ -559,15 +562,23 @@ describe("buildFlyerDesignPrompt", () => {
     expect(prompt).toContain("with the same accents and capitalization");
   });
 
-  it("drops the button when the look uses none, and names a previous misspelling", () => {
+  it("draws no button, even when the look has one", () => {
+    const look = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
+    const preset = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile: null, exampleCount: 0, roles, style: "bold_type" });
+    expect(look).toContain("The flyer has no buttons: leave out any button the look has");
+    expect(preset).toContain("The flyer has no buttons.");
+    expect(preset).not.toContain("leave out any button the look has");
+    for (const prompt of [look, preset]) expect(prompt).not.toContain("Call to action");
+  });
+
+  it("names a previous misspelling", () => {
     const prompt = buildFlyerDesignPrompt(
       copy,
       tokens,
       "1:1",
-      { profile: { ...profile, cta_style: "none" }, exampleCount: 1, roles },
+      { profile, exampleCount: 1, roles },
       { misspelled: ["Your website is losing you clients"] },
     );
-    expect(prompt).not.toContain('"Book a call"');
     expect(prompt).toContain("A previous attempt got this text wrong");
   });
 
@@ -586,7 +597,7 @@ describe("buildFlyerDesignPrompt", () => {
   it("gives each line of text its own type direction", () => {
     const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
     expect(prompt).toContain('Headline: "Your website is losing you clients", huge condensed sans');
-    expect(prompt).toContain('Call to action: "Book a call", styled as a pill.');
+    expect(prompt).toContain('Supporting line: "We fix that in 14 days", smaller and quieter than the headline.');
   });
 
   it("makes a client's flyer from their logo and colors, never the brand's", () => {

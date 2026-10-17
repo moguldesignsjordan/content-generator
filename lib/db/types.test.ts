@@ -27,6 +27,7 @@ type NonTextField =
   | "competitor_reference_id"
   | "style_reference_urls"
   | "client_brand"
+  | "colors"
   // Written by the create-chat route from the transcript, never by a model
   // tool call, so it has no place in the model-facing allowlist.
   | "conversation_notes"

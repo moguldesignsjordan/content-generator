@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import { requireDraftInBrand } from "@/lib/draft-access";
 import { accumulateUsage, type UsageDelta } from "@/lib/pipeline/cost";
-import { placeImageInFlyer, regenerateFlyerImage } from "@/lib/pipeline/generate-flyer";
+import { placeImageInFlyer, regenerateFlyerImage, withPickedColors } from "@/lib/pipeline/generate-flyer";
 import { resolveImageModel } from "@/lib/clients/image-render";
 import { isImageModelTier } from "@/lib/image-models";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
@@ -20,7 +20,7 @@ import {
 } from "@/prompts/generate-flyer";
 import { stripEmDashes } from "@/lib/text";
 import { inputsOf } from "@/lib/inputs";
-import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
+import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy, FlyerVariant } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
 import { publicError } from "@/lib/provider-outage";
@@ -37,8 +37,9 @@ const MAX_CHANGE_NOTE_CHARS = 500;
 
 /**
  * POST multipart/form-data — edits to a social flyer draft. Modes:
- *  - "generate" (default): re-renders the design. { headline?, subtext?,
- *    cta?, scene?, aspect?, styleReferenceId?, reference?, exactPrompt?,
+ *  - "generate" (default): re-renders the design and adds it to
+ *    meta.flyer_variants as a new, picked option. { headline?, subtext?,
+ *    scene?, aspect?, styleReferenceId?, reference?, exactPrompt?,
  *    changeNote? }. changeNote is the owner's "What should change?" ask,
  *    added to the generated prompt as a priority instruction.
  *    referenceRole "place" (+ referenceNote) edits the current design to
@@ -93,7 +94,6 @@ export async function POST(
       const baseCopy = {
         headline: currentCopy?.headline ?? draftCtx.content.subject,
         ...(currentCopy?.subtext ? { subtext: currentCopy.subtext } : {}),
-        ...(currentCopy?.cta ? { cta: currentCopy.cta } : {}),
       };
       let flyerCopy: FlyerCopy;
       if (mode === "ad_copy") {
@@ -249,10 +249,11 @@ export async function POST(
 
     // ── generate: re-render the design (the only AI-spending mode) ─────────
     // Resolve the topic first: it's what tells us which brand is paying.
-    const ctx = await getTopicContext(draftCtx.topicId);
-    if (!ctx) {
+    const topicCtx = await getTopicContext(draftCtx.topicId);
+    if (!topicCtx) {
       return NextResponse.json({ error: "Topic not found." }, { status: 404 });
     }
+    const ctx = withPickedColors(topicCtx, meta);
 
     const guard = await guardAiRoute("image", { brandId: ctx.brand.id, limit: 6 });
     if (!guard.ok) {
@@ -280,7 +281,6 @@ export async function POST(
       return value || undefined;
     };
     const subtext = readOptional("subtext", currentCopy?.subtext);
-    const cta = readOptional("cta", currentCopy?.cta);
     const scene =
       readOptional("scene", meta.flyer_scene) ??
       "a clean, minimal brand-colored background composition with soft depth";
@@ -318,13 +318,14 @@ export async function POST(
     const rawModel = form.get("model");
     const renderTier = isImageModelTier(rawModel) ? rawModel : null;
     const variantIndex = meta.flyer_variant_index;
-    const pickedPhotos =
-      variantIndex !== undefined ? meta.flyer_variants?.[variantIndex]?.photos : undefined;
+    const sourceVariant =
+      variantIndex !== undefined ? meta.flyer_variants?.[variantIndex] : undefined;
+    const pickedPhotos = sourceVariant?.photos;
+    const riff = sourceVariant?.riff ?? variantIndex;
 
     const copyForRender = {
       headline,
       subtext,
-      cta,
       caption: currentCopy?.caption ?? "",
       hashtags: currentCopy?.hashtags,
       ...(currentCopy?.extras?.length ? { extras: currentCopy.extras } : {}),
@@ -368,7 +369,7 @@ export async function POST(
       // The picked option keeps the photos it was made with.
       ...(pickedPhotos ? { photoUrls: pickedPhotos } : {}),
       ...(meta.client_brand ? { clientBrand: meta.client_brand } : {}),
-      ...(meta.flyer_variant_index !== undefined ? { variantIndex: meta.flyer_variant_index } : {}),
+      ...(riff !== undefined ? { variantIndex: riff } : {}),
       draftId: id,
     });
 
@@ -378,12 +379,26 @@ export async function POST(
     const flyerCopy: FlyerCopy = {
       headline,
       ...(subtext ? { subtext } : {}),
-      ...(cta ? { cta } : {}),
       caption: currentCopy?.caption ?? "",
       ...(currentCopy?.hashtags?.length ? { hashtags: currentCopy.hashtags } : {}),
       ...(currentCopy?.ad ? { ad: currentCopy.ad } : {}),
       ...(currentCopy?.extras?.length ? { extras: currentCopy.extras } : {}),
     };
+
+    // Kept as a new option, so switching to another one never loses it.
+    const flyerVariants: FlyerVariant[] = [
+      ...(meta.flyer_variants ?? []),
+      {
+        ...(meta.flyer_style ? { style: meta.flyer_style } : {}),
+        copy: flyerCopy,
+        scene,
+        image,
+        ...(meta.flyer_layout ? { layout: meta.flyer_layout } : {}),
+        ...(pickedPhotos ? { photos: pickedPhotos } : {}),
+        ...(riff !== undefined ? { riff } : {}),
+      },
+    ];
+    const newIndex = flyerVariants.length - 1;
 
     await updateDraftContent(
       id,
@@ -396,11 +411,11 @@ export async function POST(
         flyer_scene: scene,
         style_reference_id: styleReferenceId,
         usage: rolled,
-        // A re-render is a custom design that matches none of the options.
-        flyer_variant_index: undefined,
+        flyer_variants: flyerVariants,
+        flyer_variant_index: newIndex,
       },
     );
-    return NextResponse.json({ image, copy: flyerCopy, aspect });
+    return NextResponse.json({ image, copy: flyerCopy, aspect, variantIndex: newIndex });
   } catch (err) {
     logError("api:/api/drafts/[id]/flyer:post", err);
     const { message, status } = publicError(err, "Couldn't update the flyer. Try again.");

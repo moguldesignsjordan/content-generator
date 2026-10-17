@@ -13,10 +13,10 @@ describe("cleanFlyerEdit", () => {
 
   it("cleans text edits, keeps blank lines as clears, and rejects a blank headline", () => {
     const dash = String.fromCharCode(0x2014);
-    expect(cleanFlyerEdit({ headline: ` Stop the grind ${dash} now `, cta: "" }, opts)).toEqual({
+    expect(cleanFlyerEdit({ headline: ` Stop the grind ${dash} now `, subtext: "" }, opts)).toEqual({
       kind: "flyer",
       headline: "Stop the grind ,  now",
-      cta: "",
+      subtext: "",
     });
     expect(cleanFlyerEdit({ headline: "  " }, opts)).toMatch(/can't be empty/);
   });
@@ -48,7 +48,7 @@ describe("flyerEditRerenders", () => {
     const base: FlyerEditAction = { kind: "flyer" };
     expect(flyerEditRerenders({ ...base, option: 2 })).toBe(false);
     expect(flyerEditRerenders({ ...base, photo_url: photo, photo_use: "place" })).toBe(false);
-    expect(flyerEditRerenders({ ...base, cta: "" })).toBe(true);
+    expect(flyerEditRerenders({ ...base, subtext: "" })).toBe(true);
     expect(flyerEditRerenders({ ...base, pro: true })).toBe(true);
   });
 });

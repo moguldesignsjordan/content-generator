@@ -538,6 +538,7 @@ export function buildBriefStateBlock(
         ]
       : []),
     `  Vibe: ${brief.visual_vibe ?? "(not set)"}`,
+    ...(brief.colors?.length ? [`  Colors: ${brief.colors.join(", ")} (instead of the brand's)`] : []),
     ...inputsStateLines(inputsOf(brief)),
     `  Topic attached: ${topicId ? "yes" : "no"}`,
     ...checklistLines(brief),

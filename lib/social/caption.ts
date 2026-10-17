@@ -1,7 +1,7 @@
 import type { FlyerCopy } from "@/lib/db/types";
 
 // The text posted with a flyer image: the caption, then its hashtags on their
-// own line. The headline/subtext/cta are already IN the image, so they're left
+// own line. The headline/subtext are already IN the image, so they're left
 // out. Hashtags are stored with or without "#", and may carry spaces.
 
 export function buildSocialCaption(copy: FlyerCopy): string {

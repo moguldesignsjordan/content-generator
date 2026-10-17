@@ -11,7 +11,7 @@ import { emailHtmlToText, stripEmDashes } from "@/lib/text";
 import { IMAGE_STYLE_CATALOG } from "@/lib/image-styles";
 import { EMAIL_DESIGN_CATALOG } from "@/lib/design-styles";
 import { inputsOf, withInputs } from "@/lib/inputs";
-import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
+import { cleanClientBrand, cleanColors, cleanReferenceUrls } from "@/lib/looks";
 import { cleanProductNames } from "@/lib/create-questions";
 
 // Pulled out of route.ts (which Next.js only allows GET/POST/config exports
@@ -107,6 +107,12 @@ export function mergeBrief(current: CampaignBrief, input: UpdateBriefInput): Cam
   }
   const client = input.client_brand ? cleanClientBrand(input.client_brand, isHttpUrl) : null;
   if (client) next.client_brand = client;
+  // Replace semantics; an empty list is back to the brand's colors.
+  if (Array.isArray(input.colors)) {
+    const colors = cleanColors(input.colors, 3);
+    if (colors.length) next.colors = colors;
+    else delete next.colors;
+  }
   if (input.making && MAKING_KINDS.includes(input.making)) next.making = input.making;
   if (Array.isArray(input.channels)) {
     const channels = CHANNELS.filter((c) => input.channels!.includes(c));

@@ -118,7 +118,7 @@ export function SnapshotStep({
       ))}
 
       <Section title="Your look">
-        <div className="flex items-center gap-4">
+        <div className="space-y-4">
           <LogoPicker url={p.logo_url} name={p.name} onChange={(logo_url) => set({ logo_url })} />
           <div className="flex flex-wrap gap-3">
             {COLOR_ROLES.map(({ key, label }) => (
@@ -425,6 +425,9 @@ function LogoPicker({
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // A logo found on the website is often a small icon, so the owner is asked
+  // to confirm it or upload the real file.
+  const [uploaded, setUploaded] = useState(false);
 
   async function upload(file: File) {
     setUploading(true);
@@ -435,6 +438,7 @@ function LogoPicker({
       const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "Upload failed.");
       onChange(data.url);
+      setUploaded(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -442,25 +446,39 @@ function LogoPicker({
     }
   }
 
+  const status = uploaded
+    ? "Your logo file is in. It goes on every flyer."
+    : url
+      ? "We found this on your website. If it's blurry or not your full logo, upload your logo file."
+      : "Upload your logo file so it shows up right on your flyers.";
+
   return (
-    <button
-      type="button"
-      onClick={() => fileRef.current?.click()}
-      disabled={uploading}
-      aria-label={url ? "Change logo" : "Upload logo"}
-      className={cn(
-        "flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-md)] border border-border bg-surface-2 transition-colors hover:border-accent/45",
-        !url && "border-dashed",
-      )}
-    >
-      {url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt={name} className="max-h-full max-w-full object-contain p-1.5" />
-      ) : (
-        <span className="px-1 text-center text-[11px] font-medium leading-tight text-muted">
-          {uploading ? "Uploading" : "Add logo"}
-        </span>
-      )}
+    <div className="flex items-center gap-4">
+      <div
+        className={cn(
+          "flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-md)] border border-border bg-surface-2",
+          !url && "border-dashed",
+        )}
+      >
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={name} className="max-h-full max-w-full object-contain p-1.5" />
+        ) : (
+          <span className="px-1 text-center text-[11px] font-medium leading-tight text-muted">No logo</span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <p className="text-[13px] text-foreground">{status}</p>
+        <p className="text-[12px] text-muted">PNG with a transparent background works best. Max 2MB.</p>
+        <Button
+          variant={url && !uploaded ? "solid" : "subtle"}
+          size="sm"
+          loading={uploading}
+          onClick={() => fileRef.current?.click()}
+        >
+          {url ? "Upload a different file" : "Upload your logo"}
+        </Button>
+      </div>
       <input
         ref={fileRef}
         type="file"
@@ -472,7 +490,7 @@ function LogoPicker({
           e.target.value = "";
         }}
       />
-    </button>
+    </div>
   );
 }
 
