@@ -156,6 +156,8 @@ interface StartedCampaign {
   /** The chat's photos, style, and competitor ads, whole. */
   inputs?: PieceInputs;
   client_brand?: ClientBrand;
+  /** The color scheme picked in the chat, as hex codes. */
+  colors?: string[];
   /** One design per product: the products (saved ones carry their slug). */
   products?: FactoryProduct[];
   split?: "each";
@@ -1243,6 +1245,7 @@ async function dispatchTool(
         // The planner gives each piece its own photos; the style and the
         // competitor ads travel whole.
         ...(Object.keys(inputs).length ? { inputs } : {}),
+        ...(brief.colors?.length ? { colors: brief.colors } : {}),
         ...(perProductSet
           ? {
               products: factoryProducts(brief.products ?? [], ctx.products),

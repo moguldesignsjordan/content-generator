@@ -746,6 +746,9 @@ export interface FactoryState {
   reference_profile?: DesignLookProfile;
   /** The business the campaign's posts and ads are for, when not this brand. */
   client_brand?: ClientBrand;
+  /** The color scheme picked in the chat, drawn on every post and ad instead
+   * of the brand's. Unset is the brand's. */
+  colors?: string[];
   /** Legacy (read through inputsOf, never written). */
   photo_url?: string;
   look_id?: string;

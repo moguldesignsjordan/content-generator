@@ -180,8 +180,7 @@ const QUESTIONS: Record<QuestionId, QuestionSpec> = {
   },
   colors: {
     ask: "Their brand colors, or a different color scheme?",
-    // A set goes to the planner, which draws in the brand's colors.
-    applies: (b) => b.making === "flyer" && !isProductSet(b),
+    applies: hasImages,
     filled: (b) => Boolean(b.colors?.length),
     fallback: () => "the brand colors",
   },
@@ -228,7 +227,7 @@ const ORDER: Record<MakingKind | "unknown", QuestionId[]> = {
   unknown: ["making", "about"],
   email: ["about", "detail", "action", "example"],
   flyer: ["about", "split", "per_product", "photos", "colors", "style", "wording"],
-  ad: ["about", "split", "per_product", "style", "photos", "offer", "reach"],
+  ad: ["about", "split", "per_product", "style", "photos", "colors", "offer", "reach"],
   blog: ["about", "reader", "proof", "post_type"],
   campaign: [
     "about",
@@ -238,6 +237,7 @@ const ORDER: Record<MakingKind | "unknown", QuestionId[]> = {
     "per_product",
     "size",
     "style",
+    "colors",
     "photos",
     "offer",
     "proof",

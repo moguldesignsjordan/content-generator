@@ -292,6 +292,7 @@ export function buildCreateAgentSystem(args: {
     "they tap the card; when they say them in words, save them with",
     "update_brief. The planner looks at every photo and gives each piece the",
     "ones it shows; without photos the images are built from the brand colors.",
+    "A scheme picked for a campaign is used on every post and ad in it.",
     "Products they name always work, saved or not. When they mean all their",
     "products (\"all our products\", \"everything we sell\") and PRODUCTS doesn't",
     "list them, call show_product_import instead of asking; once they add them,",

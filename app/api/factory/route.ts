@@ -35,7 +35,7 @@ import { FACTORY_KINDS } from "@/prompts/campaign-formats";
 import { cleanProductNames } from "@/lib/create-questions";
 import { planProductSlots } from "@/lib/factory/plan";
 import { stripEmDashes } from "@/lib/text";
-import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
+import { cleanClientBrand, cleanColors, cleanReferenceUrls } from "@/lib/looks";
 import { extractLookProfile } from "@/lib/pipeline/extract-look";
 import { logError } from "@/lib/log";
 import { publicError } from "@/lib/provider-outage";
@@ -136,7 +136,7 @@ async function cleanInputs(
 }
 
 /**
- * POST { sentence, kinds, size, days, inputs?, client_brand?, research?,
+ * POST { sentence, kinds, size, days, inputs?, client_brand?, colors?, research?,
  * campaign_id?, products?, split?, per_product? }: starts a factory campaign
  * (one design per product when split is "each") and streams its phases
  * (researching only when the owner said yes, planning, pricing), ending in
@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
   const requestedSize = typeof body.size === "number" && SIZES.has(body.size) ? body.size : 12;
   const days = typeof body.days === "number" && DAY_RANGES.has(body.days) ? body.days : 30;
   const clientBrand = cleanClientBrand(body.client_brand, isOwnStorageUrl);
+  const colors = cleanColors(body.colors, 3);
   // Web research costs real money and time, so it only runs when asked.
   const doResearch = body.research === true;
   if (!sentence) {
@@ -222,6 +223,7 @@ export async function POST(req: NextRequest) {
     days,
     ...(Object.keys(inputs).length ? { inputs } : {}),
     ...(clientBrand ? { client_brand: clientBrand } : {}),
+    ...(colors.length ? { colors } : {}),
     ...(planProducts.length ? { products: planProducts, split, per_product: perProduct } : {}),
   };
   // The chat's transcript stays on its row, so what was said (and attached)

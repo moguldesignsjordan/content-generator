@@ -51,6 +51,13 @@ describe("openQuestions", () => {
     const emailsOnly = brief({ making: "campaign", key_message: "x", channels: ["email"], products: ["cards"] });
     expect(openQuestions(emailsOnly)).not.toContain("style");
     expect(openQuestions(emailsOnly)).not.toContain("photos");
+    expect(openQuestions(emailsOnly)).not.toContain("colors");
+  });
+
+  it("asks colors for ads and campaigns with posts or ads", () => {
+    expect(openQuestions(brief({ making: "ad", key_message: "x" }))).toContain("colors");
+    const posts = brief({ making: "campaign", key_message: "x", channels: ["social"], size: 12 });
+    expect(openQuestions(posts)).toContain("colors");
   });
 
   it("asks split only with 2+ products, and per product only when split is each", () => {
@@ -58,7 +65,7 @@ describe("openQuestions", () => {
     expect(openQuestions(one)).not.toContain("split");
     const two = brief({ making: "flyer", products: ["cards", "banners"] });
     expect(openQuestions(two)).toEqual(["split", "photos", "colors", "style", "wording"]);
-    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "photos", "style", "wording"]);
+    expect(openQuestions({ ...two, split: "each" })).toEqual(["per_product", "photos", "colors", "style", "wording"]);
     expect(openQuestions({ ...two, split: "together" })).toEqual(["photos", "colors", "style", "wording"]);
   });
 
@@ -81,8 +88,8 @@ describe("openQuestions", () => {
 
   it("caps the optional questions across the whole chat, never the structural ones", () => {
     const b = brief({ making: "campaign", key_message: "x", products: ["a", "b"] });
-    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "photos"]);
-    const later = markAsked(b, ["channels", "split", "size", "style", "photos"]);
+    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "colors"]);
+    const later = markAsked(b, ["channels", "split", "size", "style", "colors"]);
     expect(openQuestions(later)).toEqual([]);
     expect(openQuestions({ ...later, split: "each" })).toEqual(["per_product"]);
   });
@@ -216,7 +223,7 @@ describe("applyAnswers", () => {
 describe("cleanAsk", () => {
   it("shows one open question, fills fixed choices, and marks it and the skipped ones asked", () => {
     const b = brief({ making: "campaign", key_message: "Print week", products: ["Cards", "Banners"] });
-    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "photos"]);
+    expect(openQuestions(b)).toEqual(["channels", "split", "size", "style", "colors"]);
     const { questions, dropped, brief: next } = cleanAsk(
       {
         questions: [

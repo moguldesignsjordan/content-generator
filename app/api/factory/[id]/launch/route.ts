@@ -161,6 +161,8 @@ function createShell(
     flyerVariantCount: CAMPAIGN_FLYER_OPTIONS,
     ...(args.factory.reference_profile ? { referenceProfile: args.factory.reference_profile } : {}),
     ...(args.factory.client_brand ? { clientBrand: args.factory.client_brand } : {}),
+    // withPickedColors reads the scheme off the brief on every render path.
+    ...(args.factory.colors?.length ? { seriesBrief: { colors: args.factory.colors } } : {}),
     // Organic posts go out on their day through the daily cron once approved.
     // Ads never get a posting date: that cron would publish them as organic
     // posts. They're run from Ads Manager instead.

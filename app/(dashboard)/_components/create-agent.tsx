@@ -164,6 +164,7 @@ interface CampaignHandoff {
   /** The chat's photos, style, and competitor ads, passed through whole. */
   inputs?: PieceInputs;
   client_brand?: ClientBrand;
+  colors?: string[];
   /** One design per product. */
   products?: FactoryProduct[];
   split?: "each";
@@ -736,6 +737,7 @@ export function CreateAgent({
           // The chat's photos, style, and competitor ads, whole.
           ...(handoff.inputs ? { inputs: handoff.inputs } : {}),
           ...(handoff.client_brand ? { client_brand: handoff.client_brand } : {}),
+          ...(handoff.colors?.length ? { colors: handoff.colors } : {}),
           ...(handoff.products?.length
             ? { products: handoff.products, split: handoff.split, per_product: handoff.per_product }
             : {}),

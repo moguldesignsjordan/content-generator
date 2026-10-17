@@ -289,7 +289,8 @@ export const UPDATE_BRIEF_TOOL: Anthropic.Tool = {
         items: { type: "string" },
         maxItems: 3,
         description:
-          "Flyers: the color scheme they picked instead of the brand's, as " +
+          "Flyers, ads, and a campaign's posts and ads: the color scheme they " +
+          "picked instead of the brand's, as " +
           "#RRGGBB codes in order main, accent, extra (\"black and gold\" is " +
           "[\"#111111\", \"#D4AF37\"]). An empty list goes back to the brand's colors.",
       },
