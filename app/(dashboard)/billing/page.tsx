@@ -59,6 +59,7 @@ export default async function BillingPage() {
       <BillingClient
         balance={balance}
         creditsPerUsd={config.creditsPerUsd}
+        freeCreditDays={config.freeCreditDays}
         packs={config.packs}
         planCode={billing?.plan_code ?? "free"}
         hasStripeCustomer={Boolean(billing?.stripe_customer_id)}

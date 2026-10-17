@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const brand = await createBrand(name, sessionUser.id);
     // Free credits to start. Idempotent per brand, and deliberately not fatal:
     // a failed grant must not block onboarding, it just leaves a brand at zero
-    // balance that the monthly allowance cron will top up anyway.
+    // balance until it buys credits.
     await grantStarterCredits(brand.id);
     return NextResponse.json({ id: brand.id, name: brand.name });
   } catch (err) {

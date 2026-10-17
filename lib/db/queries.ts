@@ -65,7 +65,6 @@ import type {
   PieceInputs,
   Pillar,
   PillarWithClusters,
-  PlanCode,
   Positioning,
   Product,
   PromptLog,
@@ -3743,47 +3742,6 @@ export async function getBrandBillingByCustomerId(
   return (data as BrandBilling) ?? null;
 }
 
-export interface BrandAllowanceState {
-  brandId: string;
-  planCode: PlanCode;
-  lastAllowancePeriod: string | null;
-}
-
-/**
- * Every brand's plan and last-granted allowance period, for the daily
- * allowance cron to walk. Three flat selects joined in JS rather than a
- * Postgres join: at the brand counts this app runs at, the simplicity beats
- * the query, and it keeps the missing-table degrade (pre-019 DBs) trivial to
- * reason about per table instead of inside a join.
- */
-export async function listBrandsForAllowance(): Promise<BrandAllowanceState[]> {
-  const db = getAdminClient();
-  const { data: brands, error: brandsErr } = await db.from("brands").select("id");
-  if (brandsErr) throw brandsErr;
-  if (!brands?.length) return [];
-
-  const ids = brands.map((b) => b.id as string);
-  const [billingRes, balanceRes] = await Promise.all([
-    db.from("brand_billing").select("brand_id, plan_code").in("brand_id", ids),
-    db.from("credits_balance").select("brand_id, last_allowance_period").in("brand_id", ids),
-  ]);
-  if (billingRes.error && !isMissingTableError(billingRes.error)) throw billingRes.error;
-  if (balanceRes.error && !isMissingTableError(balanceRes.error)) throw balanceRes.error;
-
-  const planByBrand = new Map<string, PlanCode>(
-    (billingRes.data ?? []).map((r) => [r.brand_id as string, r.plan_code as PlanCode]),
-  );
-  const periodByBrand = new Map<string, string | null>(
-    (balanceRes.data ?? []).map((r) => [r.brand_id as string, r.last_allowance_period as string | null]),
-  );
-
-  return ids.map((brandId) => ({
-    brandId,
-    planCode: planByBrand.get(brandId) ?? "free",
-    lastAllowancePeriod: periodByBrand.get(brandId) ?? null,
-  }));
-}
-
 export interface UsageBreakdownRow {
   /** The `source` label passed to logUsage/logTokenUsage (e.g. "generate-email",
    *  "redesign", "adjust-style") — this app's closest thing to an action type. */
@@ -3859,18 +3817,4 @@ export async function listCreditTransactions(
     usdReference: r.usd_reference as number | null,
     createdAt: r.created_at as string,
   }));
-}
-
-/** Stamps the period a brand's monthly allowance was last granted for, without
- *  touching its balance (grant_credits already moved that). Upsert only sets
- *  the columns passed, so an existing balance is never clobbered. */
-export async function markAllowanceGranted(brandId: string, period: string): Promise<void> {
-  const db = getAdminClient();
-  const { error } = await db
-    .from("credits_balance")
-    .upsert(
-      { brand_id: brandId, last_allowance_period: period, updated_at: new Date().toISOString() },
-      { onConflict: "brand_id" },
-    );
-  if (error) throw error;
 }

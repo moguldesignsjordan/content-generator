@@ -4,8 +4,8 @@ import { priceUsage } from "../pipeline/cost";
 import {
   DEFAULT_BILLING_CONFIG,
   creditsForUsage,
-  currentPeriod,
   findPack,
+  freeCreditsToExpire,
   usageIdempotencyKey,
 } from "./credits";
 
@@ -130,16 +130,22 @@ describe("findPack", () => {
   });
 });
 
-describe("currentPeriod", () => {
-  it("formats YYYY-MM in UTC", () => {
-    expect(currentPeriod(new Date("2026-07-14T12:00:00Z"))).toBe("2026-07");
-    expect(currentPeriod(new Date("2026-01-01T00:00:00Z"))).toBe("2026-01");
-    expect(currentPeriod(new Date("2026-12-31T23:59:59Z"))).toBe("2026-12");
+describe("freeCreditsToExpire", () => {
+  it("expires the free credits nobody spent", () => {
+    expect(freeCreditsToExpire({ freeGranted: 500, used: 120, balance: 380 })).toBe(380);
   });
 
-  it("does not straddle months for a cron running near UTC midnight", () => {
-    // Same instant, and the answer must not depend on the server's local zone.
-    expect(currentPeriod(new Date("2026-08-01T00:30:00Z"))).toBe("2026-08");
-    expect(currentPeriod(new Date("2026-07-31T23:30:00Z"))).toBe("2026-07");
+  it("counts usage against free credits first, so purchased credits survive", () => {
+    // 500 free + 1000 bought, 120 used: only the 380 free left expire.
+    expect(freeCreditsToExpire({ freeGranted: 500, used: 120, balance: 1380 })).toBe(380);
+  });
+
+  it("expires nothing once usage has covered the free grant", () => {
+    expect(freeCreditsToExpire({ freeGranted: 500, used: 700, balance: 800 })).toBe(0);
+  });
+
+  it("never takes more than the balance", () => {
+    // A missed debit (fire-and-forget) can leave usage under-recorded.
+    expect(freeCreditsToExpire({ freeGranted: 500, used: 0, balance: 200 })).toBe(200);
   });
 });

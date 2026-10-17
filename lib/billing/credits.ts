@@ -25,13 +25,14 @@ export type CreditReason =
   | "allowance_paid"
   | "pack_purchase"
   | "usage"
-  | "manual_adjustment";
+  | "manual_adjustment"
+  | "expiry";
 
 export interface BillingConfig {
   creditsPerUsd: number;
   markupMultiplier: number;
   starterCreditGrant: number;
-  freeMonthlyAllowance: number;
+  freeCreditDays: number;
   paidMonthlyAllowance: number;
   packs: CreditPack[];
 }
@@ -60,7 +61,7 @@ export const DEFAULT_BILLING_CONFIG: BillingConfig = {
   creditsPerUsd: 100,
   markupMultiplier: Number(process.env.CREDIT_MARKUP_MULTIPLIER ?? 2.0),
   starterCreditGrant: 500,
-  freeMonthlyAllowance: 1000,
+  freeCreditDays: 14,
   paidMonthlyAllowance: 10000,
   packs: [],
 };
@@ -86,10 +87,15 @@ export function creditsForUsage(
   return Math.max(1, Math.ceil(cleaned));
 }
 
-/** 'YYYY-MM' — the monthly allowance period key (see credits_balance
- *  .last_allowance_period). UTC so a cron near midnight can't straddle two. */
-export function currentPeriod(now: Date = new Date()): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+/** How many credits to take back when a brand's free credits expire. Usage
+ *  counts against free credits first, so only free credits nobody spent go,
+ *  and never more than the balance (the ledger row must match the move). */
+export function freeCreditsToExpire(args: {
+  freeGranted: number;
+  used: number;
+  balance: number;
+}): number {
+  return Math.max(0, Math.min(args.balance, args.freeGranted - args.used));
 }
 
 /** The idempotency key for one metered call. Prefer a stable id from the
@@ -126,8 +132,7 @@ export async function getBillingConfig(): Promise<BillingConfig> {
       ),
       starterCreditGrant:
         data.starter_credit_grant ?? DEFAULT_BILLING_CONFIG.starterCreditGrant,
-      freeMonthlyAllowance:
-        data.free_monthly_allowance ?? DEFAULT_BILLING_CONFIG.freeMonthlyAllowance,
+      freeCreditDays: data.free_credit_days ?? DEFAULT_BILLING_CONFIG.freeCreditDays,
       paidMonthlyAllowance:
         data.paid_monthly_allowance ?? DEFAULT_BILLING_CONFIG.paidMonthlyAllowance,
       packs: (data.packs as CreditPack[]) ?? [],
@@ -259,6 +264,44 @@ export async function debitForUsage(args: {
   } catch (err) {
     console.error("[credits] usage debit failed:", err);
   }
+}
+
+/** Takes back the unspent free credits of every brand past
+ *  billing_config.free_credit_days. One expiry per brand, ever: the key is
+ *  per brand, and free credits are only granted once (at signup). Returns how
+ *  many brands were expired. */
+export async function expireFreeCredits(): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const config = await getBillingConfig();
+  const db = getAdminClient();
+  const { data, error } = await db.rpc("free_credits_to_expire", {
+    p_days: config.freeCreditDays,
+  });
+  if (error) throw error;
+
+  let expired = 0;
+  for (const row of (data ?? []) as {
+    brand_id: string;
+    free_granted: number;
+    used: number;
+    balance: number;
+  }[]) {
+    const credits = freeCreditsToExpire({
+      freeGranted: row.free_granted,
+      used: row.used,
+      balance: row.balance,
+    });
+    if (credits <= 0) continue;
+    const balance = await debitCredits({
+      brandId: row.brand_id,
+      credits,
+      reason: "expiry",
+      sourceId: row.brand_id,
+      idempotencyKey: `expiry:${row.brand_id}`,
+    });
+    if (balance !== null) expired++;
+  }
+  return expired;
 }
 
 /** The one-time grant a brand gets when it's created. Idempotent per brand, so

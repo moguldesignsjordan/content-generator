@@ -24,6 +24,7 @@ interface TransactionRow {
 export function BillingClient({
   balance,
   creditsPerUsd,
+  freeCreditDays,
   packs,
   planCode,
   hasStripeCustomer,
@@ -34,6 +35,7 @@ export function BillingClient({
 }: {
   balance: number;
   creditsPerUsd: number;
+  freeCreditDays: number;
   packs: CreditPack[];
   planCode: PlanCode;
   hasStripeCustomer: boolean;
@@ -73,7 +75,7 @@ export function BillingClient({
         <StatCard
           label="Plan"
           value={planCode === "pro" ? "Pro" : "Free"}
-          sub={planCode === "pro" ? "Monthly allowance active" : "Starter + free monthly credits"}
+          sub={planCode === "pro" ? "Monthly allowance active" : `Free credits expire ${freeCreditDays} days after signup`}
         />
       </div>
 

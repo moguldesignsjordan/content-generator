@@ -591,7 +591,11 @@ export function CreateAgent({
         signal: controller.signal,
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          outOfCredits?: boolean;
+        };
+        if (body.outOfCredits) openBuyCredits();
         throw new Error(body.error ?? "Something went wrong.");
       }
       // Holders, not lets: TypeScript can't see assignments made in the callback.

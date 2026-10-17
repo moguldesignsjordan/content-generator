@@ -100,6 +100,7 @@ import { scrapeCompetitorAdUrl } from "@/lib/scrape";
 import { parseAdLibraryUrl } from "@/lib/scrape/url";
 import { adLibraryAdUrl } from "@/lib/clients/scrapecreators";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
+import { guardAiRoute } from "@/lib/ai-guard";
 import { logError, logWarn } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 import { buildConversationNotes, isHttpUrl, mergeBrief } from "./brief-merge";
@@ -463,6 +464,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No brand found" }, { status: 404 });
     }
     const { brand, strategy, icps } = data;
+    // Chat turns are free (unmetered) but still spend, so they sit behind the
+    // same rate, credit, and daily-budget checks as the metered routes.
+    const guard = await guardAiRoute("create-chat", { brandId: brand.id, limit: 20 });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.error, outOfCredits: guard.outOfCredits, upgradeUrl: guard.upgradeUrl },
+        { status: guard.status },
+      );
+    }
     // A look id from the client must be one of this brand's looks.
     if (
       lookChoice &&

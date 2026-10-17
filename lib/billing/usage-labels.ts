@@ -97,6 +97,7 @@ const REASON_LABELS: Record<string, string> = {
   pack_purchase: "Credit pack purchase",
   usage: "AI usage",
   manual_adjustment: "Manual adjustment",
+  expiry: "Free credits expired",
 };
 
 /** Friendly label for a credit_transactions.reason value, for the /billing
