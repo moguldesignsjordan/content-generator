@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 
 export interface GenerationStreamState {
   status: "generating" | "ready" | "error";
@@ -74,6 +75,7 @@ export function useGenerationStream(
             } else if (event === "done") {
               setState((s) => ({ ...s, status: "ready" }));
             } else if (event === "error") {
+              if (parsed.outOfCredits) openBuyCredits();
               setState((s) => ({
                 ...s,
                 status: "error",

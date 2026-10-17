@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
 import { Button, Input, LinkButton, SegmentedControl, Sheet } from "@/components/ui";
 import type {
@@ -308,6 +309,7 @@ export function ImageSheet({
       setError(err instanceof Error ? err.message : "Couldn't update the image.");
       if (err instanceof ApiError && err.outOfCredits) {
         setUpgradeUrl(err.upgradeUrl ?? "/billing");
+        openBuyCredits();
       }
     } finally {
       setBusy(false);

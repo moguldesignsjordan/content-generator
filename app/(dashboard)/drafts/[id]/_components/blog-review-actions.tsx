@@ -16,6 +16,7 @@ import {
   Tooltip,
   useToast,
 } from "@/components/ui";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type {
@@ -153,6 +154,7 @@ export function BlogReviewActions({
         setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
         if (e instanceof ApiError && e.outOfCredits) {
           setRegenUpgradeUrl(e.upgradeUrl ?? "/billing");
+          openBuyCredits();
         }
       } finally {
         setRegenerating(false);

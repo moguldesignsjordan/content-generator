@@ -32,6 +32,7 @@ import { isImageModelTier } from "@/lib/image-models";
 import type { UsageDelta } from "@/lib/pipeline/cost";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
+import { publicError } from "@/lib/provider-outage";
 
 // A Gemini render + Haiku prompt-craft + optimize + upload usually lands in
 // 10-25s, but leave headroom for retries and cold storage buckets.
@@ -323,9 +324,8 @@ export async function POST(
     return NextResponse.json({ html: result.html, history: result.history, image });
   } catch (err) {
     logError("api:/api/drafts/[id]/image:post", err);
-    const message =
-      err instanceof Error ? err.message : "Couldn't generate the image. Try again.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const { message, status } = publicError(err, "Couldn't generate the image. Try again.");
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AccentSpinner, Button, Input, LinkButton, Sheet } from "@/components/ui";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { ApiError } from "@/lib/billing/toast-error";
 
 // The AI rewrite, as a deliberate step instead of a surprise.
@@ -63,7 +64,10 @@ export function RewriteModal({
       setProposed(text);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't write a new version.");
-      if (err instanceof ApiError && err.outOfCredits) setUpgradeUrl(err.upgradeUrl ?? "/billing");
+      if (err instanceof ApiError && err.outOfCredits) {
+        setUpgradeUrl(err.upgradeUrl ?? "/billing");
+        openBuyCredits();
+      }
     } finally {
       setLoading(false);
     }
@@ -79,7 +83,10 @@ export function RewriteModal({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't apply that.");
-      if (err instanceof ApiError && err.outOfCredits) setUpgradeUrl(err.upgradeUrl ?? "/billing");
+      if (err instanceof ApiError && err.outOfCredits) {
+        setUpgradeUrl(err.upgradeUrl ?? "/billing");
+        openBuyCredits();
+      }
       setApplying(false);
     }
   }

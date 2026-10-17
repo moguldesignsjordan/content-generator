@@ -1,5 +1,6 @@
 import "server-only";
 import { logPrompt } from "@/lib/log";
+import { ProviderHttpError } from "@/lib/provider-errors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server-only OpenAI image client (GPT Image 2.5), an optional second engine
@@ -90,12 +91,16 @@ export async function generateOpenAIImage(args: {
     const res = await fetch(url, init);
     const body = (await res.json().catch(() => ({}))) as {
       data?: { b64_json?: string }[];
-      error?: { message?: string };
+      error?: { message?: string; code?: string; type?: string };
     };
     if (!res.ok) {
-      throw Object.assign(
-        new Error(`GPT Image ${res.status}: ${body.error?.message ?? "request failed"}`),
-        { status: res.status },
+      // The code (or type, for insufficient_quota) is what separates an
+      // exhausted account from a plain rate limit; both are 429s.
+      throw new ProviderHttpError(
+        `GPT Image ${res.status}: ${body.error?.message ?? "request failed"}`,
+        "openai",
+        res.status,
+        body.error?.code ?? body.error?.type,
       );
     }
     const b64 = body.data?.[0]?.b64_json;

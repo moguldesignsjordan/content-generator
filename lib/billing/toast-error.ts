@@ -1,4 +1,5 @@
 import type { ToastHandle } from "@/components/ui";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 
 /**
  * Shape every metered route's failure body can carry (see
@@ -37,10 +38,8 @@ export class ApiError extends Error implements ApiErrorBody {
 
 /**
  * The one place every metered client fetch's error branch should call. Out of
- * credits gets a toast that doesn't auto-dismiss quickly and carries a Buy
- * credits link (to `upgradeUrl`, or /billing as a default); anything else
- * falls back to a normal error toast with `fallback` if the server sent no
- * message.
+ * credits opens the buy-credits popup (BuyCreditsModal); anything else falls
+ * back to a normal error toast with `fallback` if the server sent no message.
  */
 export function toastApiError(
   toast: ToastHandle,
@@ -48,10 +47,7 @@ export function toastApiError(
   fallback: string,
 ): void {
   if (body?.outOfCredits) {
-    toast.error(body.error ?? "You're out of credits. Top up to keep generating.", 8000, {
-      label: "Buy credits",
-      href: body.upgradeUrl ?? "/billing",
-    });
+    openBuyCredits();
     return;
   }
   toast.error(body?.error ?? fallback);

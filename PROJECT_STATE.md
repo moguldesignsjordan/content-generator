@@ -148,11 +148,18 @@ git history (`git log -p PROJECT_STATE.md`).
   and QA grounding list all three. All of it builds and is unit-tested; none
   has run live (item 1 below).
 - **Billing:** credits ledger, paywall, Stripe Checkout for packs and Pro,
-  monthly allowance cron.
+  monthly allowance cron. Out of credits opens a buy-credits popup
+  (`BuyCreditsModal`, opened by `openBuyCredits()`, fed by
+  `GET /api/billing/summary`).
+- **Provider outages (2026-10-16):** a Gemini/OpenAI/Anthropic billing or key
+  failure shows clients a neutral "temporarily unavailable" message (503) and
+  emails Jordan at most hourly per provider (`lib/provider-errors.ts`,
+  `lib/provider-outage.ts`, hooked into `logError`). Each alert is also an
+  `alert:provider-outage` row on `/logs`.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
 - **Migrations:** all through 031 are applied (checked live 2026-10-14).
-- **Checks:** `npm run typecheck`, `npm test` (873 tests), `npm run lint`
-  (0 errors, 14 warnings), `npm run build`. `next build` runs lint, so a lint
+- **Checks:** `npm run typecheck`, `npm test` (948 tests), `npm run lint`
+  (0 errors, 13 warnings), `npm run build`. `next build` runs lint, so a lint
   error now fails the deploy.
 
 ## Open: needs Jordan
@@ -214,6 +221,13 @@ git history (`git log -p PROJECT_STATE.md`).
    the best past designs (Flyers, New, Our style, Add examples) once the
    strict look read is deployed. Duplicate packages deleted 2026-10-15.
    (Gemini 402 resolved: renders worked at 17:40 UTC 2026-10-15.)
+9. **Outage alert email:** create a Resend account, then set `RESEND_API_KEY`
+   and `ALERT_EMAIL` in Vercel (and `.env.example`). Optional
+   `ALERT_FROM_EMAIL` once a sending domain is verified; the default
+   `onboarding@resend.dev` only delivers to the Resend account's own email.
+   Until then alerts only reach `/logs`. Also click through the buy-credits
+   popup logged in (light and dark, phone width); it hasn't been seen
+   rendered.
 
 ## Open: code (not started)
 

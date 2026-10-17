@@ -23,6 +23,7 @@ import { inputsOf } from "@/lib/inputs";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { guardAiRoute } from "@/lib/ai-guard";
+import { publicError } from "@/lib/provider-outage";
 
 // A Gemini render + optimize + upload usually lands in 10-25s; headroom for
 // retries and cold buckets, same as the hero-image route.
@@ -411,9 +412,8 @@ export async function POST(
     return NextResponse.json({ image, copy: flyerCopy, aspect });
   } catch (err) {
     logError("api:/api/drafts/[id]/flyer:post", err);
-    const message =
-      err instanceof Error ? err.message : "Couldn't update the flyer. Try again.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const { message, status } = publicError(err, "Couldn't update the flyer. Try again.");
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

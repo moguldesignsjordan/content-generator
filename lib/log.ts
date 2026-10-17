@@ -3,6 +3,8 @@ import { debitForUsage } from "@/lib/billing/credits";
 import { getAdminClient, isSupabaseConfigured } from "@/lib/db/client";
 import { isMissingColumnError, isMissingTableError } from "@/lib/db/table-guard";
 import { imageCostUsd, priceUsage } from "@/lib/pipeline/cost";
+import { detectProviderOutage } from "@/lib/provider-errors";
+import { reportProviderOutage } from "@/lib/provider-outage";
 import type { AppLogLevel, PromptProvider } from "@/lib/db/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -105,6 +107,10 @@ export function logError(
       ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
     },
   });
+  // Every route's catch already logs here, so this one hook alerts on a broken
+  // provider account wherever it surfaces.
+  const outage = detectProviderOutage(err);
+  if (outage) void reportProviderOutage(outage, source);
 }
 
 export function logWarn(

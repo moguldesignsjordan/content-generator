@@ -5,6 +5,7 @@ import { isSupabaseConfigured } from "@/lib/db/client";
 import { countDraftsInReview, getSingleBrand, getUserRole } from "@/lib/db/queries";
 import { availableImageTiers } from "@/lib/clients/image-render";
 import { AppShell } from "./_components/app-shell";
+import { BuyCreditsModal } from "./_components/buy-credits-modal";
 import { ImageModelsProvider } from "./_components/image-models-context";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ export default async function DashboardLayout({
   return (
     <AppShell userEmail={user.email ?? null} role={role} reviewCount={reviewCount}>
       <ImageModelsProvider tiers={availableImageTiers()}>{children}</ImageModelsProvider>
+      <BuyCreditsModal />
     </AppShell>
   );
 }

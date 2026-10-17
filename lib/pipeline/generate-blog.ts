@@ -54,6 +54,7 @@ import { heroFromProductPhoto } from "./generate-image";
 import { loadCompetitorRef } from "./competitor-ref";
 import { chosenAngle, pickAngle } from "./pick-angle";
 import { logError, logWarn } from "@/lib/log";
+import { publicError } from "@/lib/provider-outage";
 
 /**
  * Fills in a blog draft shell (content_jobs.type='blog'), mirroring
@@ -199,7 +200,8 @@ export async function generateBlogForTopicStreamed(
 
     onEvent({ type: "done" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generation failed.";
+    // Stored on the draft and shown to the client, so never the provider's text.
+    const { message } = publicError(err, "Generation failed.");
     await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
       (e) => logError("pipeline:generate-blog:record-error-phase", e, { draftId }),
     );

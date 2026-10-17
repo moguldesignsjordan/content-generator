@@ -74,6 +74,7 @@ import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import type { GenerationEvent } from "./generate";
 import { logError, logImageUsage, logWarn } from "@/lib/log";
+import { publicError } from "@/lib/provider-outage";
 
 // Social flyer generation (content_jobs.type='social'): one FAST_MODEL call
 // writes FLYER_VARIANT_COUNT alternative flyers (copy + scene, each fitted to
@@ -205,7 +206,8 @@ export async function generateFlyerForTopicStreamed(
 
     onEvent({ type: "done" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generation failed.";
+    // Stored on the draft and shown to the client, so never the provider's text.
+    const { message } = publicError(err, "Generation failed.");
     await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
       (e) => logError("pipeline:generate-flyer:record-error-phase", e, { draftId }),
     );

@@ -23,6 +23,7 @@ import {
   SendIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { toastApiError } from "@/lib/billing/toast-error";
 import { readSse } from "@/lib/read-sse";
 import { useGenerationStream } from "@/lib/use-generation-stream";
@@ -753,6 +754,7 @@ export function CreateAgent({
       router.push(`/campaigns/${out.planned}`);
     } catch (e) {
       const err = e as Error & { outOfCredits?: boolean };
+      if (err.outOfCredits) openBuyCredits();
       setCampaignRun((r) =>
         r ? { ...r, phase: null, error: { message: err.message, outOfCredits: err.outOfCredits } } : r,
       );

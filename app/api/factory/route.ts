@@ -38,6 +38,7 @@ import { stripEmDashes } from "@/lib/text";
 import { cleanClientBrand, cleanReferenceUrls } from "@/lib/looks";
 import { extractLookProfile } from "@/lib/pipeline/extract-look";
 import { logError } from "@/lib/log";
+import { publicError } from "@/lib/provider-outage";
 import { getSessionUser } from "@/lib/supabase/server";
 
 // Research (web search + fetch, one Sonnet turn, up to a few resumes) plus
@@ -311,7 +312,7 @@ export async function POST(req: NextRequest) {
           ).catch(() => {});
         }
         send("error", {
-          message: err instanceof Error ? err.message : "Couldn't plan the campaign. Try again.",
+          message: publicError(err, "Couldn't plan the campaign. Try again.").message,
         });
       } finally {
         try {

@@ -16,6 +16,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { DownloadIcon } from "@/components/ui/icons";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { cn } from "@/lib/cn";
 import { FLYER_STYLE_CATALOG } from "@/lib/design-styles";
@@ -215,6 +216,7 @@ export function FlyerReviewActions({
         setRegenError(e instanceof Error ? e.message : "Failed to regenerate.");
         if (e instanceof ApiError && e.outOfCredits) {
           setRegenUpgradeUrl(e.upgradeUrl ?? "/billing");
+          openBuyCredits();
         }
       } finally {
         setRegenerating(false);
@@ -227,12 +229,11 @@ export function FlyerReviewActions({
       method: "POST",
       body: form,
     });
-    const data = (await res.json().catch(() => ({}))) as {
+    const data = (await res.json().catch(() => ({}))) as ApiErrorBody & {
       image?: ContentImage;
       copy?: FlyerCopy;
-      error?: string;
     };
-    if (!res.ok || !data.image) throw new Error(data.error ?? failMessage);
+    if (!res.ok || !data.image) throw new ApiError(data.error ?? failMessage, data);
     return { image: data.image, copy: data.copy };
   }
 
@@ -248,7 +249,7 @@ export function FlyerReviewActions({
       setVariantIndex(index);
       router.refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't switch options.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Couldn't switch options.");
     } finally {
       setPicking(null);
     }
@@ -278,7 +279,7 @@ export function FlyerReviewActions({
       toast.success(`Finalized with ${finalizeOption?.label ?? "the chosen model"}.`);
       router.refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't finalize the flyer.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Couldn't finalize the flyer.");
     } finally {
       setFinalizing(false);
     }

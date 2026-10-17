@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AccentSpinner, Button, Card, Input, LinkButton } from "@/components/ui";
+import { openBuyCredits } from "@/lib/billing/buy-credits";
 import { ApiError, type ApiErrorBody } from "@/lib/billing/toast-error";
 import { cn } from "@/lib/cn";
 
@@ -89,6 +90,7 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
         ),
       );
     } catch (err) {
+      if (err instanceof ApiError && err.outOfCredits) openBuyCredits();
       setEntries((e) =>
         e.map((entry, i) =>
           i === e.length - 1
@@ -140,6 +142,7 @@ export function DesignChat({ draftId, html, onHtmlChange }: DesignChatProps) {
         e.map((entry, i) => (i === e.length - 1 ? { ...entry, status: "done" } : entry)),
       );
     } catch (err) {
+      if (err instanceof ApiError && err.outOfCredits) openBuyCredits();
       setEntries((e) =>
         e.map((entry, i) =>
           i === e.length - 1

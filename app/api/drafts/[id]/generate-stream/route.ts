@@ -3,6 +3,7 @@ import { getTopicContext } from "@/lib/db/queries";
 import { requireDraftInBrand } from "@/lib/draft-access";
 import { isRunActive, joinRun } from "@/lib/pipeline/generation-runs";
 import type { GenerationEvent } from "@/lib/pipeline/generate";
+import { publicError } from "@/lib/provider-outage";
 
 // A full generation is now four model calls, not one: choose the angle, write
 // and design the draft, QA it (plus one revision when QA fails), then critique
@@ -109,7 +110,7 @@ export async function GET(
           onEvent,
         );
       } catch (err) {
-        send("error", { message: err instanceof Error ? err.message : "Generation failed." });
+        send("error", { message: publicError(err, "Generation failed.").message });
         close();
       }
     },

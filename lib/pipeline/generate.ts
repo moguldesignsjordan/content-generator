@@ -89,6 +89,7 @@ import { critiqueDesign } from "./critique-design";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import { LENGTH_RETRY_TOLERANCE, MAX_DRAFT_VERSIONS } from "./constants";
 import { logError, logWarn } from "@/lib/log";
+import { publicError } from "@/lib/provider-outage";
 
 /** Phase-by-phase events emitted while a draft shell is being filled in. */
 export type GenerationEvent =
@@ -353,7 +354,8 @@ export async function generateEmailForTopicStreamed(
 
     onEvent({ type: "done" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generation failed.";
+    // Stored on the draft and shown to the client, so never the provider's text.
+    const { message } = publicError(err, "Generation failed.");
     await patchDraftGeneration(draftId, { status: "error", error: message }).catch(
       (e) => logError("pipeline:generate:record-error-phase", e, { draftId }),
     );

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { CreditPack } from "@/lib/billing/credits";
 import { bucketUsage, humanizeReason, type UsageBreakdownInput } from "@/lib/billing/usage-labels";
+import { useCheckout } from "@/lib/billing/use-checkout";
 import type { PlanCode } from "@/lib/db/types";
 import { Button, Card, StatCard, useToast } from "@/components/ui";
 
@@ -42,42 +43,8 @@ export function BillingClient({
   transactions: TransactionRow[];
 }) {
   const toast = useToast();
-  const [buying, setBuying] = useState<string | null>(null);
-  const [upgrading, setUpgrading] = useState(false);
+  const { startCheckout, pending } = useCheckout();
   const [openingPortal, setOpeningPortal] = useState(false);
-
-  async function checkout(body: { packId: string } | { plan: "pro" }) {
-    const res = await fetch("/api/billing/checkout", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json()) as { url?: string; error?: string };
-    if (!res.ok || !data.url) {
-      throw new Error(data.error ?? "Couldn't start checkout.");
-    }
-    window.location.href = data.url;
-  }
-
-  async function buyPack(packId: string) {
-    setBuying(packId);
-    try {
-      await checkout({ packId });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't start checkout.");
-      setBuying(null);
-    }
-  }
-
-  async function upgradeToPro() {
-    setUpgrading(true);
-    try {
-      await checkout({ plan: "pro" });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't start checkout.");
-      setUpgrading(false);
-    }
-  }
 
   async function openPortal() {
     setOpeningPortal(true);
@@ -144,9 +111,9 @@ export function BillingClient({
                     <Button
                       size="sm"
                       variant="gradient"
-                      loading={buying === pack.id}
-                      disabled={buying !== null || upgrading}
-                      onClick={() => buyPack(pack.id)}
+                      loading={pending === pack.id}
+                      disabled={pending !== null}
+                      onClick={() => startCheckout({ packId: pack.id })}
                     >
                       Buy
                     </Button>
@@ -172,9 +139,9 @@ export function BillingClient({
                 <Button
                   variant="gradient"
                   size="sm"
-                  loading={upgrading}
-                  disabled={buying !== null || upgrading}
-                  onClick={upgradeToPro}
+                  loading={pending === "pro"}
+                  disabled={pending !== null}
+                  onClick={() => startCheckout({ plan: "pro" })}
                   className="shrink-0"
                 >
                   Upgrade to Pro

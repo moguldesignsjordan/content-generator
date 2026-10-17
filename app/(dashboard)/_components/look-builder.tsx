@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, SegmentedControl, Sheet, useToast } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { cn } from "@/lib/cn";
 import type { DesignLook, LookExample } from "@/lib/db/types";
 import type { AdLibraryAd } from "@/lib/clients/scrapecreators";
@@ -177,8 +178,8 @@ export function LookBuilder({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, examples, is_default: makeDefault }),
       });
-      const data = (await res.json()) as { look?: DesignLook; error?: string };
-      if (!res.ok || !data.look) throw new Error(data.error ?? "Couldn't save the look.");
+      const data = (await res.json()) as ApiErrorBody & { look?: DesignLook };
+      if (!res.ok || !data.look) throw new ApiError(data.error ?? "Couldn't save the look.", data);
       toast.success(`Saved "${data.look.name}".`);
       onSaved(data.look);
       setExamples([]);
@@ -186,7 +187,7 @@ export function LookBuilder({
       setMakeDefault(false);
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't save the look.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Couldn't save the look.");
     } finally {
       setBusy(null);
     }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Input, Textarea, useToast } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { ScreenHeader } from "../../../_components/screen-header";
 import type {
   FactoryFinding,
@@ -90,16 +91,14 @@ export function CampaignView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
       });
-      const data = (await res.json().catch(() => ({}))) as Partial<FactoryState> & {
-        error?: string;
-        created?: number;
-      };
-      if (!res.ok) throw new Error(data.error ?? "Couldn't start generating.");
+      const data = (await res.json().catch(() => ({}))) as Partial<FactoryState> &
+        ApiErrorBody & { created?: number };
+      if (!res.ok) throw new ApiError(data.error ?? "Couldn't start generating.", data);
       setFactory((f) => ({ ...f, plan: data.plan, quote: data.quote }));
       toast.success(`Started ${data.created} piece${data.created === 1 ? "" : "s"}.`);
       router.refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't start generating.");
+      toastApiError(toast, e instanceof ApiError ? e : null, "Couldn't start generating.");
     } finally {
       setLaunching(null);
     }

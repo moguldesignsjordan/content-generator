@@ -11,6 +11,7 @@ import {
   Textarea,
   useToast,
 } from "@/components/ui";
+import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import type { ContentImage, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { useImageModelOptions } from "../../../_components/image-models-context";
 
@@ -108,18 +109,17 @@ export function FlyerSheet({
         method: "POST",
         body: form,
       });
-      const data = (await res.json().catch(() => ({}))) as {
+      const data = (await res.json().catch(() => ({}))) as ApiErrorBody & {
         image?: ContentImage;
         copy?: FlyerCopy;
         aspect?: FlyerAspect;
-        error?: string;
       };
-      if (!res.ok || !data.image) throw new Error(data.error ?? failMessage);
+      if (!res.ok || !data.image) throw new ApiError(data.error ?? failMessage, data);
       onApplied(data.image, data.copy ?? copy, data.aspect ?? aspect);
       toast.success("Flyer updated.");
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : failMessage);
+      toastApiError(toast, err instanceof ApiError ? err : null, failMessage);
     } finally {
       setBusy(false);
     }

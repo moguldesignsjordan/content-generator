@@ -1,6 +1,7 @@
 import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { logPrompt } from "@/lib/log";
+import { ProviderHttpError, httpStatusOf } from "@/lib/provider-errors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server-only Google GenAI client for image generation ("Nano Banana" family).
@@ -142,15 +143,18 @@ export async function generateGeminiImage(
       },
     }),
   ).catch((err: unknown) => {
-    // A 402 is the Google account's billing, not the request: say so plainly
-    // instead of surfacing the SDK's empty httpMeta JSON.
-    if (err instanceof Error && /^402\b/.test(err.message)) {
-      throw new Error(
-        "Image generation is paused: the Gemini account's billing or prepaid credits need attention (402).",
-        { cause: err },
-      );
-    }
-    throw err;
+    // Tagged with provider and status so lib/provider-errors.ts can tell a
+    // billing or key failure apart from a bad request. A 402 is the Google
+    // account's billing, so the log says so plainly instead of the SDK's empty
+    // httpMeta JSON; clients never see this text (lib/provider-outage.ts).
+    const status = httpStatusOf(err);
+    const message =
+      status === 402
+        ? "Image generation is paused: the Gemini account's billing or prepaid credits need attention (402)."
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    throw new ProviderHttpError(message, "gemini", status, undefined, { cause: err });
   });
 
   const image = interaction.output_image;
