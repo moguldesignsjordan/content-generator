@@ -5,6 +5,7 @@ import { Button, Checkbox, Input, SegmentedControl, Sheet, useToast } from "@/co
 import { ApiError, type ApiErrorBody, toastApiError } from "@/lib/billing/toast-error";
 import { cn } from "@/lib/cn";
 import type { DesignLook, LookExample } from "@/lib/db/types";
+import { shrinkForUpload } from "@/lib/images/shrink-for-upload";
 import type { AdLibraryAd } from "@/lib/clients/scrapecreators";
 
 // Builds a design look: a named group of example ads/posts the owner wants
@@ -90,7 +91,7 @@ export function LookBuilder({
     try {
       for (const file of Array.from(files).slice(0, room)) {
         const form = new FormData();
-        form.append("file", file);
+        form.append("file", await shrinkForUpload(file));
         form.append("kind", "general");
         const res = await fetch("/api/uploads/image", { method: "POST", body: form });
         const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };

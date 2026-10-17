@@ -48,6 +48,7 @@ import type { ChatQuestion, QuestionAnswer } from "@/lib/create-questions";
 import { AdLibraryPicker } from "./ad-library-picker";
 import { ChatPreviewCard, type ChatPreview, type QueuedPreviewAction } from "./chat-preview-card";
 import type { PreviewAction } from "@/lib/chat-preview";
+import { shrinkForUpload } from "@/lib/images/shrink-for-upload";
 
 // Labels for the manual email_type/blog_type override (migration 005). Left
 // unset, generation derives the type from the topic as before; picking one
@@ -405,7 +406,7 @@ export function CreateAgent({
       for (const file of files) {
         try {
           const body = new FormData();
-          body.append("file", file);
+          body.append("file", await shrinkForUpload(file));
           const res = await fetch("/api/uploads/image", { method: "POST", body });
           const data = (await res.json()) as { url?: string; error?: string };
           if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't upload that image.");

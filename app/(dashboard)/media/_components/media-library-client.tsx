@@ -20,6 +20,7 @@ import type {
 import { StyleReferencePanel } from "./style-reference-panel";
 import { CompetitorReferencePanel } from "./competitor-reference-panel";
 import { BulkDeleteBar, SelectToggle, useBulkSelect } from "./bulk-delete";
+import { shrinkForUpload } from "@/lib/images/shrink-for-upload";
 
 const KIND_LABELS: Record<MediaAssetKind, string> = {
   hero: "Hero",
@@ -138,7 +139,7 @@ function MyMediaTab({ initialMedia }: { initialMedia: MediaAsset[] }) {
     setUploading(true);
     try {
       const body = new FormData();
-      body.append("file", file);
+      body.append("file", await shrinkForUpload(file));
       body.append("kind", "general");
       const res = await fetch("/api/uploads/image", { method: "POST", body });
       const data = (await res.json()) as {

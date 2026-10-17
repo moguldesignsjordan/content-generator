@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Button, Card, Field, Input, Textarea, useToast } from "@/components/ui";
 import type { Product } from "@/lib/db/types";
+import { shrinkForUpload } from "@/lib/images/shrink-for-upload";
 import { ListInput } from "./list-input";
 import { ProductImport } from "../../_components/product-import";
 
@@ -139,7 +140,7 @@ function ProductCard({
     setUploadingPhoto(true);
     try {
       const body = new FormData();
-      body.append("file", file);
+      body.append("file", await shrinkForUpload(file));
       body.append("kind", "product");
       const res = await fetch("/api/uploads/image", { method: "POST", body });
       const data = (await res.json()) as { url?: string; error?: string };
