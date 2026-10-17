@@ -28,6 +28,13 @@ describe("checkRenderedText", () => {
     expect(r.extra.length).toBeGreaterThan(8);
   });
 
+  it("counts a label repeated across a mockup's items once", () => {
+    const seen = `${expected.join("\n")}\n${"DAILY GRIND COFFEE\n".repeat(4)}`;
+    const r = checkRenderedText(expected, seen);
+    expect(r.ok).toBe(true);
+    expect(r.extra).toEqual(["daily", "grind", "coffee"]);
+  });
+
   it("passes sample text the model put on a showcased product", () => {
     const seen = `${expected.join("\n")}\nIMPACT SIGN CO\n555-0199`;
     expect(checkRenderedText(expected, seen).ok).toBe(true);

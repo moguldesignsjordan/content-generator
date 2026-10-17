@@ -8,7 +8,7 @@ blow) belongs in git history and the code itself, not here. `git log
 what's genuinely still open. When a session ends, edit the sections below
 rather than appending a new session log.
 
-Last updated: 2026-10-16. `git status` and `git log` show what's committed
+Last updated: 2026-10-17. `git status` and `git log` show what's committed
 and pushed. Trimmed from a 1,700-line session log; the old entries are in
 git history (`git log -p PROJECT_STATE.md`).
 
@@ -20,8 +20,8 @@ git history (`git log -p PROJECT_STATE.md`).
 - Strategy is data (Postgres rows), not code: see
   `automated-content-engine-plan.md` §7.
 - Models (`lib/clients/model-ids.ts`): `DRAFT_MODEL` = `claude-sonnet-5`,
-  `HARD_MODEL` = `claude-opus-5`, `FAST_MODEL` = Haiku 4.5. Emails use no Opus
-  by default; the Opus design critique is opt-in per brand.
+  `HARD_MODEL` = `claude-opus-5`, `FAST_MODEL` = `claude-haiku-5-5`. Emails use
+  no Opus by default; the Opus design critique is opt-in per brand.
 - Images: default Nano Banana 2.1, Pro tier available. GPT Image 2.5 shows up
   only when `OPENAI_API_KEY` is set.
 - The human-approval gate is mandatory. Nothing publishes without an explicit

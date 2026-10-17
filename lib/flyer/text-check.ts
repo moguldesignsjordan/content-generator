@@ -33,7 +33,7 @@ export interface TextCheckResult {
   ok: boolean;
   /** Expected lines that weren't found as written. */
   missing: string[];
-  /** Words in the image that aren't in any expected or allowed line. */
+  /** Distinct words in the image that aren't in any expected or allowed line. */
   extra: string[];
   /** Word pairs the design repeated from the examples' own text. */
   copied: string[];
@@ -53,14 +53,15 @@ export function checkRenderedText(
   const lines = expected.map((l) => l.trim()).filter(Boolean);
   const missing = lines.filter((line) => !seenJoined.includes(` ${words(line).join(" ")} `));
   const allowed = new Set([...lines, ...alsoAllowed].flatMap(words));
-  const extra = seenWords.filter((w) => !allowed.has(w));
+  const extra = [...new Set(seenWords.filter((w) => !allowed.has(w)))];
 
   const ours = new Set([...lines, ...alsoAllowed].flatMap((l) => [...pairs(l)]));
   const fromExamples = pairs(examplesText);
   const copied = [...pairs(seen)].filter((p) => fromExamples.has(p) && !ours.has(p));
 
   // A handful of stray words is fine (a product's own label, sample text on a
-  // mockup); a paragraph of them means the model wrote copy of its own.
+  // mockup); a paragraph of them means the model wrote copy of its own. Words
+  // count once: a label printed on every item of a mockup is still one label.
   const lineWords = new Set(lines.flatMap(words));
   const extraLimit = Math.max(8, Math.ceil(lineWords.size * 0.5));
   return {

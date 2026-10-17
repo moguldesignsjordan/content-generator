@@ -19,4 +19,4 @@ export const HARD_MODEL = "claude-opus-5";
  * needn't scale with cost: picking from a curated list, short classification,
  * a brand-identity palette. Don't use for anything drafting reader-facing copy.
  */
-export const FAST_MODEL = "claude-haiku-4-5-20251001";
+export const FAST_MODEL = "claude-haiku-5-5";

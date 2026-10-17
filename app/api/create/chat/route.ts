@@ -810,6 +810,9 @@ export async function POST(req: NextRequest) {
           // of making it, so force the tool that does.
           if (tappedGo && !state.draftId && !state.campaign && !state.showLookPicker) {
             try {
+              // Haiku 5.5 rejects a conversation that ends on an assistant turn,
+              // and the loop above can stop on the model's own reply.
+              pushUserNote(messages, "SYSTEM NOTE: they confirmed, so make it now.");
               const forced = await getAnthropic().messages.create({
                 model: FAST_MODEL,
                 max_tokens: 1024,
