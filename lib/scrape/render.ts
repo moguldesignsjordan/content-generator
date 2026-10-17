@@ -7,9 +7,10 @@ import { isPrivateAddress } from "./url";
 // JavaScript rendering fallback: when a site's server HTML is an empty shell
 // (client-rendered SPA), the scraper re-loads it in headless Chrome and reads
 // the hydrated DOM. puppeteer-core drives an ALREADY-INSTALLED browser, so
-// there's no bundled-Chromium download. On serverless hosting there is no
-// system Chrome: set CHROME_EXECUTABLE_PATH (e.g. to @sparticuz/chromium's
-// binary) or rendering quietly degrades to the plain-fetch behavior.
+// there's no bundled-Chromium download. Vercel functions have no system
+// Chrome, so there the browser comes from @sparticuz/chromium instead.
+// Anywhere else without a browser, rendering quietly degrades to the
+// plain-fetch behavior.
 
 const CHROME_PATHS = [
   process.env.CHROME_EXECUTABLE_PATH,
@@ -41,26 +42,37 @@ function findChrome(): string | null {
 
 /** Whether a JS-rendering browser is available in this environment. */
 export function isRenderAvailable(): boolean {
-  return findChrome() !== null;
+  return findChrome() !== null || Boolean(process.env.VERCEL);
 }
 
-// One shared browser per process; pages are opened/closed per render. The
-// promise resets on launch failure so a transient error doesn't wedge it.
-let browserPromise: Promise<Browser> | null = null;
-
-async function getBrowser(): Promise<Browser | null> {
+async function launchBrowser(): Promise<Browser | null> {
   const executablePath = findChrome();
-  if (!executablePath) return null;
-  if (!browserPromise) {
-    browserPromise = puppeteer.launch({
+  if (executablePath) {
+    return puppeteer.launch({
       executablePath,
       headless: true,
       args: ["--disable-gpu", "--disable-dev-shm-usage"],
     });
   }
+  if (!process.env.VERCEL) return null;
+  // Imported lazily: it's a Linux-only binary that local dev never needs.
+  const { default: chromium } = await import("@sparticuz/chromium");
+  return puppeteer.launch({
+    executablePath: await chromium.executablePath(),
+    headless: "shell",
+    args: await puppeteer.defaultArgs({ args: chromium.args, headless: "shell" }),
+  });
+}
+
+// One shared browser per process; pages are opened/closed per render. The
+// promise resets on launch failure so a transient error doesn't wedge it.
+let browserPromise: Promise<Browser | null> | null = null;
+
+async function getBrowser(): Promise<Browser | null> {
+  if (!browserPromise) browserPromise = launchBrowser();
   try {
     const browser = await browserPromise;
-    if (!browser.connected) throw new Error("browser disconnected");
+    if (!browser?.connected) throw new Error("browser unavailable");
     return browser;
   } catch {
     browserPromise = null;

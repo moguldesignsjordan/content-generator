@@ -20,8 +20,12 @@ export const GUIDELINES_TOOL: Anthropic.Tool = {
   description:
     "Return the synthesized brand guidelines. Every field distilled from the " +
     "provided brand data only, never invented facts about the business.",
+  // Strict: without it the model sent a list field as a string and
+  // cleanList's .map threw, so every synthesis 500'd.
+  strict: true,
   input_schema: {
     type: "object",
+    additionalProperties: false,
     properties: {
       voice_and_tone: {
         type: "string",
