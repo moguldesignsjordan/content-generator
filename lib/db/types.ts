@@ -1149,8 +1149,6 @@ export interface FlyerVariant {
   /** The text layout this option was composed with; absent on flyers made
    * before composition (their text was drawn by the image model). */
   layout?: FlyerLayout;
-  /** True once this option was re-rendered on the pro image tier. */
-  finalized?: boolean;
   /** The owner's photos this option shows, so a re-render keeps them. */
   photos?: string[];
 }
@@ -1438,7 +1436,7 @@ export interface DraftMeta {
    * posts make fewer. */
   flyer_variant_count?: number;
   /** The picked option's text layout, mirrored like flyer_style, so an
-   * image-only re-render (edit sheet, Finalize in Pro) keeps it. */
+   * image-only re-render (edit sheet) keeps it. */
   flyer_layout?: FlyerLayout;
   // Position of this draft within its plan_series batch, set at shell
   // creation (createDraftShell). Lets the parallel per-draft generation

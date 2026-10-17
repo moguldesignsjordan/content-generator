@@ -9,7 +9,6 @@ import {
   Field,
   Input,
   LinkButton,
-  Select,
   Sheet,
   Textarea,
   Tooltip,
@@ -24,7 +23,6 @@ import { MAX_DRAFT_VERSIONS } from "@/lib/pipeline/constants";
 import type { ContentImage, DraftMeta, FlyerAspect, FlyerCopy } from "@/lib/db/types";
 import { FlyerSheet } from "./flyer-sheet";
 import { AdCopyCard } from "./ad-copy-card";
-import { useImageModelOptions } from "../../../_components/image-models-context";
 
 /** A connected network this flyer can post to (see lib/publishing/providers). */
 export interface SocialTarget {
@@ -92,10 +90,9 @@ export function FlyerReviewActions({
   const [aspect, setAspect] = useState<FlyerAspect>(
     initialMeta.flyer_aspect ?? "1:1",
   );
-  const [variants, setVariants] = useState(initialMeta.flyer_variants ?? []);
+  const variants = initialMeta.flyer_variants ?? [];
   const [variantIndex, setVariantIndex] = useState(initialMeta.flyer_variant_index);
   const [picking, setPicking] = useState<number | null>(null);
-  const [finalizing, setFinalizing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [captionOpen, setCaptionOpen] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
@@ -113,10 +110,8 @@ export function FlyerReviewActions({
   const isActionable = state === "in_review";
   const isApproved = state === "approved";
   const busy =
-    approving || archiving || regenerating || finalizing || posting || picking !== null;
+    approving || archiving || regenerating || posting || picking !== null;
   const unposted = socialTargets.filter((t) => !posts[t.id]);
-  const currentVariant =
-    variantIndex !== undefined ? variants[variantIndex] : undefined;
   // With a fixed preset every option shares one style, so its name can't
   // tell them apart.
   const stylesDiffer = new Set(variants.map((v) => v.style)).size > 1;
@@ -255,36 +250,6 @@ export function FlyerReviewActions({
     }
   }
 
-  // Finalizing re-renders the picked option once on the chosen model.
-  const imageModelOptions = useImageModelOptions();
-  const [finalizeModel, setFinalizeModel] = useState<string>("pro");
-  const finalizeOption = imageModelOptions.find((m) => m.id === finalizeModel);
-
-  async function handleFinalize() {
-    if (variantIndex === undefined) return;
-    const index = variantIndex;
-    setFinalizing(true);
-    try {
-      const form = new FormData();
-      form.set("mode", "generate");
-      form.set("tier", finalizeModel);
-      const result = await postFlyer(form, "Couldn't finalize the flyer.");
-      setImage(result.image);
-      if (result.copy) setCopy(result.copy);
-      setVariants((prev) =>
-        prev.map((v, i) =>
-          i === index ? { ...v, image: result.image, finalized: true } : v,
-        ),
-      );
-      toast.success(`Finalized with ${finalizeOption?.label ?? "the chosen model"}.`);
-      router.refresh();
-    } catch (e) {
-      toastApiError(toast, e instanceof ApiError ? e : null, "Couldn't finalize the flyer.");
-    } finally {
-      setFinalizing(false);
-    }
-  }
-
   async function handleSaveCaption() {
     if (!captionDraft.trim() || savingCaption) return;
     setSavingCaption(true);
@@ -364,37 +329,6 @@ export function FlyerReviewActions({
       <Card className="p-5">
         {isActionable && (
           <div className="mb-3 flex items-center justify-end gap-4">
-            {currentVariant && !currentVariant.finalized && (
-              <div className="flex items-center gap-2">
-                <Select
-                  aria-label="Model to finalize with"
-                  value={finalizeModel}
-                  disabled={busy || finalizing}
-                  onChange={(e) => setFinalizeModel(e.target.value)}
-                  className="h-8 text-[12px]"
-                >
-                  {imageModelOptions.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </Select>
-                <Tooltip
-                  label={`Re-renders this option once. ${finalizeOption?.description ?? ""}`}
-                  side="top"
-                >
-                  <Button
-                    variant="gradient"
-                    size="sm"
-                    loading={finalizing}
-                    disabled={busy}
-                    onClick={() => void handleFinalize()}
-                  >
-                    Finalize
-                  </Button>
-                </Tooltip>
-              </div>
-            )}
             <button
               type="button"
               onClick={() => setSheetOpen(true)}
@@ -469,7 +403,6 @@ export function FlyerReviewActions({
                     </div>
                     <span className="mt-1 block truncate text-[11px] text-muted">
                       {label}
-                      {v.finalized && <span className="text-accent"> Pro</span>}
                     </span>
                   </button>
                 );

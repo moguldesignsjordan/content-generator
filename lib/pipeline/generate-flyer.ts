@@ -370,8 +370,7 @@ export async function regenerateFlyerImage(args: {
   /** Full final prompt override, sent verbatim (plus the style directive
    * when a reference is present). */
   exactPrompt?: string;
-  /** Concrete image model id; defaults to the brand's tier. The "Finalize in
-   * Pro" action passes the pro model. */
+  /** Concrete image model id; defaults to the brand's tier. */
   model?: string;
   /** The picked option's text layout (meta.flyer_layout), kept on re-render. */
   layout?: FlyerLayout;

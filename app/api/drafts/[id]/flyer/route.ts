@@ -42,9 +42,7 @@ const MAX_EXACT_PROMPT_CHARS = 8000;
  *    include the reference instead of copying its style.
  *    Copy fields default to the stored flyer_copy; exactPrompt sends the full
  *    prompt verbatim (the tweak-and-regenerate path). Zero Claude tokens
- *    either way, one image render. { tier } (any image model choice) is
- *    "Finalize": the current option re-rendered on that model, upgrading it
- *    in place.
+ *    either way, one image render.
  *  - "upload": { file } replaces the design with the user's own image,
  *    cover-fitted to the flyer's post shape. No AI.
  *  - "caption": { caption, hashtags? } edits the post caption only. No AI,
@@ -312,13 +310,8 @@ export async function POST(
 
     const exactPrompt =
       (form.get("exactPrompt") as string | null)?.trim().slice(0, MAX_EXACT_PROMPT_CHARS) || undefined;
-    const rawTier = form.get("tier");
-    const finalizeTier = isImageModelTier(rawTier) ? rawTier : null;
-    const finalize = finalizeTier !== null;
-    // A plain model choice from the edit sheet: renders on that model without
-    // the finalize-in-place upgrade.
     const rawModel = form.get("model");
-    const renderTier = finalizeTier ?? (isImageModelTier(rawModel) ? rawModel : null);
+    const renderTier = isImageModelTier(rawModel) ? rawModel : null;
     const variantIndex = meta.flyer_variant_index;
     const pickedPhotos =
       variantIndex !== undefined ? meta.flyer_variants?.[variantIndex]?.photos : undefined;
@@ -397,16 +390,8 @@ export async function POST(
         flyer_scene: scene,
         style_reference_id: styleReferenceId,
         usage: rolled,
-        // Finalizing upgrades the picked option in place, so switching away
-        // and back keeps the pro render. Any other re-render is a custom
-        // design that matches none of the options.
-        ...(finalize && variantIndex !== undefined && meta.flyer_variants
-          ? {
-              flyer_variants: meta.flyer_variants.map((v, i) =>
-                i === variantIndex ? { ...v, image, finalized: true } : v,
-              ),
-            }
-          : { flyer_variant_index: undefined }),
+        // A re-render is a custom design that matches none of the options.
+        flyer_variant_index: undefined,
       },
     );
     return NextResponse.json({ image, copy: flyerCopy, aspect });
