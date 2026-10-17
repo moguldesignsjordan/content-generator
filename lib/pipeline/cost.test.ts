@@ -3,9 +3,19 @@ import {
   IMAGE_COSTS_USD,
   accumulateUsage,
   imageCostUsd,
+  priceUsage,
 } from "./cost";
 import { IMAGE_MODELS, resolveImageModel } from "@/lib/clients/image-render";
+import { CHAT_MODEL, DRAFT_MODEL } from "@/lib/clients/model-ids";
 import { IMAGE_MODEL_CATALOG, isImageModelTier } from "@/lib/image-models";
+
+describe("priceUsage", () => {
+  it("prices the chat model's cache reads at 0.05x input, others at 0.1x", () => {
+    const reads = { cache_read_input_tokens: 1e6 };
+    expect(priceUsage(CHAT_MODEL, reads)).toBeCloseTo(0.1, 6);
+    expect(priceUsage(DRAFT_MODEL, reads)).toBeCloseTo(0.2, 6);
+  });
+});
 
 describe("imageCostUsd", () => {
   it("prices every tier's resolved model explicitly (no silent fallback)", () => {

@@ -1,21 +1,25 @@
 import "server-only";
-import { DRAFT_MODEL, FAST_MODEL, HARD_MODEL } from "@/lib/clients/model-ids";
+import { CHAT_MODEL, DRAFT_MODEL, FAST_MODEL, HARD_MODEL } from "@/lib/clients/model-ids";
 import type { DraftMeta, DraftUsage } from "@/lib/db/types";
 
 // Display-only spend estimates for the review screen's cost panel. Rates from
 // the Anthropic prompt-caching pricing table (checked 2026-10-17): Sonnet 5
-// $2/$10 per MTok, Opus 5 $5/$25, Haiku 5.5 $0.10/$0.50 (its rate for prompts
-// up to 100K tokens); cache reads bill at 0.1x input, cache writes at 1.25x.
-// Image cost is a per-image estimate for the Gemini image model. Estimates, not
-// billing truth; keep them honest but don't build invoicing on them.
+// and Sonnet 5.5 $2/$10 per MTok, Opus 5 $5/$25, Haiku 5.5 $0.10/$0.50 (its
+// rate for prompts up to 100K tokens); cache reads bill at 0.1x input (0.05x on
+// Sonnet 5.5), cache writes at 1.25x. Image cost is a per-image estimate for
+// the Gemini image model. Estimates, not billing truth; keep them honest but
+// don't build invoicing on them.
 
 interface ModelRates {
   inputPerMTok: number;
   outputPerMTok: number;
+  /** Cache reads as a fraction of the input rate, when not the usual 0.1. */
+  cacheReadMultiplier?: number;
 }
 
 const RATES: Record<string, ModelRates> = {
   [DRAFT_MODEL]: { inputPerMTok: 2, outputPerMTok: 10 },
+  [CHAT_MODEL]: { inputPerMTok: 2, outputPerMTok: 10, cacheReadMultiplier: 0.05 },
   [HARD_MODEL]: { inputPerMTok: 5, outputPerMTok: 25 },
   [FAST_MODEL]: { inputPerMTok: 0.1, outputPerMTok: 0.5 },
 };
@@ -96,7 +100,7 @@ export function priceUsage(
 
   return (
     (input / 1e6) * rates.inputPerMTok +
-    (cacheRead / 1e6) * rates.inputPerMTok * 0.1 +
+    (cacheRead / 1e6) * rates.inputPerMTok * (rates.cacheReadMultiplier ?? 0.1) +
     (cacheWrite / 1e6) * rates.inputPerMTok * 1.25 +
     (output / 1e6) * rates.outputPerMTok +
     searches * WEB_SEARCH_COST_USD

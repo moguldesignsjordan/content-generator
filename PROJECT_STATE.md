@@ -20,8 +20,9 @@ git history (`git log -p PROJECT_STATE.md`).
 - Strategy is data (Postgres rows), not code: see
   `automated-content-engine-plan.md` §7.
 - Models (`lib/clients/model-ids.ts`): `DRAFT_MODEL` = `claude-sonnet-5`,
-  `HARD_MODEL` = `claude-opus-5`, `FAST_MODEL` = `claude-haiku-5-5`. Emails use
-  no Opus by default; the Opus design critique is opt-in per brand.
+  `CHAT_MODEL` = `claude-sonnet-5-5` (the Create chat), `HARD_MODEL` =
+  `claude-opus-5`, `FAST_MODEL` = `claude-haiku-5-5`. Emails use no Opus by
+  default; the Opus design critique is opt-in per brand.
 - Images: default Nano Banana 2.1, Pro tier available. GPT Image 2.5 shows up
   only when `OPENAI_API_KEY` is set.
 - The human-approval gate is mandatory. Nothing publishes without an explicit
@@ -240,6 +241,11 @@ git history (`git log -p PROJECT_STATE.md`).
 
 ## Open: code (not started)
 
+- Move `DRAFT_MODEL` and `HARD_MODEL` to the 5.5 line (Sonnet 5.5 bills
+  cache reads at half; Opus 5.5 is 20% cheaper). Blocked by about 20 forced
+  `tool_choice` call sites, which the 5.5 models reject: switch them to
+  structured outputs first. Needs a working local `ANTHROPIC_API_KEY` to test
+  each flow.
 - Blog AI section-level copy editing (Plan 5 Phase B). Check with Jordan
   before starting.
 - Feed performance (open/click rates) back into topic and angle selection

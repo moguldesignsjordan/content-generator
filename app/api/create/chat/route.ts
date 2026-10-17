@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import {
-  DRAFT_MODEL,
+  CHAT_MODEL,
   FAST_MODEL,
   cacheableSystem,
   getAnthropic,
@@ -100,7 +100,7 @@ import { scrapeCompetitorAdUrl } from "@/lib/scrape";
 import { parseAdLibraryUrl } from "@/lib/scrape/url";
 import { adLibraryAdUrl } from "@/lib/clients/scrapecreators";
 import { joinReplySegments, stripEmDashes, stripMarkdown } from "@/lib/text";
-import { logError } from "@/lib/log";
+import { logError, logWarn } from "@/lib/log";
 import { getSessionUser } from "@/lib/supabase/server";
 import { buildConversationNotes, isHttpUrl, mergeBrief } from "./brief-merge";
 import { userAskedForResearch } from "./research-consent";
@@ -691,10 +691,11 @@ export async function POST(req: NextRequest) {
           let needsGap = false;
           const call = () => {
             const stream = getAnthropic().messages.stream({
-              model: DRAFT_MODEL,
-              // 2048, not 1024: a turn can chain several tool calls of brief
-              // fields alongside the reply text.
-              max_tokens: 2048,
+              model: CHAT_MODEL,
+              // Room for thinking (it counts toward the cap) plus a turn that
+              // chains several tool calls of brief fields alongside the reply
+              // text; a cut-off turn loses its tool calls.
+              max_tokens: 8192,
               // Automatic caching: moves a breakpoint onto the newest block each
               // step, so later tool round-trips in this turn read the earlier ones
               // from cache instead of re-paying full input for them.
@@ -736,7 +737,12 @@ export async function POST(req: NextRequest) {
               send("reset", {});
               response = await call();
             }
-            logUsage("create-chat", DRAFT_MODEL, response.usage, { brandId: brand.id });
+            logUsage("create-chat", CHAT_MODEL, response.usage, { brandId: brand.id });
+            if (response.stop_reason === "refusal") {
+              logWarn("api:/api/create/chat", "model declined", {
+                category: response.stop_details?.category,
+              });
+            }
 
             // Search citations split one sentence across several text blocks, so
             // adjacent text blocks join as-is; only text on either side of a
@@ -867,7 +873,7 @@ export async function POST(req: NextRequest) {
               );
               send("status", { label: "Thinking" });
               const nudged = await call();
-              logUsage("create-chat-nudge", DRAFT_MODEL, nudged.usage, { brandId: brand.id });
+              logUsage("create-chat-nudge", CHAT_MODEL, nudged.usage, { brandId: brand.id });
               for (const block of nudged.content) {
                 if (block.type === "text") replyParts.push(block.text);
                 if (block.type === "tool_use") await dispatchTool(block, state, dispatchCtx);

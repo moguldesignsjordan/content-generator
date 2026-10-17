@@ -7,6 +7,13 @@
 export const DRAFT_MODEL = "claude-sonnet-5";
 
 /**
+ * The Create chat's model, a step ahead of DRAFT_MODEL: the chat only uses
+ * auto tool choice, and the 5.5 models reject the forced tool calls the
+ * drafting call sites still make.
+ */
+export const CHAT_MODEL = "claude-sonnet-5-5";
+
+/**
  * The "Opus for hard pieces" tier the architecture always specified: reserved
  * for the judgment calls, not the volume work. Today that's the design
  * critique, which only runs when a brand opts into it (Settings, "Deep design
