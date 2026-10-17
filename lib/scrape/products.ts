@@ -6,6 +6,7 @@ import { optimizeEmailImage } from "@/lib/images/optimize";
 import { uploadContentImage } from "@/lib/pipeline/generate-image";
 import { emailHtmlToText, slugify, stripEmDashes } from "@/lib/text";
 import type { ProposedProduct } from "@/lib/db/types";
+import { storageHostFromEnv } from "@/lib/looks";
 
 // Finds a site's products and services with their photos, from structured
 // data only: the sitemaps (robots.txt, sitemap.xml, one level of sitemap
@@ -369,6 +370,20 @@ export async function scrapeProducts(inputUrl: string): Promise<ScrapedProducts>
 
 const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+/** A photo from someone else's site (a website import) is copied into our
+ * storage, since the image pipeline only fetches our own. Null when it
+ * can't be downloaded. */
+export async function ownProductPhoto(url: string | undefined): Promise<string | null> {
+  const value = url?.trim();
+  if (!value) return null;
+  try {
+    if (new URL(value).host === storageHostFromEnv()) return value;
+  } catch {
+    return null;
+  }
+  return mirrorProductPhoto(value).catch(() => null);
+}
 
 /** Copies a product photo from someone else's site into our storage, so the
  * image pipeline can fetch it. Null when it can't be downloaded. */

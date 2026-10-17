@@ -75,6 +75,9 @@ export interface BrandFooter {
    * QA grounding facts, so the copy is allowed to state it: a guarantee the
    * brand really offers should not read as an invented claim. */
   guarantee?: string;
+  /** The number customers call, printed on flyers and linked in the email
+   * footer. Written exactly as the owner wants it shown. */
+  phone?: string;
 }
 
 // Brand-level image generation preference, set during onboarding or in
@@ -124,9 +127,14 @@ export interface Positioning {
   tagline?: string;
   differentiators?: string[]; // what separates the business
   competitors?: string[];
+  /** Where the business works, e.g. "Dallas and the suburbs". */
+  service_area?: string;
+  /** The one next step a customer takes, as a full line, e.g. "Call (214)
+   * 555-0101 for a free roof inspection". Also the brand's decision CTA. */
+  main_action?: string;
 }
 
-// ── Onboarding: the chatbot conversation state, persisted for resume ────────
+// ── Onboarding: research, a tap-to-confirm snapshot, a voice pick ────────────
 
 export interface OnboardingMessage {
   role: "user" | "assistant";
@@ -134,9 +142,90 @@ export interface OnboardingMessage {
   images?: string[];
 }
 
+/** The one next step a customer takes; positioning.main_action is its line. */
+export const MAIN_ACTION_KINDS = ["call", "book", "visit", "order", "quote", "message"] as const;
+export type MainActionKind = (typeof MAIN_ACTION_KINDS)[number];
+
+export interface OnboardingMainAction {
+  kind?: MainActionKind;
+  /** What the customer gets, completing "Call us for ...". */
+  wording?: string;
+  url?: string;
+}
+
+export interface OnboardingAudience {
+  label?: string;
+  demographics?: string;
+  pains?: string[];
+  objections?: string[];
+  vocabulary?: string[];
+}
+
+/** One short sample about a real service, in one candidate voice. */
+export interface VoiceSample {
+  name: string;
+  voice: string;
+  tone: string;
+  text: string;
+  /** Written to sound like the site's own copy. */
+  from_site: boolean;
+}
+
+export interface OnboardingSource {
+  url: string;
+  title: string;
+}
+
+/** What onboarding found, and (once the owner taps "Looks good") what they
+ * confirmed: unticked items are left out of the confirmed copy. */
+export interface OnboardingProposal {
+  name: string;
+  description?: string;
+  tagline?: string;
+  logo_url?: string;
+  colors?: BrandColors;
+  fonts?: BrandFonts;
+  products: ProposedProduct[];
+  audience: OnboardingAudience;
+  differentiators: string[];
+  competitors: string[];
+  main_action: OnboardingMainAction;
+  phone?: string;
+  website?: string;
+  contact_email?: string;
+  social?: SocialLinks;
+  service_area?: string;
+  postal_address?: string;
+  guarantee?: string;
+  /** Verbatim lines from the site, saved as voice examples. */
+  example_lines: string[];
+  /** How the site sounds, as the extraction described it. */
+  site_voice?: { voice?: string; tone?: string };
+  /** e.g. "4.8 stars from 120 Google reviews". */
+  rating?: string;
+  /** Sections filled by inference, shown tagged "Guess". */
+  guesses: string[];
+  sources: OnboardingSource[];
+  voice_samples?: VoiceSample[];
+}
+
+export type OnboardingStep = "find" | "confirm" | "voice" | "ideas";
+
+export interface OnboardingInput {
+  url?: string;
+  name?: string;
+  description?: string;
+  city?: string;
+}
+
 export interface OnboardingState {
+  /** Legacy chat transcript; guidelines synthesis still reads it. */
   messages?: OnboardingMessage[];
   completed?: boolean;
+  step?: OnboardingStep;
+  input?: OnboardingInput;
+  proposal?: OnboardingProposal;
+  idea_topic_ids?: string[];
 }
 
 // ── Brand guidelines: synthesized by Claude from everything stored, edited and

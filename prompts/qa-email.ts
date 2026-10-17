@@ -145,6 +145,14 @@ export function buildGroundingFactsBlock(
   for (const d of ctx.brand.positioning?.differentiators ?? []) {
     if (d.trim()) lines.push(`  Brand differentiator: ${d.trim()}`);
   }
+  // Saved contact facts the writer is told to use: the phone (in the footer
+  // and flyers), where the business works, and its main call to action.
+  const phone = ctx.brand.visual_identity?.footer?.phone;
+  if (phone) lines.push(`  Brand phone: ${phone}`);
+  const area = ctx.brand.positioning?.service_area;
+  if (area) lines.push(`  Service area: ${area}`);
+  const action = ctx.brand.positioning?.main_action;
+  if (action) lines.push(`  Main call to action: ${action}`);
   if (brief?.proof) lines.push(`  Proof: ${brief.proof}`);
   if (brief?.offer_deal) lines.push(`  Offer deal: ${brief.offer_deal}`);
   if (brief?.offer_deadline) lines.push(`  Offer deadline: ${brief.offer_deadline}`);

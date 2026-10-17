@@ -81,6 +81,12 @@ export function brandReadiness(
       href: "/settings",
     },
     {
+      label: "Email sender",
+      hint: "The name and address your emails send from.",
+      done: Boolean(brand.mailerlite_config?.sender_email?.trim()),
+      href: "/settings",
+    },
+    {
       label: "Mailing address",
       hint: "Required by law in marketing email footers.",
       done: Boolean(vi.footer?.postal_address?.trim()),

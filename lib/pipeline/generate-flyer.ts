@@ -155,6 +155,7 @@ export async function generateFlyerForTopicStreamed(
       usageDeltas,
       textSlots: look?.profile?.text_slots,
       website: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.website,
+      phone: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.phone,
       photoUrls: photos.map((p) => p.url),
       campaignBrief: meta.series_brief,
     });
@@ -283,6 +284,7 @@ export async function regenerateFlyerDraft(
     usageDeltas,
     textSlots: look?.profile?.text_slots,
     website: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.website,
+    phone: meta.client_brand ? undefined : ctx.brand.visual_identity?.footer?.phone,
     rejection: {
       feedback,
       previousHeadline: meta.flyer_copy?.headline ?? draftCtx.content.subject,
@@ -862,6 +864,7 @@ async function generateFlyerVariants(
     /** The look's extra text spots, for the copy to fill. */
     textSlots?: string[];
     website?: string;
+    phone?: string;
     rejection?: {
       feedback: string;
       previousHeadline?: string;
@@ -891,6 +894,7 @@ async function generateFlyerVariants(
     variants: { count, styles: opts.styles },
     textSlots: opts.textSlots,
     website: opts.website,
+    phone: opts.phone,
     photoCount: photoUrls.length,
   });
   const content: Anthropic.MessageParam["content"] = photoUrls.length

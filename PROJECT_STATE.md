@@ -135,6 +135,18 @@ git history (`git log -p PROJECT_STATE.md`).
 - **Brand brain:** onboarding, settings, website import, brand guidelines
   doc, reference emails, email design references, competitor ad library
   (including Ad Library import via ScrapeCreators), design looks.
+- **Onboarding (2026-10-17, plan
+  `~/.claude/plans/pasted-content-id-b51e-my-onboarding-reactive-pebble.md`):**
+  tap-through cards replace the onboarding chat. Website (or name, one line,
+  city) -> research streams honest steps (site import and Claude web search in
+  parallel, then 3 voice samples) -> "Is this you?" snapshot with up to 3 gap
+  questions -> voice pick with nudges -> 3 ideas saved as topics, "Make it"
+  opens Create via `/?idea=<topicId>&kind=email`. Research is free to the
+  owner (rate limit + house cap, no credit check). New brand fields: footer
+  phone, positioning `service_area` and `main_action` (also the decision CTA);
+  flyers print the phone, the email footer links it, the positioning block
+  and QA grounding list all three. All of it builds and is unit-tested; none
+  has run live (item 1 below).
 - **Billing:** credits ledger, paywall, Stripe Checkout for packs and Pro,
   monthly allowance cron.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
@@ -170,6 +182,14 @@ git history (`git log -p PROJECT_STATE.md`).
    (the look picker should show Their ads selected), then make a flyer, an
    email, a blog, and a campaign test launch, and check each used the right
    photos and style (drafts' `meta.inputs`, the saved image prompts).
+   And the Oct 17 onboarding, on a fresh test account (one brand per user):
+   onboard a real site and a no-website business; every step at phone and
+   desktop width, light and dark; a reload mid-flow resumes; Settings shows
+   the saved phone, area, and main action; a flyer prints the real phone; an
+   email CTA uses the main action; "Make it" starts Create on the saved topic
+   without creating a duplicate topic; cost per run on `/logs` (expect about
+   $0.20 to $0.25). Also Settings "Import from website" after the extraction
+   moved to `lib/pipeline/import-website.ts`.
 3. **Meta app for Facebook/Instagram.** `META_APP_ID`, `META_APP_SECRET`,
    `META_LOGIN_CONFIG_ID` aren't in Vercel. Public posting also needs App
    Review and likely Business Verification. Add the META vars to

@@ -4,22 +4,7 @@ import { getSessionUser } from "@/lib/supabase/server";
 import type { Product } from "@/lib/db/types";
 import { logError } from "@/lib/log";
 import { requireOwnBrand } from "@/lib/brand-access";
-import { storageHostFromEnv } from "@/lib/looks";
-import { mirrorProductPhoto } from "@/lib/scrape/products";
-
-/** A photo from someone else's site (a website import) is copied into our
- * storage, since the image pipeline only fetches our own. Null when it
- * can't be downloaded. */
-async function ownPhoto(url: string | undefined): Promise<string | null> {
-  const value = url?.trim();
-  if (!value) return null;
-  try {
-    if (new URL(value).host === storageHostFromEnv()) return value;
-  } catch {
-    return null;
-  }
-  return mirrorProductPhoto(value).catch(() => null);
-}
+import { ownProductPhoto } from "@/lib/scrape/products";
 
 /** Creates or updates one product (keyed by brand_id + slug). */
 export async function PATCH(req: NextRequest) {
@@ -36,7 +21,7 @@ export async function PATCH(req: NextRequest) {
     }
     const access = await requireOwnBrand(brandId);
     if (!access.ok) return access.response;
-    const imageUrl = await ownPhoto(product.image_url ?? undefined);
+    const imageUrl = await ownProductPhoto(product.image_url ?? undefined);
     const saved = await upsertProduct(brandId, {
       slug: product.slug.trim(),
       name: product.name.trim(),

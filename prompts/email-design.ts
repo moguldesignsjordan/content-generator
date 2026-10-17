@@ -7,7 +7,7 @@ import type {
   VisualVibe,
 } from "@/lib/db/types";
 import { EMAIL_STYLES, type EmailStyleDirective } from "./email-styles";
-import { onColor } from "@/lib/email/templates/shared";
+import { onColor, telHref } from "@/lib/email/templates/shared";
 
 // The default accent discipline: color is a signal, not a theme.
 const ACCENT_BUDGET_DEFAULT = [
@@ -131,8 +131,11 @@ function buildFooterChrome(tokens: BrandTokens): string[] {
       ". Use the SAME mark (real logo or wordmark) as the header above, never a different one.",
     "  2) a muted contact line" +
       (footer.website ? `: the bare domain of ${footer.website}` : "") +
+      (footer.phone
+        ? `${footer.website ? ", a middot separator," : ":"} ${footer.phone} (tel:${telHref(footer.phone)} link)`
+        : "") +
       (footer.contact_email
-        ? `${footer.website ? ", a middot separator, and" : ":"} ${footer.contact_email} (mailto link)`
+        ? `${footer.website || footer.phone ? ", a middot separator, and" : ":"} ${footer.contact_email} (mailto link)`
         : "") +
       ".",
     ...(socialLines.length

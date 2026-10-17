@@ -269,6 +269,7 @@ export function CreateAgent({
   initial,
   suggestions = [],
   startKind,
+  startText,
   landing,
 }: {
   className?: string;
@@ -276,6 +277,8 @@ export function CreateAgent({
   suggestions?: CreateAgentSuggestion[];
   /** Prefills the composer (e.g. a "New campaign" link). */
   startKind?: StarterKind;
+  /** Sent once on arrival (an onboarding idea's "Make it"). */
+  startText?: string;
   /** Server-rendered rows shown under the kind tiles until the chat starts. */
   landing?: ReactNode;
 }) {
@@ -489,6 +492,16 @@ export function CreateAgent({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, [input]);
+
+  // Sent once, then the ?idea= link is cleared so a reload doesn't resend it.
+  const startSent = useRef(false);
+  useEffect(() => {
+    if (!startText || startSent.current) return;
+    startSent.current = true;
+    send(startText);
+    router.replace("/", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startText]);
 
   /** extra: the ads ticked in the Ad Library picker (in tick order), a look
    * picker tap, the question card's answers, or a tapped chip's id. */

@@ -2268,8 +2268,6 @@ export async function ensureDefaultCluster(strategyId: string): Promise<string> 
     .insert({
       strategy_id: strategyId,
       name: "Core content",
-      description:
-        "Starter pillar created automatically. Rename or reorganize it as the content plan grows.",
       primary_funnel_stage: "awareness",
     })
     .select("id")

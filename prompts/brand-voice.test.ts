@@ -4,6 +4,7 @@ import type {
   BrandMemory,
   CampaignBrief,
   CompetitorReference,
+  Icp,
   Product,
   ReferenceEmail,
 } from "@/lib/db/types";
@@ -504,6 +505,29 @@ describe("buildBrandContext", () => {
 
   it("leaves the learned section out when there's nothing learned", () => {
     expect(buildBrandContext({ brand, primaryIcp: null })).not.toContain("THINGS LEARNED");
+  });
+
+  it("prints the service area and main action in the positioning block", () => {
+    const block = buildBrandContext({
+      brand: {
+        ...brand,
+        positioning: {
+          service_area: "Dallas and the suburbs",
+          main_action: "Call (214) 555-0101 for a free roof inspection",
+        },
+      } as Brand,
+      primaryIcp: null,
+    });
+    expect(block).toContain("POSITIONING:");
+    expect(block).toContain("  Where we work: Dallas and the suburbs");
+    expect(block).toContain("Call (214) 555-0101 for a free roof inspection");
+  });
+
+  it("skips the audience header for an ICP with an empty profile", () => {
+    const icp = { id: "i1", label: "Primary ICP", is_primary: true, profile: {} } as Icp;
+    expect(buildBrandContext({ brand, primaryIcp: icp })).not.toContain("PRIMARY AUDIENCE");
+    const real = { ...icp, label: "Homeowners", profile: { pains: ["Leaks"] } } as Icp;
+    expect(buildBrandContext({ brand, primaryIcp: real })).toContain('PRIMARY AUDIENCE, "Homeowners"');
   });
 });
 

@@ -304,6 +304,8 @@ export function buildFlyerCopyMessages(args: {
   aspect: FlyerAspect;
   /** The brand's real site, so a website spot never gets a guessed domain. */
   website?: string;
+  /** The brand's real phone number, so a phone spot never gets a made-up one. */
+  phone?: string;
   /** Freeform creative brief typed at creation time, if any. */
   brief?: string;
   /** The chat's structured brief (buildCampaignBriefBlock for social), the
@@ -458,6 +460,9 @@ export function buildFlyerCopyMessages(args: {
     `FLYER SHAPE: ${FLYER_ASPECTS[args.aspect].label}`,
     args.website
       ? `WEBSITE (write it exactly like this wherever a website goes, never any other address): ${displayDomain(args.website)}`
+      : "",
+    args.phone
+      ? `PHONE (write it exactly like this wherever a phone number goes, never any other number): ${args.phone}`
       : "",
     perVariantStyles
       ? [

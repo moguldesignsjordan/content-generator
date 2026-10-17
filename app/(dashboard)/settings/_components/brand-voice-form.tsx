@@ -136,7 +136,7 @@ export function BrandVoiceForm({ brandId, voiceProfile }: BrandVoiceFormProps) {
           onChange={(v) => setCtaLibrary((c) => ({ ...c, portfolio: v }))}
         />
         <CtaField
-          label="Decision → book call"
+          label="Main action"
           value={ctaLibrary.book_call}
           onChange={(v) => setCtaLibrary((c) => ({ ...c, book_call: v }))}
         />

@@ -430,6 +430,12 @@ describe("buildFlyerCopyMessages", () => {
     expect(buildFlyerCopyMessages(base).user).not.toContain("WEBSITE");
   });
 
+  it("gives the brand's real phone as written, and nothing without one", () => {
+    const { user } = buildFlyerCopyMessages({ ...base, phone: "(214) 555-0101" });
+    expect(user).toContain("never any other number): (214) 555-0101");
+    expect(buildFlyerCopyMessages(base).user).not.toContain("PHONE");
+  });
+
   it("distills the source email when emailCopy is provided", () => {
     const { user } = buildFlyerCopyMessages({
       ...base,

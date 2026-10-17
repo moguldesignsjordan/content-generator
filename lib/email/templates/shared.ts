@@ -147,8 +147,18 @@ export function renderSocialBadges(tokens: BrandTokens): string {
   );
 }
 
+/** "(214) 555-0101" → "+12145550101": a dialable tel: target. A 10-digit
+ * number is taken as US, the only format the scraper reads. */
+export function telHref(phone: string): string {
+  const digits = phone.replace(/[^\d+]/g, "");
+  if (digits.startsWith("+")) return digits;
+  if (/^\d{10}$/.test(digits)) return `+1${digits}`;
+  if (/^1\d{10}$/.test(digits)) return `+${digits}`;
+  return digits;
+}
+
 /**
- * Footer: sender wordmark, contact line (domain and email), social badge row,
+ * Footer: sender wordmark, contact line (domain, phone, and email), social badge row,
  * postal address, permission reminder, and the literal {$unsubscribe} merge
  * tag MailerLite requires. The tag is here by construction so a generated
  * email can never be unpublishable.
@@ -170,11 +180,16 @@ export function renderFooter(tokens: BrandTokens): string {
     ? `<a href="${escapeHtml(f.website)}" style="text-decoration:none;">${wordmarkInner}</a>`
     : wordmarkInner;
 
-  // One muted contact line: domain and email, dot-separated.
+  // One muted contact line: domain, phone, and email, dot-separated.
   const contactParts: string[] = [];
   if (f.website) {
     contactParts.push(
       `<a href="${escapeHtml(f.website)}" style="color:${muted};text-decoration:none;">${escapeHtml(displayDomain(f.website))}</a>`,
+    );
+  }
+  if (f.phone) {
+    contactParts.push(
+      `<a href="tel:${escapeHtml(telHref(f.phone))}" style="color:${muted};text-decoration:none;">${escapeHtml(f.phone)}</a>`,
     );
   }
   if (f.contact_email) {

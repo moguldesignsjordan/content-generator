@@ -77,6 +77,7 @@ export function VisualIdentityForm({
     initialFooter.contact_email ?? "",
   );
   const [website, setWebsite] = useState(initialFooter.website ?? "");
+  const [phone, setPhone] = useState(initialFooter.phone ?? "");
   const [postalAddress, setPostalAddress] = useState(
     initialFooter.postal_address ?? "",
   );
@@ -142,6 +143,7 @@ export function VisualIdentityForm({
             footer: {
               contact_email: contactEmail.trim() || undefined,
               website: website.trim() || undefined,
+              phone: phone.trim() || undefined,
               postal_address: postalAddress.trim() || undefined,
               guarantee: guarantee.trim() || undefined,
               social,
@@ -298,6 +300,14 @@ export function VisualIdentityForm({
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
             placeholder="https://yourbrand.com"
+          />
+        </Field>
+        <Field label="Phone" hint="Printed on flyers and linked in the email footer, exactly as typed.">
+          <Input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="(214) 555-0101"
           />
         </Field>
         <div className="sm:col-span-2">

@@ -26,6 +26,9 @@ export interface SiteSignals {
   /** font-family stacks by frequency, generic-only stacks filtered. */
   font_candidates: string[];
   emails: string[];
+  /** Phone numbers for display, tel: links first, then US-format numbers in
+   * the page text. Formatted "(214) 555-0101" when US. */
+  phones: string[];
   social: {
     linkedin?: string;
     twitter?: string;

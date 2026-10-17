@@ -46,6 +46,19 @@ describe("buildGroundingFactsBlock", () => {
     expect(block).toContain("0.5s average load time");
     expect(block.match(/Brand differentiator:/g)).toHaveLength(2);
   });
+
+  it("lists the saved phone, service area, and main action as real facts", () => {
+    const ctx = {
+      brand: {
+        visual_identity: { footer: { phone: "(214) 555-0101" } },
+        positioning: { service_area: "Dallas", main_action: "Call for a free inspection" },
+      } as Brand,
+    } as TopicContext;
+    const block = buildGroundingFactsBlock(ctx, null);
+    expect(block).toContain("Brand phone: (214) 555-0101");
+    expect(block).toContain("Service area: Dallas");
+    expect(block).toContain("Main call to action: Call for a free inspection");
+  });
 });
 
 describe("designQaIssues", () => {

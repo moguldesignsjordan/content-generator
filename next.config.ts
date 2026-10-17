@@ -6,6 +6,7 @@ const SCRAPE_ROUTES = [
   "/api/settings/import-products",
   "/api/competitor-references",
   "/api/create/chat",
+  "/api/onboarding/research",
 ];
 
 const nextConfig: NextConfig = {

@@ -1,6 +1,7 @@
 import "server-only";
 import * as cheerio from "cheerio";
 import type { ColorCandidate, SiteSignals } from "./types";
+import { phoneCandidates } from "./phones";
 
 // Deterministic signal extraction from the homepage: metadata, logo/icon
 // candidates, colors, fonts, contact and social links. These are facts Claude
@@ -199,6 +200,11 @@ export async function extractSignals(
       .filter((e): e is string => !!e && e.includes("@")),
   )].slice(0, 3);
 
+  const phones = phoneCandidates(
+    $('a[href^="tel:"]').map((_, el) => $(el).attr("href") ?? "").get(),
+    $("body").text(),
+  );
+
   const social: SiteSignals["social"] = {};
   $("a[href]").each((_, el) => {
     const abs = absolutize($(el).attr("href"), origin);
@@ -219,6 +225,7 @@ export async function extractSignals(
     color_candidates,
     font_candidates,
     emails,
+    phones,
     social,
   };
 }

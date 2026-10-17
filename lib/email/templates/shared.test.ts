@@ -66,6 +66,13 @@ describe("renderFooter", () => {
     expect((footer.match(/em-social/g) ?? []).length).toBe(2);
   });
 
+  it("links the phone as a dialable tel: target when one is set", () => {
+    const withPhone = renderFooter({ ...TOKENS, footer: { ...TOKENS.footer, phone: "(214) 555-0101" } });
+    expect(withPhone).toContain(`href="tel:+12145550101"`);
+    expect(withPhone).toContain(">(214) 555-0101</a>");
+    expect(footer).not.toContain("tel:");
+  });
+
   it("omits the social row entirely when no links are configured", () => {
     const bare = renderFooter({ ...TOKENS, footer: { ...TOKENS.footer, social: {} } });
     expect(bare).not.toContain("em-social");

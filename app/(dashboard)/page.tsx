@@ -11,6 +11,7 @@ import {
   listDrafts,
   listProducts,
   listTopPerformingEmails,
+  listTopics,
 } from "@/lib/db/queries";
 import type { DraftListRow, Icp } from "@/lib/db/types";
 import { buildBriefCard, topicContextFor } from "@/lib/brief-card";
@@ -31,7 +32,7 @@ const SEASONS = ["winter", "spring", "summer", "fall"] as const;
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; idea?: string; kind?: string }>;
 }) {
   if (!isSupabaseConfigured()) {
     return (
@@ -64,11 +65,13 @@ export default async function HomePage({
 
   // "New campaign" links land here with ?mode=campaign: skip straight past
   // "what are we creating?".
-  const startKind = (await searchParams).mode === "campaign" ? "campaign" : undefined;
-  const [awaitingReview, chat, pieces] = await Promise.all([
+  const params = await searchParams;
+  const startKind = params.mode === "campaign" ? "campaign" : undefined;
+  const [awaitingReview, chat, pieces, startText] = await Promise.all([
     countScheduledAwaitingReview(data.brand.id).catch(() => 0),
     loadChat(user.id, data.icps),
     loadPieces(data.brand.id),
+    ideaStartText(data.brand.id, params.idea, params.kind),
   ]);
 
   return (
@@ -79,10 +82,12 @@ export default async function HomePage({
       {data.brand.onboarding_state?.completed !== true && <FinishSetupBanner />}
 
       <CreateAgent
-        // A "New campaign" link starts fresh instead of resuming the last chat.
-        initial={startKind ? undefined : chat.initial}
+        // A "New campaign" link or an onboarding idea starts fresh instead of
+        // resuming the last chat.
+        initial={startKind || startText ? undefined : chat.initial}
         suggestions={chat.suggestions}
         startKind={startKind}
+        startText={startText}
         landing={
           <LandingRails
             waiting={pieces.waiting}
@@ -94,6 +99,24 @@ export default async function HomePage({
       />
     </div>
   );
+}
+
+/**
+ * Onboarding's "Make it" lands here with ?idea=<topicId>&kind=: the same
+ * starter text Home's topic suggestions send, so Create picks the saved
+ * topic. Only a topic on this brand counts.
+ */
+async function ideaStartText(
+  brandId: string,
+  topicId: string | undefined,
+  kind: string | undefined,
+): Promise<string | undefined> {
+  if (!topicId) return undefined;
+  const topic = (await listTopics(brandId).catch(() => [])).find((t) => t.id === topicId);
+  if (!topic) return undefined;
+  if (kind === "flyer") return `Make a flyer about "${topic.title}"`;
+  if (kind === "blog") return `Write a blog post about "${topic.title}"`;
+  return `Write an email about "${topic.title}"`;
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { ScrapeResult } from "@/lib/scrape/types";
-import type { ProposedProduct } from "@/lib/db/types";
+import { MAIN_ACTION_KINDS, type MainActionKind, type ProposedProduct } from "@/lib/db/types";
 import { slugify, stripEmDashes } from "@/lib/text";
 
 // Brand extraction from a scraped website: one forced tool call turns page
@@ -53,6 +53,20 @@ export interface ImportToolInput {
   social_twitter?: string;
   social_instagram?: string;
   social_youtube?: string;
+  // onboarding (Settings' import review ignores these)
+  brand_name?: string;
+  phone?: string;
+  service_area?: string;
+  main_action_kind?: MainActionKind;
+  main_action_wording?: string;
+  main_action_url?: string;
+  icp_label?: string;
+  icp_demographics?: string;
+  icp_pains?: string[];
+  icp_objections?: string[];
+  icp_vocabulary?: string[];
+  guarantee?: string;
+  postal_address?: string;
 }
 
 /** The extraction's products as proposals: deduped by slug, a name required,
@@ -209,6 +223,62 @@ export const IMPORT_TOOL: Anthropic.Tool = {
       social_twitter: { type: "string", description: `From SOCIAL signals only. ${OMIT}` },
       social_instagram: { type: "string", description: `From SOCIAL signals only. ${OMIT}` },
       social_youtube: { type: "string", description: `From SOCIAL signals only. ${OMIT}` },
+      brand_name: {
+        type: "string",
+        description: `The business's name as the site writes it (not the domain, no tagline). ${OMIT}`,
+      },
+      phone: {
+        type: "string",
+        description: `The main customer phone number. MUST be one from PHONE CANDIDATES, copied as listed. ${OMIT}`,
+      },
+      service_area: {
+        type: "string",
+        description: `Where the business serves customers, in a few words (e.g. "Dallas and nearby suburbs", "Ships nationwide"). ${OMIT}`,
+      },
+      main_action_kind: {
+        type: "string",
+        enum: [...MAIN_ACTION_KINDS],
+        description: `The one action the site pushes hardest (its main buttons and calls to action): call, book, visit, order, quote (get a quote or estimate), or message. ${OMIT}`,
+      },
+      main_action_wording: {
+        type: "string",
+        description: `What the customer gets from that action, as a short phrase that completes "Call us for ...", e.g. "a free roof inspection". From the site's own button or offer wording. ${OMIT}`,
+      },
+      main_action_url: {
+        type: "string",
+        description: `The page that action links to (booking, ordering, contact), on this same site. ${OMIT}`,
+      },
+      icp_label: {
+        type: "string",
+        description: "INFERRED: a short name for the main customer, e.g. \"Homeowners in Dallas\". Infer from who the site speaks to.",
+      },
+      icp_demographics: {
+        type: "string",
+        description: "INFERRED: one sentence on who they are.",
+      },
+      icp_pains: {
+        type: "array",
+        items: { type: "string" },
+        description: "INFERRED: 2-4 problems the site says it solves for them, short phrases.",
+      },
+      icp_objections: {
+        type: "array",
+        items: { type: "string" },
+        description: "INFERRED: 1-3 worries the site answers (price, trust, time), short phrases.",
+      },
+      icp_vocabulary: {
+        type: "array",
+        items: { type: "string" },
+        description: "INFERRED: 3-6 plain words or phrases customers would use for what they need.",
+      },
+      guarantee: {
+        type: "string",
+        description: `A standing guarantee or warranty the site states, close to verbatim. ${OMIT}`,
+      },
+      postal_address: {
+        type: "string",
+        description: `The business's street address as the site shows it. ${OMIT}`,
+      },
     },
   },
 };
@@ -231,6 +301,8 @@ export function buildImportMessages(scrape: ScrapeResult): {
     "  highlights; background and text should read comfortably together).",
     "- Products: one entry per distinct offer. price_point only if a price is",
     "  literally shown. deliverables only if scope is stated.",
+    "- phone MUST come from PHONE CANDIDATES. The icp_* fields are the one",
+    "  place you infer: describe the customer the site is clearly written for.",
     "- NEVER use em dashes in any text you write. Use a comma, colon, or period.",
     "- Call save_brand_extraction once with everything you found.",
   ].join("\n");
@@ -263,6 +335,7 @@ export function buildImportMessages(scrape: ScrapeResult): {
     ...logoLines,
     "",
     s.emails.length ? `CONTACT: ${s.emails.join(", ")}` : "",
+    s.phones.length ? `PHONE CANDIDATES (choose phone ONLY from these): ${s.phones.join(", ")}` : "",
     Object.keys(s.social).length
       ? `SOCIAL: ${Object.entries(s.social)
           .map(([k, v]) => `${k}: ${v}`)

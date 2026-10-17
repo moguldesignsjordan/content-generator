@@ -22,6 +22,8 @@ export function PositioningForm({ brandId, positioning }: PositioningFormProps) 
     p.differentiators ?? [],
   );
   const [competitors, setCompetitors] = useState(p.competitors ?? []);
+  const [serviceArea, setServiceArea] = useState(p.service_area ?? "");
+  const [mainAction, setMainAction] = useState(p.main_action ?? "");
 
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -39,6 +41,8 @@ export function PositioningForm({ brandId, positioning }: PositioningFormProps) 
             tagline: tagline.trim() || undefined,
             differentiators: differentiators.filter(Boolean),
             competitors: competitors.filter(Boolean),
+            service_area: serviceArea.trim() || undefined,
+            main_action: mainAction.trim() || undefined,
           },
         }),
       });
@@ -85,6 +89,25 @@ export function PositioningForm({ brandId, positioning }: PositioningFormProps) 
             onApply={(v) => setTagline(v.split("\n")[0] ?? "")}
           />
         </div>
+      </Field>
+
+      <Field
+        label="Main action"
+        hint="The one next step you want customers to take. Calls to action use it."
+      >
+        <Input
+          value={mainAction}
+          onChange={(e) => setMainAction(e.target.value)}
+          placeholder="e.g. Call (214) 555-0101 for a free roof inspection"
+        />
+      </Field>
+
+      <Field label="Service area" hint="Where you work, in your own words.">
+        <Input
+          value={serviceArea}
+          onChange={(e) => setServiceArea(e.target.value)}
+          placeholder="e.g. Dallas and the surrounding suburbs"
+        />
       </Field>
 
       <div>

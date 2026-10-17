@@ -54,8 +54,13 @@ export function buildBrandVoiceBlock(
     );
   }
 
-  if (icp) {
-    const p = icp.profile ?? {};
+  const p = icp?.profile ?? {};
+  // A new brand's placeholder ICP has a label and nothing else: printing its
+  // header would hand every writer an empty "audience" to aim at.
+  if (
+    icp &&
+    (p.demographics || p.pains?.length || p.objections?.length || p.vocabulary?.length)
+  ) {
     lines.push("");
     lines.push(`PRIMARY AUDIENCE, "${icp.label}":`);
     if (p.demographics) lines.push(`  Who: ${p.demographics}`);
@@ -140,6 +145,8 @@ export function buildPositioningBlock(brand: Brand): string {
     !p.tagline &&
     !p.differentiators?.length &&
     !p.competitors?.length &&
+    !p.service_area &&
+    !p.main_action &&
     !guarantee
   ) {
     return "";
@@ -159,6 +166,10 @@ export function buildPositioningBlock(brand: Brand): string {
   }
   if (p.competitors?.length) {
     lines.push(`  Competitors (differentiate from these, don't name-call): ${p.competitors.join(", ")}`);
+  }
+  if (p.service_area) lines.push(`  Where we work: ${p.service_area}`);
+  if (p.main_action) {
+    lines.push(`  How customers take the next step (the real action; use it for calls to action): ${p.main_action}`);
   }
   return lines.join("\n");
 }
