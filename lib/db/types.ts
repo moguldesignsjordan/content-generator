@@ -1179,6 +1179,7 @@ export interface DesignLookProfile {
     background: "dark" | "light" | "vivid" | "photo";
     accent_usage: string;
   };
+  /** How the imagery is rendered (medium, finish, crop), never what it shows. */
   imagery: string;
   cta_style: "pill" | "box" | "underline" | "text" | "none";
   logo_placement: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "none";
@@ -1188,6 +1189,12 @@ export interface DesignLookProfile {
    * copy step fills them so the image model doesn't invent words for them.
    * Absent on looks read before this existed. */
   text_slots?: string[];
+  /** What the examples' imagery shows, kept apart from the style so new
+   * designs never copy it. Absent on looks read before this existed. */
+  subjects?: string;
+  /** Whether any example shows a person or character. Absent on looks read
+   * before this existed (see examplesShowPeople). */
+  has_people?: boolean;
 }
 
 export interface DesignLook {

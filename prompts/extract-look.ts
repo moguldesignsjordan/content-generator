@@ -7,7 +7,9 @@ import { stripEmDashes } from "@/lib/text";
 // the owner wants flyers to look like. Runs when the look is saved; flyer
 // renders attach the example images AND this profile, so no render
 // re-analyzes the examples. It describes the DESIGN only (layout, type,
-// color roles, imagery), never the examples' words, products, or brands.
+// color roles, how imagery is rendered), never the examples' words, products,
+// or brands. What the imagery shows goes in its own field (subjects), so a
+// render can take the style without the subject.
 
 export const LookProfileSchema = z.object({
   summary: z.string().min(1),
@@ -26,6 +28,8 @@ export const LookProfileSchema = z.object({
   // shouldn't throw the whole read away.
   mood: z.array(z.string()).transform((m) => m.slice(0, 6)),
   text_slots: z.array(z.string()).transform((t) => t.slice(0, 4)).optional(),
+  subjects: z.string(),
+  has_people: z.boolean(),
 });
 
 export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
@@ -42,12 +46,12 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
       summary: {
         type: "string",
         description:
-          "2-3 sentences a designer would use to brief someone on this look: what makes these examples feel the way they do. Describe the design, never their words, products, or brands.",
+          "2-3 sentences a designer would use to brief someone on this look: what makes these examples feel the way they do. Describe the design, never their words, products, or brands, and never what the imagery depicts: call it 'the main visual', not 'a portrait' or 'a man'.",
       },
       layout: {
         type: "string",
         description:
-          "The composition pattern, e.g. 'full-bleed lifestyle photo with text over a dark lower third', 'product centered on a flat color field', 'split: photo left, text panel right'.",
+          "The composition pattern, naming the main visual by its role and position, never by what it depicts, e.g. 'full-bleed photo with text over a dark lower third', 'main visual centered on a flat color field', 'split: large cut-out main visual left breaking the frame edge, text panel right'.",
       },
       text_placement: { type: "string", description: "Where the text sits and how it's aligned." },
       text_amount: {
@@ -58,7 +62,7 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
       headline_treatment: {
         type: "string",
         description:
-          "Size relative to the frame, weight, case, and typeface feel, e.g. 'huge condensed uppercase sans, tight leading' or 'small elegant serif, lots of space'.",
+          "The headline's type only: size relative to the frame, weight, case, and typeface feel, e.g. 'huge condensed uppercase sans, tight leading' or 'small elegant serif, lots of space'. Not prices or other elements.",
       },
       color_roles: {
         type: "object",
@@ -78,7 +82,8 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
       },
       imagery: {
         type: "string",
-        description: "The kind of imagery: lifestyle photo, studio product shot, flat illustration, 3D, collage, none.",
+        description:
+          "How the imagery is rendered, never what it depicts: the medium and finish (lifestyle photo, studio photo, flat vector, semi-realistic comic illustration, 3D, collage, none), crop, and how it sits in the layout. Never name people, products, or objects here.",
       },
       cta_style: { type: "string", enum: ["pill", "box", "underline", "text", "none"] },
       logo_placement: {
@@ -96,8 +101,19 @@ export const EXTRACT_LOOK_TOOL: Anthropic.Tool = {
         description:
           "Every text element BESIDES the headline, one supporting line, the button, and the logo, by its job and form, e.g. 'date and time in two side-by-side pills', 'location line with a pin icon', 'three short values in a footer bar separated by dots', 'short slogan of three parts under the headline'. Never their actual words. At most 4. Empty when there are none.",
       },
+      subjects: {
+        type: "string",
+        description:
+          "What the examples' imagery actually shows, e.g. 'a bearded man, chest up' or 'a yard sign on a lawn'. Kept apart from the style so new designs never copy it.",
+      },
+      has_people: {
+        type: "boolean",
+        description: "true when any example shows a person, face, or character, photographed or drawn.",
+      },
     },
     required: [
+      "subjects",
+      "has_people",
       "summary",
       "layout",
       "text_placement",
@@ -117,7 +133,8 @@ export function buildExtractLookMessages(exampleCount: number): { system: string
     "You are a senior art director. You read example ads and social posts and",
     "write the shared design language a designer could follow to make new,",
     "original pieces in the same style. You describe design only: never copy or",
-    "name the examples' text, products, people, or brands.",
+    "name the examples' text, products, people, or brands. What the imagery",
+    "shows goes only in subjects; every other field describes how it looks.",
   ].join("\n");
   const user = [
     `These ${exampleCount} image${exampleCount === 1 ? " is" : "s are"} examples of the look the owner wants their social posts and ads to have.`,
@@ -141,6 +158,7 @@ export function parseLookProfile(input: unknown): DesignLookProfile | null {
     headline_treatment: clean(p.headline_treatment),
     color_roles: { ...p.color_roles, accent_usage: clean(p.color_roles.accent_usage) },
     imagery: clean(p.imagery),
+    subjects: clean(p.subjects),
     mood: p.mood.map(clean).filter(Boolean),
     ...(p.text_slots?.length ? { text_slots: p.text_slots.map(clean).filter(Boolean) } : {}),
   };

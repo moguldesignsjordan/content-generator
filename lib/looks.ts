@@ -1,4 +1,10 @@
-import { MAX_FLYER_REFERENCES, type ClientBrand, type LookExample, type LookExampleSource } from "@/lib/db/types";
+import {
+  MAX_FLYER_REFERENCES,
+  type ClientBrand,
+  type DesignLookProfile,
+  type LookExample,
+  type LookExampleSource,
+} from "@/lib/db/types";
 import { stripEmDashes } from "@/lib/text";
 
 // Validation for design looks coming from the client. Pure, so the API routes
@@ -86,4 +92,12 @@ export function cleanClientBrand(value: unknown, allowed: (url: string) => boole
     ...(colors.length ? { colors } : {}),
     ...(logo && allowed(logo) ? { logo_url: logo } : {}),
   };
+}
+
+/** True when a look's examples show a person. Such a look renders from its
+ * written profile alone: an image model redraws a face it can see, however
+ * the prompt words it. People a flyer asks for come from its own scene.
+ * Unknown (an old read) is false. */
+export function examplesShowPeople(profile: DesignLookProfile | null | undefined): boolean {
+  return profile?.has_people === true;
 }

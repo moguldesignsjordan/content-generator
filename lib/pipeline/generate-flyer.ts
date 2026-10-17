@@ -22,6 +22,7 @@ import {
   persistRegeneratedDraft,
   populateDraft,
   rejectDraftRecord,
+  updateDesignLook,
 } from "@/lib/db/queries";
 import { optimizeFlyerImage, prepareReferenceImage } from "@/lib/images/optimize";
 import { uploadContentImage } from "./generate-image";
@@ -65,11 +66,13 @@ import type {
   FlyerStyleId,
   FlyerVariant,
   ImageModelTier,
+  LookExample,
   PieceInputs,
   TopicContext,
 } from "@/lib/db/types";
 import { MAX_PHOTOS_PER_DESIGN } from "@/lib/db/types";
 import { effectiveStyle, followedStyleImages, inputsOf } from "@/lib/inputs";
+import { examplesShowPeople } from "@/lib/looks";
 import { MAX_DRAFT_VERSIONS } from "./constants";
 import { accumulateUsage, type UsageDelta } from "./cost";
 import type { GenerationEvent } from "./generate";
@@ -1003,7 +1006,7 @@ async function resolveFlyerLook(
     const images = await loadLookImages(examples, LOOK_EXAMPLES_PER_RENDER);
     if (images.length) {
       const profile = meta.reference_profile ?? (await extractLookProfile(examples, brandId, usageDeltas));
-      return { id: ATTACHED_LOOK_ID, profile, images, riffs: true };
+      return styleOnly({ id: ATTACHED_LOOK_ID, profile, images, riffs: true });
     }
     logWarn("pipeline:generate-flyer:attached-refs", "no style image could be loaded", { draftId });
   }
@@ -1093,21 +1096,49 @@ async function resolveLook(
       const look = await getDesignLook(lookId, brandId);
       if (!look?.examples.length) return null;
       const images = await loadLookImages(look.examples, LOOK_EXAMPLES_PER_RENDER);
-      return images.length ? { id: look.id, profile: look.profile, images, riffs: true } : null;
+      if (!images.length) return null;
+      const profile = await withPeopleRead(look.id, look.examples, look.profile, brandId);
+      return styleOnly({ id: look.id, profile, images, riffs: true });
     }
     const ours = await describeOurStyle(brandId);
     if (!ours) return null;
-    const images = await loadLookImages(
-      ours.urls.map((url) => ({ url, source: "library" as const })),
-      LOOK_EXAMPLES_PER_RENDER,
-    );
-    return images.length ? { id: ours.lookId, profile: ours.profile, images, riffs: true } : null;
+    const examples = ours.urls.map((url) => ({ url, source: "library" as const }));
+    const images = await loadLookImages(examples, LOOK_EXAMPLES_PER_RENDER);
+    if (!images.length) return null;
+    const profile =
+      ours.lookId === HOUSE_LOOK_ID
+        ? ours.profile
+        : await withPeopleRead(ours.lookId, examples, ours.profile, brandId);
+    return styleOnly({ id: ours.lookId, profile, images, riffs: true });
   } catch (err) {
     logWarn("pipeline:generate-flyer:look", err instanceof Error ? err.message : String(err), {
       draftId,
     });
     return null;
   }
+}
+
+/** A look whose examples show people renders from its written profile alone
+ * (see examplesShowPeople), so the examples' images are never sent to the
+ * image model, even for a flyer that asks for people. */
+function styleOnly(look: ResolvedLook): ResolvedLook {
+  return examplesShowPeople(look.profile) ? { ...look, images: [] } : look;
+}
+
+/** A saved look read before has_people existed is read again, once, and the
+ * new read saved, so the people rule applies to it. Non-fatal: a failed read
+ * keeps the old profile. */
+async function withPeopleRead(
+  lookId: string,
+  examples: LookExample[],
+  profile: DesignLookProfile | null,
+  brandId: string,
+): Promise<DesignLookProfile | null> {
+  if (!profile || profile.has_people !== undefined) return profile;
+  const fresh = await extractLookProfile(examples, brandId);
+  if (!fresh) return profile;
+  await updateDesignLook(lookId, brandId, { profile: fresh });
+  return fresh;
 }
 
 /** Tells the copy writer how much text the look carries, so a minimal look
@@ -1120,7 +1151,12 @@ function withLookNote(brief: string | undefined, profile: DesignLookProfile | nu
       : profile.text_amount === "heavy"
         ? "The look carries more text: a headline plus a fuller supporting line is fine."
         : "A short headline and one supporting line.";
-  return [brief, `DESIGN LOOK this flyer follows: ${profile.summary} ${length}`].filter(Boolean).join("\n");
+  return [
+    brief,
+    `DESIGN LOOK this flyer follows: ${profile.summary} ${length} Take only its style: the scene's subject comes from this flyer's topic, never from the look's examples.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Read-back attempts per option before falling back to the code-set layout. */
@@ -1194,6 +1230,7 @@ async function renderDesignedFlyer(
         misspelled,
         logoCorner: corner,
         riff: opts.riff,
+        fontIsDefault: !ctx.brand.visual_identity?.fonts?.heading,
         ...(client
           ? {
               client: {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DESIGN_RIFFS,
+  PEOPLE_RULE,
   DEFAULT_FLYER_ASPECT,
   FLYER_ASPECTS,
   FLYER_STYLE_DIRECTIONS,
@@ -496,6 +497,12 @@ describe("buildFlyerCopyMessages", () => {
     expect(user).toContain("Leave a spot out when the brief has nothing true");
     expect(buildFlyerCopyMessages(base).user).not.toContain("EXTRA TEXT SPOTS");
   });
+
+  it("puts people in a scene only when the brief asks, never from a look's examples", () => {
+    const { system } = buildFlyerCopyMessages(base);
+    expect(system).toContain("shows people only when the brief asks for them");
+    expect(system).toContain("Never take a subject from a design look's examples.");
+  });
 });
 
 describe("buildFlyerDesignPrompt", () => {
@@ -605,6 +612,32 @@ describe("buildFlyerDesignPrompt", () => {
     expect(close).toContain(DESIGN_RIFFS[0]);
     expect(riff).toContain(DESIGN_RIFFS[1]);
     for (const r of DESIGN_RIFFS) expect(none).not.toContain(r);
+  });
+
+  it("takes the examples' rendering style, never their subject", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles });
+    expect(prompt).toContain("drawn in the examples' rendering style");
+    expect(prompt).not.toContain("shown the way the examples show theirs");
+    expect(prompt).toContain("Imagery (how it is rendered, not what it shows): studio product shot.");
+  });
+
+  it("designs from the written look alone when its examples aren't sent", () => {
+    const prompt = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 0, roles }, { riff: 0 });
+    expect(prompt).toContain("Follow the design described below closely");
+    expect(prompt).toContain(DESIGN_RIFFS[0]);
+    expect(prompt).not.toContain("Image 1");
+  });
+
+  it("allows only the people the scene names, on both render paths", () => {
+    expect(buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles })).toContain(PEOPLE_RULE);
+    expect(buildFlyerImagePrompt(copy, tokens, "1:1", false)).toContain(PEOPLE_RULE);
+  });
+
+  it("uses the look's type alone when the brand saved no font", () => {
+    const font = tokens.fonts.heading.split(",")[0].replace(/['"]/g, "");
+    const fallback = buildFlyerDesignPrompt(copy, tokens, "1:1", { profile, exampleCount: 1, roles }, { fontIsDefault: true });
+    expect(fallback).toContain('Headline: "Your website is losing you clients", huge condensed sans.');
+    expect(fallback).not.toContain(`in the spirit of ${font}`);
   });
 
   it("typesets extras under their own label and drops the examples' other text", () => {

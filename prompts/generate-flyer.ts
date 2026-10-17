@@ -366,8 +366,13 @@ export function buildFlyerCopyMessages(args: {
     "  must come from the brief or the brand context, and only for what it",
     "  describes: never invent one, and never borrow a number from another",
     "  service. Without a real fact, sell the benefit without a number.",
+    "- scene: shows people only when the brief asks for them (a person, a",
+    "  customer, a couple, a team), and then names them. Otherwise it shows the",
+    "  work, the place, the objects, or the result, with no people at all.",
+    "  Never take a subject from a design look's examples.",
     "- scene: imagery and composition only. Never describe the text, colors,",
-    "  or fonts; the render prompt handles those.",
+    "  or fonts, or any element that carries text (headlines, prices, buttons,",
+    "  badges, gauges, footers); the render prompt handles those.",
     "- mockup: only when the scene shows off a designed item the brand makes",
     "  or sells, so it looks finished instead of blank. A made-up business",
     "  that fits the item, never a real one; phone numbers in 555-01XX.",
@@ -618,6 +623,12 @@ export function parseFlyerVariants(
  * part of the frame calm (see lib/flyer/layout.ts). */
 export type FlyerQuietZone = "top" | "bottom" | "none";
 
+/** People are opt-in per flyer: the copy writer names them in the scene only
+ * when the brief asks, and this keeps the image model from adding its own
+ * (or redrawing a look example's). Shared by both render prompts. */
+export const PEOPLE_RULE =
+  "Show people only where the subject above names them; otherwise no people, faces, figures, or characters anywhere.";
+
 /**
  * Builds the render prompt for the flyer's ARTWORK only. The headline,
  * supporting line, CTA, and logo are set on top afterwards in code with the
@@ -667,6 +678,7 @@ export function buildFlyerImagePrompt(
         ]
       : []),
     quiet,
+    PEOPLE_RULE,
     "Absolutely no text anywhere: no words, letters, numbers, logos, signs, labels, captions, or watermarks (the product's own printed label is the only exception).",
     "Specific and crafted, never generic stock imagery: no handshakes, no people pointing at laptops, no lightbulbs.",
   ].filter(Boolean);
@@ -678,10 +690,10 @@ export function buildFlyerImagePrompt(
  * the first stays close, the rest keep the style and change the composition,
  * so the owner gets a real choice instead of four near-copies. */
 export const DESIGN_RIFFS = [
-  "This is option 1: stay as close to the examples' layout, composition, and type treatment as you can, with this piece's own content.",
-  "This is a variation: keep the examples' style, type, and colors, but recompose it, with the headline in a different part of the frame at a different scale.",
-  "This is a variation: keep the examples' style, type, and colors, but build the design around a different main visual element for this subject.",
-  "This is a variation: keep the examples' style and type, but lead with the accent color as a large, confident color block or shape.",
+  "This is option 1: stay as close to the look's layout, composition, and type treatment as you can, with this piece's own content and imagery.",
+  "This is a variation: keep the look's style, type, and colors, but recompose it, with the headline in a different part of the frame at a different scale.",
+  "This is a variation: keep the look's style, type, and colors, but build the design around a different main visual element for this subject.",
+  "This is a variation: keep the look's style and type, but lead with the accent color as a large, confident color block or shape.",
 ] as const;
 
 /**
@@ -714,6 +726,8 @@ export function buildFlyerDesignPrompt(
     riff?: number;
     /** The flyer is for this business, not the brand. */
     client?: { name: string; hasLogo: boolean; hasColors: boolean };
+    /** The brand saved no heading font, so tokens carry the generic default. */
+    fontIsDefault?: boolean;
   } = {},
 ): string {
   const p = look.profile;
@@ -740,9 +754,13 @@ export function buildFlyerDesignPrompt(
   ].filter(Boolean);
 
   const font = tokens.fonts.heading.split(",")[0].replace(/['"]/g, "").trim();
+  // A default font named next to the look's own type treatment contradicts
+  // it (a serif "in the spirit of" a condensed sans), so the look wins.
   const headlineType = opts.client && hasExamples
     ? "in the examples' headline type treatment"
-    : `${p ? `${p.headline_treatment}, ` : ""}in the spirit of ${font || "a bold modern sans serif"}`;
+    : p && opts.fontIsDefault
+      ? p.headline_treatment
+      : `${p ? `${p.headline_treatment}, ` : ""}in the spirit of ${font || "a bold modern sans serif"}`;
   const lines = [
     `Headline: "${copy.headline}", ${headlineType}.`,
     copy.subtext ? `Supporting line: "${copy.subtext}", smaller and quieter than the headline.` : "",
@@ -772,10 +790,14 @@ export function buildFlyerDesignPrompt(
     ? [
         `Use Image${look.exampleCount === 1 ? ` ${firstExample}` : `s ${firstExample} to ${firstExample + look.exampleCount - 1}`} as the design to follow: match its layout, typographic treatment, color use, composition, density, and overall feel as closely as possible, and fill it with entirely new content: a new background, new imagery, and none of its photos, people, objects, or words. Everything below adapts that design to this message.`,
       ]
-    : [
-        "Design it the way a top agency art director would: one bold idea, a clear hierarchy with the headline dominant, confident type, and generous breathing room.",
-        ...(look.style ? [FLYER_STYLE_DIRECTIONS[look.style]] : []),
-      ];
+    : p
+      ? [
+          "Follow the design described below closely: its layout, type treatment, color roles, and how the imagery is rendered, with this piece's own content.",
+        ]
+      : [
+          "Design it the way a top agency art director would: one bold idea, a clear hierarchy with the headline dominant, confident type, and generous breathing room.",
+          ...(look.style ? [FLYER_STYLE_DIRECTIONS[look.style]] : []),
+        ];
 
   return [
     `Design a finished, professional social media ${opts.client ? "flyer" : "ad"}, ${FLYER_ASPECTS[aspect].label.toLowerCase()}${opts.client ? `, for ${opts.client.name}` : ""}.`,
@@ -784,11 +806,12 @@ export function buildFlyerDesignPrompt(
     ...design,
     ...(p
       ? [
-          `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Imagery: ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
+          `The look: ${p.summary} Layout: ${p.layout}. Text: ${p.text_placement}. Imagery (how it is rendered, not what it shows): ${p.imagery}. Mood: ${p.mood.join(", ")}.`,
         ]
       : []),
-    ...(opts.riff !== undefined && hasExamples ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
-    `Subject for this piece${hasExamples ? ", shown the way the examples show theirs" : ""}: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    ...(opts.riff !== undefined && (hasExamples || p) ? [DESIGN_RIFFS[opts.riff % DESIGN_RIFFS.length]] : []),
+    `Subject for this piece${hasExamples ? ", drawn in the examples' rendering style" : ""}: ${copy.scene.trim().replace(/\.$/, "")}.`,
+    PEOPLE_RULE,
     mockup,
     `On the flyer itself, typeset EXACTLY these lines and no other words, every word spelled exactly as given. ${lines.join(" ")}`,
     hasExamples ? "Any other text element the examples have (taglines, footers, lists, labels) is left out of this design entirely." : "",

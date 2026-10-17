@@ -156,9 +156,18 @@ git history (`git log -p PROJECT_STATE.md`).
   emails Jordan at most hourly per provider (`lib/provider-errors.ts`,
   `lib/provider-outage.ts`, hooked into `logError`). Each alert is also an
   `alert:provider-outage` row on `/logs`.
+- **Looks: style, not subject (2026-10-17):** the look read keeps what the
+  examples show (`subjects`, `has_people`) out of the style fields. People
+  are opt-in per flyer: the copy writer puts them in a scene only when the
+  brief asks, and both render prompts carry `PEOPLE_RULE` (only people the
+  scene names). A look whose examples show people renders from its written
+  profile only: the example images are never sent to the image model,
+  because it redraws a face it can see. This also covers attached style
+  images and ticked ads. Looks read before this are re-read once on next
+  use. Cause: the Credit Guru 101 test flyers redrew the example's cartoon man.
 - **Admin:** `/logs` and `/prompts`, gated by `user_profiles.role`.
 - **Migrations:** all through 031 are applied (checked live 2026-10-14).
-- **Checks:** `npm run typecheck`, `npm test` (948 tests), `npm run lint`
+- **Checks:** `npm run typecheck`, `npm test` (955 tests), `npm run lint`
   (0 errors, 13 warnings), `npm run build`. `next build` runs lint, so a lint
   error now fails the deploy.
 

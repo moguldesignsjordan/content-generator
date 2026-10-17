@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cleanClientBrand, cleanExamples, cleanLookName, cleanReferenceUrls } from "./looks";
+import {
+  cleanClientBrand,
+  cleanExamples,
+  cleanLookName,
+  cleanReferenceUrls,
+  examplesShowPeople,
+} from "./looks";
+import type { DesignLookProfile } from "@/lib/db/types";
 
 const host = "stujpgjxhyivsqvnhdfs.supabase.co";
 const ok = `https://${host}/storage/v1/object/public/content-images/a.jpg`;
@@ -55,5 +62,27 @@ describe("cleanReferenceUrls and cleanClientBrand", () => {
       colors: ["#112233"],
     });
     expect(cleanClientBrand({ colors: ["#112233"] }, own)).toBeNull();
+  });
+});
+
+describe("examplesShowPeople", () => {
+  const profile = {
+    summary: "s",
+    layout: "l",
+    text_placement: "t",
+    text_amount: "minimal",
+    headline_treatment: "h",
+    color_roles: { background: "light", accent_usage: "a" },
+    imagery: "flat vector",
+    cta_style: "pill",
+    logo_placement: "none",
+    mood: [],
+  } satisfies DesignLookProfile;
+
+  it("is true only when the read found people", () => {
+    expect(examplesShowPeople({ ...profile, has_people: true })).toBe(true);
+    expect(examplesShowPeople({ ...profile, has_people: false })).toBe(false);
+    expect(examplesShowPeople(profile)).toBe(false);
+    expect(examplesShowPeople(null)).toBe(false);
   });
 });

@@ -13,6 +13,8 @@ const valid = {
   cta_style: "pill",
   logo_placement: "top-right",
   mood: ["bold", "playful"],
+  subjects: "a bearded man, chest up",
+  has_people: true,
 };
 
 describe("parseLookProfile", () => {
@@ -20,6 +22,14 @@ describe("parseLookProfile", () => {
     const p = parseLookProfile(valid)!;
     expect(p.summary).not.toContain(EM_DASH);
     expect(p.color_roles.background).toBe("vivid");
+  });
+
+  it("keeps what the examples show apart from the style", () => {
+    const p = parseLookProfile(valid)!;
+    expect(p.subjects).toBe("a bearded man, chest up");
+    expect(p.has_people).toBe(true);
+    const { has_people: _drop, ...noPeopleFlag } = valid;
+    expect(parseLookProfile(noPeopleFlag)).toBeNull();
   });
 
   it("rejects out-of-range enums and missing fields", () => {
